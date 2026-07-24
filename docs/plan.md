@@ -216,6 +216,15 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 - [ ] no hay datos/secretos en Git;
 - [ ] checkpoint de código estable.
 
+> **Ejecución anticipada C2/C3 (ADR-001, 24 jul):** Epic RAG (RAG-001…011) y
+> Epic Conversation/Decision (CON-001/002, SAFE-001…004, RES-001, SUM-002,
+> ORC-002) implementados y auditados. WebSocket (API-002) y ciclo E2E de los 5
+> escenarios (E2E-002) verdes. Integración `/call`↔WS, backend de auditoría
+> (`/audit`, `/metrics`) y vista `/audit` funcionando end-to-end. README
+> (DOC-001), LICENSE MIT (DOC-007) y stack Docker completo (api+web) listos.
+> `make verify` = 235 tests. Pendiente-T0: adapter del modelo obligatorio
+> (AI-001), Delta Share (DATA-001), voz realtime STT/TTS (VOI-*).
+
 ## Sprint C2 — Clinical Core · T+12h–T+28h
 
 ### Epic RAG — conocimiento vivo
