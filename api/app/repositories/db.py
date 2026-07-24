@@ -31,11 +31,58 @@ def get_connection(database_path: str) -> sqlite3.Connection:
     return conn
 
 
+# Columnas agregadas por RAG-001 sobre tablas que ya existían (documents,
+# document_chunks, citations). `CREATE TABLE IF NOT EXISTS` no agrega
+# columnas a una tabla preexistente, así que la migración real vive aquí:
+# por cada tabla, se agrega cada columna que falte vía `ALTER TABLE ... ADD
+# COLUMN`, verificado con `PRAGMA table_info` antes de intentarlo. Correrlo
+# dos veces es un no-op (ninguna columna falta la segunda vez) — mismo
+# contrato de idempotencia que `apply_schema` (DB-001).
+_ADDITIVE_COLUMNS: dict[str, list[str]] = {
+    "documents": [
+        "filename TEXT NOT NULL DEFAULT ''",
+        "mime TEXT NOT NULL DEFAULT 'text/plain'",
+        "size_bytes INTEGER NOT NULL DEFAULT 0",
+        "applicability TEXT NOT NULL DEFAULT '{}'",
+        "knowledge_version_deleted INTEGER",
+        "deleted_at TEXT",
+        "deleted_by TEXT",
+        "error_reason TEXT",
+    ],
+    "document_chunks": [
+        "chunk_index INTEGER NOT NULL DEFAULT 0",
+        "char_start INTEGER",
+        "char_end INTEGER",
+        "content_hash TEXT NOT NULL DEFAULT ''",
+        "embedding BLOB",
+        "embedding_dim INTEGER NOT NULL DEFAULT 0",
+    ],
+    "citations": [
+        "title TEXT NOT NULL DEFAULT ''",
+        "section TEXT",
+        "page INTEGER",
+        "knowledge_version INTEGER NOT NULL DEFAULT 0",
+    ],
+}
+
+
+def _ensure_additive_columns(conn: sqlite3.Connection) -> None:
+    for table, column_defs in _ADDITIVE_COLUMNS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for column_def in column_defs:
+            column_name = column_def.split()[0]
+            if column_name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+
+
 def apply_schema(conn: sqlite3.Connection) -> None:
     """Aplica `db/schema.sql`. Idempotente: solo usa CREATE TABLE IF NOT
-    EXISTS / INSERT OR IGNORE, seguro de correr en cada arranque."""
+    EXISTS / INSERT OR IGNORE, seguro de correr en cada arranque. Luego
+    aplica `_ensure_additive_columns` (RAG-001) para las columnas nuevas
+    sobre tablas preexistentes — igualmente idempotente."""
     schema_sql = _SCHEMA_PATH.read_text(encoding="utf-8")
     conn.executescript(schema_sql)
+    _ensure_additive_columns(conn)
 
 
 @contextmanager

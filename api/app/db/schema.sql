@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);
 
+-- `knowledge_version` (columna) se reutiliza como "knowledge_version_added"
+-- (RAG-001): versión global vigente en el momento en que el documento quedó
+-- `ready`. `knowledge_version_deleted` (agregada por `_ensure_columns` en
+-- app/repositories/db.py, ver comentario ahí) registra la versión en la que
+-- se borró. `status` ∈ processing|ready|deleted|failed (spec.md §9.2 reduce
+-- el enum completo al subconjunto relevante en runtime: `uploaded`/
+-- `validating`/`rejected` se resuelven antes de escribir la fila).
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -68,6 +75,20 @@ CREATE TABLE IF NOT EXISTS documents (
     updated_at TEXT NOT NULL
 );
 
+-- Solo un documento activo (processing|ready) por checksum: defensa en
+-- profundidad además de la verificación a nivel de aplicación (RAG-002),
+-- cierra la ventana de carrera entre dos cargas concurrentes del mismo
+-- contenido. Un checksum puede reaparecer si el documento anterior fue
+-- borrado (deleted) o falló (failed) — volver a "aprender" contenido
+-- borrado es una operación legítima, no un duplicado.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_checksum_active
+    ON documents(checksum)
+    WHERE status IN ('processing', 'ready');
+
+-- chunk_id (id) es determinista: sha256(document_id|chunk_index|text)
+-- (RAG-003), no un uuid aleatorio — permite recomputar/verificar identidad
+-- sin ir a la base. `embedding` es un BLOB float32 (NumPy `tobytes()`);
+-- `embedding_dim` guarda la dimensión para reconstruir con `frombuffer`.
 CREATE TABLE IF NOT EXISTS document_chunks (
     id TEXT PRIMARY KEY,
     document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -79,6 +100,22 @@ CREATE TABLE IF NOT EXISTS document_chunks (
 
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON document_chunks(document_id);
 
+-- Índice FTS5 (BM25 léxico, RAG-005). Tabla independiente (no "external
+-- content"): `document_chunks.id` es TEXT, no hay alias de rowid entero
+-- limpio para triggers de contenido externo. Se sincroniza explícitamente
+-- desde `app/repositories/knowledge_documents.py` dentro de la misma
+-- transacción que escribe `document_chunks` (insertar/borrar en ambas
+-- tablas juntas) — "sincronizada" por código de aplicación, no por
+-- triggers SQL, documentado aquí para quien audite el schema.
+CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts USING fts5(
+    chunk_id UNINDEXED,
+    document_id UNINDEXED,
+    text
+);
+
+-- knowledge_version (columna) es la versión global vigente en el momento en
+-- que se registró la cita (no la versión del documento) — permite auditar
+-- "qué vio la sesión" incluso si el documento se borra después.
 CREATE TABLE IF NOT EXISTS citations (
     id TEXT PRIMARY KEY,
     turn_id TEXT REFERENCES turns(id) ON DELETE CASCADE,

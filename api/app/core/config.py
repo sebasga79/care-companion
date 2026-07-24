@@ -41,6 +41,27 @@ class Settings(BaseSettings):
     llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
     llm_model: str = Field(default="fake-model-v1", alias="LLM_MODEL")
 
+    # RAG (Sprint C2, Epic RAG). Defaults conservadores para un corpus
+    # pequeño/mediano de reto (architecture.md §9.1); todos overrideables
+    # por entorno para tests y ajuste sin tocar código.
+    rag_allowed_extensions: str = Field(default="txt,md", alias="RAG_ALLOWED_EXTENSIONS")
+    rag_max_upload_bytes: int = Field(default=2_000_000, alias="RAG_MAX_UPLOAD_BYTES")
+    rag_chunk_size_chars: int = Field(default=800, alias="RAG_CHUNK_SIZE_CHARS")
+    rag_chunk_overlap_chars: int = Field(default=150, alias="RAG_CHUNK_OVERLAP_CHARS")
+    rag_embedding_dimensions: int = Field(default=128, alias="RAG_EMBEDDING_DIMENSIONS")
+    rag_rrf_k: int = Field(default=60, alias="RAG_RRF_K")
+    rag_retrieval_top_k: int = Field(default=5, alias="RAG_RETRIEVAL_TOP_K")
+    rag_candidate_pool_size: int = Field(default=200, alias="RAG_CANDIDATE_POOL_SIZE")
+    rag_evidence_score_threshold: float = Field(default=0.2, alias="RAG_EVIDENCE_SCORE_THRESHOLD")
+
+    @property
+    def rag_allowed_extensions_set(self) -> frozenset[str]:
+        return frozenset(
+            ext.strip().lower().lstrip(".")
+            for ext in self.rag_allowed_extensions.split(",")
+            if ext.strip()
+        )
+
     @model_validator(mode="after")
     def _validate_llm_provider_config(self) -> Settings:
         if self.llm_provider == LLMProvider.OPENAI_COMPAT:

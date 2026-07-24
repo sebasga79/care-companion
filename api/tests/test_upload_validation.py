@@ -1,0 +1,180 @@
+"""RAG-002 — validación de carga: tests negativos (malicioso, oversize,
+duplicado, MIME falso) + camino feliz."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.services.upload_validation import UploadRejected, sanitize_filename, validate_upload
+
+_ALLOWED = frozenset({"txt", "md"})
+
+
+def test_valid_txt_upload_passes() -> None:
+    result = validate_upload(
+        raw_filename="guia.txt",
+        content=b"contenido de prueba",
+        allowed_extensions=_ALLOWED,
+        max_bytes=1000,
+        existing_active_checksums=frozenset(),
+    )
+    assert result.safe_filename == "guia.txt"
+    assert result.extension == "txt"
+    assert len(result.checksum) == 64  # sha256 hex
+
+
+@pytest.mark.parametrize(
+    "raw_filename",
+    [
+        "../../etc/passwd.txt",
+        "..\\..\\windows\\win.ini.txt",
+        "/etc/passwd.txt",
+        "a/b/../../c.txt",
+    ],
+)
+def test_path_traversal_filenames_are_sanitized_or_rejected(raw_filename: str) -> None:
+    # El basename resultante no debe contener separadores de ruta ni poder
+    # escapar del directorio de destino, sin importar cuántos ".." tenga.
+    safe = sanitize_filename(raw_filename)
+    assert "/" not in safe
+    assert "\\" not in safe
+    assert ".." not in safe
+
+
+def test_upload_rejects_malicious_filename_with_bad_characters() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="../../etc/passwd",  # sin extensión tras basename -> distinto motivo
+            content=b"x",
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code in {"invalid_filename", "missing_extension"}
+
+
+def test_upload_rejects_filename_with_shell_metacharacters() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="evil;rm -rf ~.txt",
+            content=b"x",
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "invalid_filename"
+
+
+def test_upload_rejects_oversize_file() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="grande.txt",
+            content=b"x" * 2000,
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "file_too_large"
+
+
+def test_upload_rejects_empty_file() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="vacio.txt",
+            content=b"",
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "empty_file"
+
+
+def test_upload_rejects_duplicate_checksum() -> None:
+    content = b"contenido identico"
+    import hashlib
+
+    checksum = hashlib.sha256(content).hexdigest()
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="dup.txt",
+            content=content,
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset({checksum}),
+        )
+    assert exc_info.value.code == "duplicate_checksum"
+
+
+def test_upload_rejects_disallowed_extension() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="script.exe",
+            content=b"MZ" + b"\x00" * 20,
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "extension_not_allowed"
+
+
+def test_upload_rejects_pdf_as_explicitly_unsupported() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="informe.pdf",
+            content=b"%PDF-1.4 contenido",
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "pdf_not_supported"
+    assert "no soportado" in exc_info.value.reason.lower()
+
+
+def test_upload_rejects_fake_mime_pdf_disguised_as_txt() -> None:
+    """Extensión .txt pero bytes iniciales son la firma real de un PDF —
+    debe rechazarse por MIME falso, no aceptarse como texto plano."""
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="no_es_texto.txt",
+            content=b"%PDF-1.7\n%\xe2\xe3\xcf\xd3 contenido binario simulado",
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "mime_mismatch"
+
+
+def test_upload_rejects_fake_mime_zip_disguised_as_md() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="oculto.md",
+            content=b"PK\x03\x04" + b"\x00" * 30,
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "mime_mismatch"
+
+
+def test_upload_rejects_empty_filename_after_sanitization() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="../",
+            content=b"x",
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "invalid_filename"
+
+
+def test_upload_rejects_missing_extension() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="sin_extension",
+            content=b"x",
+            allowed_extensions=_ALLOWED,
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "missing_extension"

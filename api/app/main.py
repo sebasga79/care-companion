@@ -11,15 +11,19 @@ import logging
 
 from fastapi import FastAPI
 
+from app.adapters.fake_embeddings import FakeEmbeddings
 from app.adapters.fixture_cases import FixtureCaseAdapter
-from app.api.routes import cases, health, sessions
+from app.api.routes import cases, health, knowledge, sessions
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.core.middleware import CorrelationIdMiddleware
 from app.repositories.db import apply_schema, get_connection
+from app.repositories.documents import DocumentRepository
 from app.repositories.events import EventRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.turns import TurnRepository
+from app.services.embeddings_cache import EmbeddingsCache
+from app.services.ingestion import KnowledgeIngestionService
 
 logger = logging.getLogger("care_companion.main")
 
@@ -49,11 +53,27 @@ def create_app() -> FastAPI:
     app.state.turn_repo = TurnRepository(settings.database_path)
     app.state.event_repo = EventRepository(settings.database_path)
 
+    # RAG (Sprint C2, Epic RAG). El adapter de embeddings real llega detrás
+    # del mismo `EmbeddingsPort` en T0 (RAG-004) — hoy siempre es
+    # `FakeEmbeddings`, sin condicionar por `LLM_PROVIDER` (son puertos
+    # independientes; no existe todavía un `EMBEDDINGS_PROVIDER`).
+    app.state.document_repo = DocumentRepository(settings.database_path)
+    app.state.embeddings_cache = EmbeddingsCache(
+        FakeEmbeddings(dimensions=settings.rag_embedding_dimensions)
+    )
+    app.state.ingestion_service = KnowledgeIngestionService(
+        settings.database_path,
+        embeddings_cache=app.state.embeddings_cache,
+        settings=settings,
+        document_repo=app.state.document_repo,
+    )
+
     app.add_middleware(CorrelationIdMiddleware, event_repo=app.state.event_repo)
 
     app.include_router(health.router)
     app.include_router(cases.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
+    app.include_router(knowledge.router, prefix="/api/v1")
 
     logger.info(
         "care_companion_app_ready env=%s db=%s llm_provider=%s",
