@@ -185,6 +185,8 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 
 **Objetivo:** obtener pronto una ruta desplegable de micrófono a respuesta y resumen con un caso, aunque todavía no esté pulida.
 
+> **Ejecución anticipada (ADR-001, 23 jul):** REP-001/002/003, DB-001/002, ORC-001, API-001, SUM-001, OBS-001 implementados con adapters fake tras puertos (100 tests verdes). DATA-001 (Delta Share), AI-001 (modelo obligatorio), VOI-001/002 (proveedor STT/TTS) quedan Pendiente-T0 en su parte de proveedor real; sus puertos ya existen.
+
 | Ticket | P | Est. | Tareas | Aceptación / evidencia |
 |---|---:|---:|---|---|
 | REP-001 Estructura del repo | P0 | 30m | respetar starter; separar `web`, `api`, docs/config | build inicial |

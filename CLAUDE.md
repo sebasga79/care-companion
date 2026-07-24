@@ -27,6 +27,8 @@ No hay comandos de build/lint/test todavía. Cuando exista código, el arranque 
 | 23 jul | PRE-031/032/033/036/037 | Done | Batch C Sonnet, auditado: agenda T0 (CH-001…010), scorecards voz/RAG con scores vacíos (ninguna decisión del 7 ago pre-tomada), plan de turnos, nota stop-work. **Hallazgo del ejecutor:** timeboxes C0 suman 160 min vs ventana de 120 — registrado en plan.md §5 como nota, se resuelve en T0. |
 | 23 jul | PRE-024/026 | In review | Guion de video v0 (11 PENDIENTE-T0) y correo al organizador (8 preguntas ← OQ-001…010) listos; ensayo hablado y envío del correo son acción humana. |
 | 23 jul | PRE-025 | Done | Auditoría a11y del mockup (Sonnet, ratios WCAG verificados por Fable con cálculo independiente): **5 blockers AA** en `/call` — CTA "Alertar al equipo" 3.01:1, textos aqua/dorados 3.6–4.0:1, anillo de foco ~1.6:1. Fortalezas: semántica real, reduced-motion correcto. Los tokens deben corregirse ANTES de implementar UX-001/008 en el concurso. |
+| 23 jul | ADR-001 | Aceptado | Decisión del propietario: construcción anticipada pre-T0. PRE-037 Superseded. Mitigación: puertos estrictos, adapters provisionales, fixtures propios. Commit `7c8a8b4`. |
+| 23 jul | C1 backend (REP/DB/ORC/API/SUM/OBS) | Done | Vertical slice API: FSM + reduce_decision con tests adversariales (modelo no puede rebajar red flags — validado por tipo), SQLite WAL, puertos limpios (auditoría Fable: 100 tests verdes re-ejecutados, dominio sin SDKs, sin except-pass, sin secretos). Commit `09d8055`. **Nota:** venv quedó en Python 3.12 (uv default) — inofensivo, revisar en T0 si la ficha fija versión. |
 
 ## Documentos canónicos (leer antes de editar)
 
