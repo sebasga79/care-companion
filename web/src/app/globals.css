@@ -1290,6 +1290,8 @@ footer {
 
 .document-status-badge {
   display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 6px 10px;
   border-radius: 99px;
   background: var(--lime-soft);
@@ -1298,16 +1300,185 @@ footer {
   font-weight: 900;
 }
 
-.document-status-badge[data-status="uploaded"],
+/* Real document lifecycle (api/app/api/schemas.py DocumentResponse.status):
+   processing | ready | deleted | failed. `ready` uses the default (lime)
+   styling above. Color is never the only signal — each badge pairs an
+   icon + label text (see STATUS_META in knowledge/page.tsx). */
 .document-status-badge[data-status="processing"] {
   background: var(--gold-soft);
   color: var(--gold-deep);
 }
 
-.document-status-badge[data-status="deleting"],
 .document-status-badge[data-status="deleted"] {
   background: var(--coral-soft);
   color: var(--coral-deep);
+}
+
+.document-status-badge[data-status="failed"] {
+  border: 1px solid rgba(232, 95, 87, 0.5);
+  background: var(--coral-soft);
+  color: var(--coral-deep);
+}
+
+/* ---------------------------------------------------------------------
+   /knowledge — verification (search) panel + confirm dialog
+   ------------------------------------------------------------------- */
+
+.search-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+  margin-bottom: var(--space-4);
+}
+
+.search-form .filter-field {
+  flex: 1 1 160px;
+}
+
+.search-result-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.search-result-item {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fbfdfe;
+}
+
+.search-result-item header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: 4px;
+}
+
+.search-result-item strong {
+  font-size: 12px;
+}
+
+.search-result-item .search-result-meta {
+  color: var(--ink-muted);
+  font-size: 10px;
+}
+
+.search-result-item p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.score-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.score-chip {
+  border-radius: 99px;
+  padding: 3px 9px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.checksum-code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--canvas);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+}
+
+.applicability-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.document-detail-row {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fbfdfe;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.document-detail-row dt {
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.document-detail-row dd {
+  margin: 0 0 8px;
+}
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(19, 54, 95, 0.45);
+}
+
+.dialog-panel {
+  width: min(480px, 100%);
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgba(7, 30, 56, 0.28);
+}
+
+.dialog-panel h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.dialog-panel p {
+  margin: 0 0 8px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dialog-verify-query {
+  padding: 10px 12px;
+  margin: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f9fcfd;
+  font-size: 12px;
+}
+
+.dialog-error {
+  padding: 10px 12px;
+  margin: 10px 0 0;
+  border: 1px solid rgba(232, 95, 87, 0.35);
+  border-radius: 10px;
+  background: var(--coral-soft);
+  color: var(--coral-deep);
+  font-size: 12px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 
 /* ---------------------------------------------------------------------

@@ -29,7 +29,12 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Shared fetch wrapper — exported so other client modules (e.g.
+ * `lib/knowledge.ts`) get the same honest-failure behavior instead of
+ * duplicating fetch/error-parsing logic.
+ */
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
 
   try {
@@ -52,12 +57,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new ApiError(
-      detail || `El backend respondió ${response.status} en ${path}.`,
-      response.status,
-      path,
-    );
+    const raw = await response.text().catch(() => "");
+    let message = raw || `El backend respondió ${response.status} en ${path}.`;
+    // FastAPI error bodies are `{"detail": "..."}` or, for structured
+    // rejections (e.g. upload validation), `{"detail": {"code", "message"}}`.
+    // Unwrap either shape into one honest, human-readable message instead of
+    // surfacing raw JSON text to the operator.
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { detail?: unknown };
+        if (typeof parsed.detail === "string") {
+          message = parsed.detail;
+        } else if (parsed.detail && typeof parsed.detail === "object") {
+          const detail = parsed.detail as { code?: string; message?: string };
+          message = detail.message ?? JSON.stringify(parsed.detail);
+        }
+      } catch {
+        // Not JSON — keep the raw text as the message.
+      }
+    }
+    throw new ApiError(message, response.status, path);
   }
 
   if (response.status === 204) {
@@ -181,35 +200,9 @@ export interface CallSummary {
   citations: CitationRef[];
 }
 
-/** architecture.md §9.3 — learn → retrieve → forget lifecycle. */
-export type DocumentStatus =
-  | "uploaded"
-  | "processing"
-  | "ready"
-  | "deleting"
-  | "deleted";
-
-export interface KnowledgeDocument {
-  id: string;
-  title: string;
-  version: string;
-  status: DocumentStatus;
-  applicableTo: string | null;
-  chunkCount: number;
-  lastCanaryAt: string | null;
-}
-
-export interface KnowledgeInventory {
-  knowledgeVersion: number;
-  documents: KnowledgeDocument[];
-  updatedAt: string | null;
-}
-
-export interface CanaryResult {
-  query: string;
-  resultCount: number;
-  executedAt: string;
-}
+// Note: the learn → retrieve → forget document lifecycle lives in
+// `lib/knowledge.ts`, typed directly from the real, committed
+// `/api/v1/knowledge/*` contract (api/app/api/schemas.py) rather than here.
 
 export interface UsageMetrics {
   latencyMs: number | null;
@@ -330,30 +323,6 @@ export const api = {
     const query = params.toString();
     return request<AuditSessionRow[]>(`/api/sessions${query ? `?${query}` : ""}`);
   },
-
-  getKnowledgeInventory: () => request<KnowledgeInventory>("/api/knowledge"),
-
-  uploadKnowledgeDocument: (file: File, applicableTo?: string) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    if (applicableTo) formData.append("applicable_to", applicableTo);
-    return request<KnowledgeDocument>("/api/knowledge/documents", {
-      method: "POST",
-      body: formData,
-    });
-  },
-
-  deleteKnowledgeDocument: (documentId: string) =>
-    request<{ knowledgeVersion: number; canary: CanaryResult }>(
-      `/api/knowledge/documents/${documentId}`,
-      { method: "DELETE" },
-    ),
-
-  searchKnowledge: (query: string) =>
-    request<CitationRef[]>("/api/knowledge/search", {
-      method: "POST",
-      body: JSON.stringify({ query }),
-    }),
 
   getMetrics: () => request<MetricsSnapshot>("/api/metrics"),
 };
