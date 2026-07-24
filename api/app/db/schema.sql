@@ -137,3 +137,58 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_session ON metrics(session_id);
+
+-- Sprint C2 (Epic Conversation & Decision, CON-001/SAFE-00x/ORC-002). `value`
+-- se serializa como JSON (bool/str/null) — spec.md §8.1 admite un valor
+-- adicional opcional además de la certeza. `certainty` refleja
+-- app.domain.observation.Certainty; el CHECK es defensa en profundidad
+-- además de la validación Pydantic (BR-005: silencio/ambigüedad nunca es
+-- 'denied').
+CREATE TABLE IF NOT EXISTS observations (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    code TEXT NOT NULL,
+    label TEXT NOT NULL,
+    value TEXT,
+    certainty TEXT NOT NULL CHECK (certainty IN ('confirmed', 'uncertain', 'denied', 'not_assessed')),
+    original_text TEXT NOT NULL,
+    normalized_text TEXT,
+    source_turn_id TEXT REFERENCES turns(id),
+    normalized_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
+
+-- Una fila por decisión emitida por `reduce_decision` durante el ciclo de
+-- una sesión (puede haber varias si el flujo vuelve a INTERVIEWING para un
+-- seguimiento adicional, spec.md §7 Respond->Interview). `trigger_codes` se
+-- serializa como JSON array.
+CREATE TABLE IF NOT EXISTS decisions (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    level TEXT NOT NULL,
+    should_escalate INTEGER NOT NULL,
+    trigger_codes TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id);
+
+-- SAFE-004: handoff simulado, auditable, idempotente. El índice único sobre
+-- (session_id, idempotency_key) es la defensa de última línea (además de la
+-- verificación a nivel de aplicación en EscalationRepository) contra una
+-- doble alerta por la misma condición en la misma sesión (BR-025).
+CREATE TABLE IF NOT EXISTS escalations (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    decision_level TEXT NOT NULL,
+    reasons TEXT NOT NULL,
+    trigger_codes TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_escalations_session_idem
+    ON escalations(session_id, idempotency_key);

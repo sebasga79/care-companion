@@ -6,9 +6,13 @@ from __future__ import annotations
 from fastapi import Request
 
 from app.core.config import Settings
+from app.orchestrator.call_cycle import CallCycleOrchestrator
 from app.ports.challenge_case import ChallengeCasePort
+from app.repositories.decisions import DecisionRepository
 from app.repositories.documents import DocumentRepository
+from app.repositories.escalations import EscalationRepository
 from app.repositories.events import EventRepository
+from app.repositories.observations import ObservationRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.turns import TurnRepository
 from app.services.embeddings_cache import EmbeddingsCache
@@ -45,3 +49,19 @@ def get_embeddings_cache(request: Request) -> EmbeddingsCache:
 
 def get_ingestion_service(request: Request) -> KnowledgeIngestionService:
     return request.app.state.ingestion_service
+
+
+def get_observation_repo(request: Request) -> ObservationRepository:
+    return request.app.state.observation_repo
+
+
+def get_decision_repo(request: Request) -> DecisionRepository:
+    return request.app.state.decision_repo
+
+
+def get_escalation_repo(request: Request) -> EscalationRepository:
+    return request.app.state.escalation_repo
+
+
+def get_call_cycle_orchestrator(request: Request) -> CallCycleOrchestrator:
+    return request.app.state.call_cycle_orchestrator

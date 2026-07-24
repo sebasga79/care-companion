@@ -1,11 +1,19 @@
-"""`/api/v1/sessions` — crear, consultar y cerrar sesiones (API-001, SUM-001).
+"""`/api/v1/sessions` — crear, consultar y cerrar sesiones (API-001, SUM-001/SUM-002).
 
 `finish_session` usa `shortest_path` sobre `CallOrchestrator` para cerrar
 la sesión de forma segura sin importar en qué estado se encuentre: la FSM
 siempre tiene una salida hacia `closed` (vía `fail_safe` si el estado no
 tiene un camino "feliz" directo hacia `summarizing`). Nunca se finge un
 cierre exitoso si la transición es ilegal — un error real produce 500, no
-una respuesta silenciosamente incorrecta (spec.md §11.2)."""
+una respuesta silenciosamente incorrecta (spec.md §11.2).
+
+SUM-002: el `CallSummary` devuelto ya no es un stub vacío — se construye
+con `CallCycleOrchestrator.build_summary` a partir de lo que ORC-002 fue
+persistiendo turno a turno (observaciones/decisiones/citas/escalamientos/
+uso). Una sesión sin turnos (cerrada inmediatamente tras crearse, como en
+`test_finish_session_returns_valid_empty_summary`) sigue produciendo el
+mismo resumen "vacío-válido" de SUM-001, porque todas esas listas están
+vacías en ese caso — no es un camino especial, es el mismo builder."""
 
 from __future__ import annotations
 
@@ -14,7 +22,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import get_case_port, get_event_repo, get_session_repo, get_settings_dep
+from app.api.deps import (
+    get_call_cycle_orchestrator,
+    get_case_port,
+    get_event_repo,
+    get_session_repo,
+    get_settings_dep,
+)
 from app.api.schemas import SessionCreateRequest, SessionResponse
 from app.core.config import Settings
 from app.core.correlation_id import get_correlation_id
@@ -25,6 +39,7 @@ from app.domain.session_fsm import (
     shortest_path,
 )
 from app.domain.summary import CallSummary
+from app.orchestrator.call_cycle import CallCycleOrchestrator
 from app.ports.challenge_case import ChallengeCasePort
 from app.repositories.events import EventRepository
 from app.repositories.knowledge import get_current_knowledge_version
@@ -73,16 +88,17 @@ async def finish_session(
     session_id: UUID,
     session_repo: SessionRepository = Depends(get_session_repo),
     event_repo: EventRepository = Depends(get_event_repo),
+    call_cycle_orchestrator: CallCycleOrchestrator = Depends(get_call_cycle_orchestrator),
 ) -> CallSummary:
     record = session_repo.get(str(session_id))
     if record is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
 
-    orchestrator = CallOrchestrator(str(session_id), initial_state=SessionState(record["state"]))
-    if orchestrator.state is SessionState.CLOSED:
+    fsm = CallOrchestrator(str(session_id), initial_state=SessionState(record["state"]))
+    if fsm.state is SessionState.CLOSED:
         raise HTTPException(status_code=409, detail="La sesión ya está cerrada")
 
-    path = shortest_path(orchestrator.state, SessionState.CLOSED)
+    path = shortest_path(fsm.state, SessionState.CLOSED)
     if path is None:
         # No debería ocurrir nunca: fail_safe siempre tiene salida a closed.
         # Si ocurriera, es un error real y explícito, no un cierre falso.
@@ -93,13 +109,13 @@ async def finish_session(
 
     try:
         for target in path[1:]:
-            orchestrator.transition(target, event="finish_requested")
+            fsm.transition(target, event="finish_requested")
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=500, detail=f"Estado inconsistente: {exc}") from exc
 
     now = datetime.now(UTC)
     updated = session_repo.update_state(
-        str(session_id), state=orchestrator.state.value, closed_at=now.isoformat()
+        str(session_id), state=fsm.state.value, closed_at=now.isoformat()
     )
     if updated is None:
         raise HTTPException(status_code=500, detail="No se pudo persistir el cierre de la sesión")
@@ -111,16 +127,9 @@ async def finish_session(
         component="orchestrator",
         event_type="session.finished",
         payload={
-            "final_state": orchestrator.state.value,
+            "final_state": fsm.state.value,
             "path": [state.value for state in path],
         },
     )
 
-    started_at = datetime.fromisoformat(record["created_at"])
-    return CallSummary(
-        session_id=session_id,
-        case_id=updated["case_id"],
-        started_at=started_at,
-        ended_at=now,
-        knowledge_version=updated["knowledge_version"],
-    )
+    return await call_cycle_orchestrator.build_summary(str(session_id))

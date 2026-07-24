@@ -52,6 +52,22 @@ class CitationRepository:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_for_session(self, conn: sqlite3.Connection, session_id: str) -> list[dict[str, Any]]:
+        """Todas las citas emitidas durante una sesión, vía join con
+        `turns` (`citations` no guarda `session_id` directamente — cada
+        cita cuelga de un turno). Usado por SUM-002 para poblar
+        `CallSummary.citations` sin duplicar la relación turno→cita."""
+        rows = conn.execute(
+            """
+            SELECT citations.* FROM citations
+            JOIN turns ON turns.id = citations.turn_id
+            WHERE turns.session_id = ?
+            ORDER BY citations.created_at ASC
+            """,
+            (session_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def to_citation_ref(self, row: dict[str, Any]) -> CitationRef:
         return CitationRef(
             citation_id=row["id"],
