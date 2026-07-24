@@ -117,13 +117,13 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 
 | Ticket | P | Tareas | Aceptación | Evidencia | Estado |
 |---|---:|---|---|---|---|
-| PRE-010 Verificar estación de trabajo | P0 | espacio, Docker, Python, Node, navegador, micrófono, cámara, grabación, Git/GitHub | checklist verde y plan B documentado | captura/versiones | Backlog |
-| PRE-011 Preparar reloj de clean install | P0 | cronómetro, VM/contenedor limpio, plantilla de log | puede medir T0→ready sin pasos manuales ocultos | plantilla | Backlog |
+| PRE-010 Verificar estación de trabajo | P0 | espacio, Docker, Python, Node, navegador, micrófono, cámara, grabación, Git/GitHub | checklist verde y plan B documentado | `docs/evidence/pre-010-workstation.md` — stack verificado; micrófono/cámara/grabación/plan B pendientes (humano) | In review |
+| PRE-011 Preparar reloj de clean install | P0 | cronómetro, VM/contenedor limpio, plantilla de log | puede medir T0→ready sin pasos manuales ocultos | `docs/templates/clean-install-log.md`; VM/contenedor limpio pendiente (humano) | In review |
 | PRE-012 Preparar gestión de secretos | P0 | password manager, `.env.example` template, secret scanner, rotación | ningún secreto necesita copiarse a docs o Git | scan sample | Backlog |
-| PRE-013 Preparar convenciones Git | P1 | branch/commit format, ticket IDs, PR/self-review checklist | cada cambio es rastreable | `CONTRIBUTING` template | Backlog |
-| PRE-014 Preparar templates de ADR | P1 | contexto, opciones, decisión, riesgos, revisión | ADR se completa en <10 min | template | Backlog |
-| PRE-015 Preparar evidence ledger | P1 | estructura de capturas, logs, métricas, prompts/config y demo | cada evidencia tiene fecha/ticket/commit | template | Backlog |
-| PRE-016 Definir política de dependencias | P1 | licencias, lockfiles, vulnerabilidades, criterio add/remove | dependencia nueva exige necesidad y licencia | checklist | Backlog |
+| PRE-013 Preparar convenciones Git | P1 | branch/commit format, ticket IDs, PR/self-review checklist | cada cambio es rastreable | `CONTRIBUTING.md` v0.1 (rama base `main` aplicada al repo) | Done |
+| PRE-014 Preparar templates de ADR | P1 | contexto, opciones, decisión, riesgos, revisión | ADR se completa en <10 min | `docs/templates/adr-template.md` v0.1 con ejemplo diligenciado | Done |
+| PRE-015 Preparar evidence ledger | P1 | estructura de capturas, logs, métricas, prompts/config y demo | cada evidencia tiene fecha/ticket/commit | `docs/templates/evidence-ledger.md` v0.1 (schema §2.4 + convención `docs/evidence/<ID>/`) | Done |
+| PRE-016 Definir política de dependencias | P1 | licencias, lockfiles, vulnerabilidades, criterio add/remove | dependencia nueva exige necesidad y licencia | `docs/policies/dependencies.md` v0.1 | Done |
 | PRE-017 Preparar casos conversacionales ficticios | P1 | routine, ambiguous, urgent, contradiction, no evidence | casos no copian dataset y tienen expected behavior abstracto | catálogo de escenarios | Backlog |
 | PRE-018 Preparar glosario colombiano genérico | P2 | expresiones ambiguas sin inferir diagnóstico; reglas de aclaración | cada término exige confirmación contextual | fixture no clínico | Backlog |
 
