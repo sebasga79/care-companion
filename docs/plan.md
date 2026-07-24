@@ -271,6 +271,13 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 
 ### Epic Voice
 
+> **Ejecución anticipada (ADR-001, 24 jul):** VOI-011/013/014/016 implementados con
+> Web Speech API del navegador tras el puerto `useVoiceSession` (STT+TTS local,
+> barge-in <250ms, fallback de texto). El proveedor de voz real (o la voz realtime
+> del modelo obligatorio) se conecta en T0 sin tocar `/call`. VOI-010/012/015/017
+> (chunking/backpressure, reconciliación parcial, reconnect, cleanup) quedan para
+> el pipeline del proveedor real.
+
 | Ticket | P | Est. | Tareas | Aceptación / evidencia |
 |---|---:|---:|---|---|
 | VOI-010 Audio chunking/backpressure | P0 | 45m | sequence, bounded queue, drop policy segura | load test |
