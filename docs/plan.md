@@ -136,7 +136,7 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 | PRE-022 Ensayar fallo de red | P1 | hotspot/segundo enlace, descarga de dependencias permitida, recuperación Git | plan de continuidad probado | checklist | Backlog |
 | PRE-023 Ensayar micrófono/navegador | P1 | permisos, eco, auriculares, barge-in manual | ruta principal y alternativa funcionan | registro | Backlog |
 | PRE-024 Ensayar explicación de 2 preguntas | P2 | problema/valor y decisión técnica/opciones/riesgos/2 semanas | respuestas preliminares ≤90 s cada una | `docs/video/two-questions-script.md` v0 (11 marcas PENDIENTE-T0); ensayo hablado pendiente (humano) | In review |
-| PRE-025 Revisar accesibilidad del mockup | P2 | contraste, foco, labels, color, reduced motion | sin blockers AA en primera vista | auditoría | Backlog |
+| PRE-025 Revisar accesibilidad del mockup | P2 | contraste, foco, labels, color, reduced motion | sin blockers AA en primera vista | `docs/evidence/pre-025-a11y-audit.md` — **5 blockers AA hallados** (CTA de alerta 3.01:1, familia aqua/dorada <4.5:1, anillo de foco 1.6:1); ratios verificados independientemente; corrección de tokens → antes de UX-008 | Done (con hallazgos) |
 | PRE-026 Preparar consulta de dudas al organizador | P2 | consolidar solo preguntas no publicadas | correo listo, sin solicitar material anticipado | `docs/comms/organizer-questions-draft.md` — 8 preguntas mapeadas a OQ-001…010; envío pendiente (humano) | In review |
 
 ### Sprint P3 — Freeze · 3–6 ago
