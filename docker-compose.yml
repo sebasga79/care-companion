@@ -15,5 +15,17 @@ services:
     volumes:
       - care_companion_data:/app/data
 
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        # El navegador llama al api publicado en el host (localhost:8000).
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
 volumes:
   care_companion_data:
