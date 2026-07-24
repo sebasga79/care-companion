@@ -334,10 +334,36 @@ export interface MetricsSnapshot {
   cost: MetricValue;
 }
 
+export interface TraceEvent {
+  correlationId: string;
+  component: string;
+  eventType: string;
+  latencyMs: number | null;
+  createdAt: string;
+}
+
+export interface TraceDecision {
+  level: DecisionLevel;
+  shouldEscalate: boolean;
+  triggerCodes: string;
+  rationale: string;
+  createdAt: string;
+}
+
+export interface TraceEscalation {
+  decisionLevel: DecisionLevel;
+  reasons: string;
+  triggerCodes: string;
+  createdAt: string;
+}
+
 export interface SessionTrace {
   sessionId: string;
-  timeline: TimelineEvent[];
-  agentEvents: AgentEvent[];
+  state: SessionStatus;
+  knowledgeVersion: number;
+  events: TraceEvent[];
+  decisions: TraceDecision[];
+  escalations: TraceEscalation[];
 }
 
 export interface AuditFilters {
@@ -484,9 +510,61 @@ export const api = {
     };
   },
 
-  getTrace: (sessionId: string) =>
-    request<SessionTrace>(`/api/v1/audit/sessions/${sessionId}/trace`),
+  getTrace: async (sessionId: string): Promise<SessionTrace> => {
+    const raw = await request<RawTrace>(`/api/v1/audit/sessions/${sessionId}/trace`);
+    return {
+      sessionId: raw.session_id,
+      state: raw.state,
+      knowledgeVersion: raw.knowledge_version,
+      events: raw.events.map((e) => ({
+        correlationId: e.correlation_id,
+        component: e.component,
+        eventType: e.event_type,
+        latencyMs: e.latency_ms,
+        createdAt: e.created_at,
+      })),
+      decisions: raw.decisions.map((d) => ({
+        level: d.level,
+        shouldEscalate: d.should_escalate === 1 || d.should_escalate === true,
+        triggerCodes: d.trigger_codes,
+        rationale: d.rationale,
+        createdAt: d.created_at,
+      })),
+      escalations: raw.escalations.map((e) => ({
+        decisionLevel: e.decision_level,
+        reasons: e.reasons,
+        triggerCodes: e.trigger_codes,
+        createdAt: e.created_at,
+      })),
+    };
+  },
 };
+
+interface RawTrace {
+  session_id: string;
+  state: SessionStatus;
+  knowledge_version: number;
+  events: {
+    correlation_id: string;
+    component: string;
+    event_type: string;
+    latency_ms: number | null;
+    created_at: string;
+  }[];
+  decisions: {
+    level: DecisionLevel;
+    should_escalate: number | boolean;
+    trigger_codes: string;
+    rationale: string;
+    created_at: string;
+  }[];
+  escalations: {
+    decision_level: DecisionLevel;
+    reasons: string;
+    trigger_codes: string;
+    created_at: string;
+  }[];
+}
 
 interface RawAuditRow {
   session_id: string;

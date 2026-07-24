@@ -10,6 +10,7 @@ import {
   type AuditFilters,
   type AuditSessionRow,
   type RiskLevel,
+  type SessionTrace,
 } from "@/lib/api";
 
 const RISK_OPTIONS: { value: RiskLevel; label: string }[] = [
@@ -25,6 +26,20 @@ export default function AuditPage() {
   const [rows, setRows] = useState<AuditSessionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [trace, setTrace] = useState<SessionTrace | null>(null);
+  const [traceError, setTraceError] = useState<string | null>(null);
+
+  async function selectSession(sessionId: string) {
+    setSelectedId(sessionId);
+    setTrace(null);
+    setTraceError(null);
+    try {
+      setTrace(await api.getTrace(sessionId));
+    } catch (err) {
+      setTraceError(err instanceof ApiError ? err.message : "No se pudo cargar la traza.");
+    }
+  }
 
   async function fetchSessions(nextFilters: AuditFilters) {
     try {
@@ -192,7 +207,25 @@ export default function AuditPage() {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.sessionId}>
+                  <tr
+                    key={row.sessionId}
+                    onClick={() => selectSession(row.sessionId)}
+                    aria-selected={selectedId === row.sessionId}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        selectSession(row.sessionId);
+                      }
+                    }}
+                    style={{
+                      cursor: "pointer",
+                      background:
+                        selectedId === row.sessionId
+                          ? "color-mix(in srgb, var(--aqua-deep) 10%, transparent)"
+                          : undefined,
+                    }}
+                  >
                     <td>{new Date(row.startedAt).toLocaleString("es")}</td>
                     <td>{row.state}</td>
                     <td translate="no">{row.decisionLevel ?? "—"}</td>
@@ -214,25 +247,80 @@ export default function AuditPage() {
               <h2 id="timeline-heading">Línea de tiempo del handoff</h2>
             </div>
           </div>
-          <EmptyState
-            icon="→"
-            title="Sin línea de tiempo todavía"
-            detail="Selecciona una sesión auditada para ver la secuencia correlacionada: turno capturado → señal detectada → evidencia recuperada → decisión → handoff."
-          />
+          {traceError ? <StatusBanner message={traceError} onRetry={() => selectSession(selectedId!)} /> : null}
+          {!selectedId ? (
+            <EmptyState
+              icon="→"
+              title="Sin línea de tiempo todavía"
+              detail="Selecciona una sesión de la tabla para ver la secuencia correlacionada: eventos instrumentados, decisiones y handoff."
+            />
+          ) : !trace ? (
+            <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>Cargando traza…</p>
+          ) : trace.events.length === 0 ? (
+            <EmptyState
+              icon="→"
+              title="Sesión sin eventos instrumentados"
+              detail="Esta sesión no registró eventos con latencia todavía (p. ej. se creó pero no procesó turnos)."
+            />
+          ) : (
+            <ol className="trace-timeline" style={{ margin: 0, paddingLeft: 18 }}>
+              {trace.events.map((event, index) => (
+                <li key={`${event.correlationId}-${index}`} style={{ marginBottom: 10 }}>
+                  <strong translate="no">{event.component}</strong> · {event.eventType}
+                  {event.latencyMs != null ? (
+                    <span style={{ opacity: 0.7 }}> · {event.latencyMs.toFixed(0)} ms</span>
+                  ) : null}
+                  <br />
+                  <small style={{ opacity: 0.7 }}>
+                    {new Date(event.createdAt).toLocaleTimeString("es")}
+                  </small>
+                </li>
+              ))}
+            </ol>
+          )}
         </section>
 
         <section className="card card-pad" aria-labelledby="agents-heading">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Responsabilidad única</p>
-              <h2 id="agents-heading">Resultados de agentes</h2>
+              <p className="eyebrow">Decisión y escalamiento</p>
+              <h2 id="agents-heading">Resultados estructurados</h2>
             </div>
           </div>
-          <EmptyState
-            icon="⚙"
-            title="Sin resultados de agentes todavía"
-            detail="Orquestador, Safety Agent, Retrieval Agent y Conversation Agent mostrarán su salida estructurada aquí — nunca su razonamiento interno."
-          />
+          {!selectedId || !trace ? (
+            <EmptyState
+              icon="⚙"
+              title="Sin decisiones cargadas"
+              detail="Selecciona una sesión para ver su nivel de decisión, motivo y escalamientos — nunca su razonamiento interno."
+            />
+          ) : trace.decisions.length === 0 && trace.escalations.length === 0 ? (
+            <EmptyState
+              icon="⚙"
+              title="Sesión sin decisiones registradas"
+              detail="Aún no se produjo una decisión clínica en esta sesión."
+            />
+          ) : (
+            <div>
+              {trace.decisions.map((decision, index) => (
+                <div key={index} className="trace-decision" style={{ marginBottom: 12 }}>
+                  <strong translate="no">{decision.level}</strong>
+                  {decision.shouldEscalate ? (
+                    <span className="chip chip-simulation" style={{ marginLeft: 8 }}>
+                      escala
+                    </span>
+                  ) : null}
+                  <p style={{ margin: "4px 0 0", fontSize: 13, opacity: 0.85 }}>
+                    {decision.rationale}
+                  </p>
+                </div>
+              ))}
+              {trace.escalations.length > 0 ? (
+                <p style={{ fontSize: 13 }}>
+                  <strong>{trace.escalations.length}</strong> escalamiento(s) registrado(s).
+                </p>
+              ) : null}
+            </div>
+          )}
           <div className="audit-note">
             <span aria-hidden="true">i</span>
             <p style={{ margin: 0 }}>
