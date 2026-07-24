@@ -1,4 +1,7 @@
-import type { MetricValue } from "@/lib/api";
+"use client";
+
+import { useEffect, useState } from "react";
+import { api, type MetricValue } from "@/lib/api";
 
 type MetricProps = {
   label: string;
@@ -49,9 +52,35 @@ const DEFAULT_METRICS: { label: string; metric: MetricValue }[] = [
 ];
 
 export function MetricsBand() {
+  // Live metrics from GET /api/v1/metrics; falls back to the spec's honest
+  // "objetivo/pendiente" placeholders if the backend is unreachable (never
+  // fabricated numbers).
+  const [metrics, setMetrics] = useState(DEFAULT_METRICS);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getMetrics()
+      .then((snapshot) => {
+        if (cancelled) return;
+        setMetrics([
+          { label: "Latencia P50", metric: snapshot.latencyP50 },
+          { label: "Latencia P95", metric: snapshot.latencyP95 },
+          { label: "Tokens", metric: snapshot.tokens },
+          { label: "Costo", metric: snapshot.cost },
+        ]);
+      })
+      .catch(() => {
+        // Keep honest placeholders on failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <section className="metrics-band" aria-label="Métricas del concurso">
-      {DEFAULT_METRICS.map((item) => (
+      {metrics.map((item) => (
         <Metric key={item.label} label={item.label} metric={item.metric} />
       ))}
     </section>

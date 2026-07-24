@@ -4,6 +4,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+
+from app.main import create_app
 
 
 @pytest.fixture
@@ -30,3 +33,9 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, db_path: str) -> Iterator[None]:
     monkeypatch.setenv("DATABASE_PATH", db_path)
     monkeypatch.chdir(Path(__file__).resolve().parent.parent)
     yield
+
+
+@pytest.fixture
+def client(clean_env: None) -> TestClient:
+    """Shared TestClient over an isolated app (its own temp DB)."""
+    return TestClient(create_app())

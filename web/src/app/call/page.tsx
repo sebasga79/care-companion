@@ -1,23 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { VOICE_STATES, VoiceOrb } from "@/components/VoiceOrb";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { VoiceOrb } from "@/components/VoiceOrb";
 import { TranscriptPanel } from "@/components/TranscriptPanel";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { RiskPanel } from "@/components/RiskPanel";
 import { StatusBanner } from "@/components/StatusBanner";
-import { api, ApiError, type CaseSummary, type VoiceState } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  callSocketUrl,
+  decisionToRisk,
+  mapWsCitation,
+  type CaseSummary,
+  type CitationRef,
+  type DecisionLevel,
+  type RiskLevel,
+  type ServerEnvelope,
+  type SessionStatus,
+  type Turn,
+  type VoiceState,
+} from "@/lib/api";
 
-const VOICE_STATE_LABELS: Record<VoiceState, string> = {
-  ready: "Listo",
-  listening: "Escuchando",
-  patient_speaking: "Paciente habla",
-  thinking: "Pensando",
-  assistant_speaking: "Asistente responde",
-  interrupted: "Interrumpido",
-  reconnecting: "Reconectando",
-  failed: "Error de audio",
+/** FSM state → voice-orb state (display only). */
+function stateToVoice(state: SessionStatus): VoiceState {
+  switch (state) {
+    case "retrieving":
+    case "deciding":
+      return "thinking";
+    case "responding":
+      return "assistant_speaking";
+    case "fail_safe":
+      return "failed";
+    case "interviewing":
+    case "consent":
+      return "listening";
+    default:
+      return "ready";
+  }
+}
+
+const STATE_LABELS: Record<SessionStatus, string> = {
+  created: "Sesión creada",
+  consent: "Consentimiento",
+  interviewing: "Entrevistando",
+  retrieving: "Buscando evidencia",
+  deciding: "Evaluando riesgo",
+  responding: "Respondiendo",
+  summarizing: "Resumiendo",
+  closed: "Llamada cerrada",
+  fail_safe: "Modo seguro",
+  escalated: "Escalado a persona",
 };
+
+type CallPhase = "idle" | "connecting" | "active" | "closed";
+
+let turnCounter = 0;
+function makeTurn(sessionId: string, speaker: Turn["speaker"], text: string): Turn {
+  turnCounter += 1;
+  return {
+    id: `${sessionId}-${turnCounter}`,
+    sessionId,
+    speaker,
+    text,
+    isFinal: true,
+    startedAt: new Date().toISOString(),
+  };
+}
 
 export default function CallPage() {
   const [cases, setCases] = useState<CaseSummary[]>([]);
@@ -25,10 +74,23 @@ export default function CallPage() {
   const [loadingCases, setLoadingCases] = useState(true);
   const [selectedCaseId, setSelectedCaseId] = useState<string>("");
 
+  const [phase, setPhase] = useState<CallPhase>("idle");
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [fsmState, setFsmState] = useState<SessionStatus>("created");
   const [voiceState, setVoiceState] = useState<VoiceState>("ready");
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [citations, setCitations] = useState<CitationRef[]>([]);
+  const [riskLevel, setRiskLevel] = useState<RiskLevel | null>(null);
+  const [decisionLevel, setDecisionLevel] = useState<DecisionLevel | null>(null);
+  const [escalated, setEscalated] = useState(false);
   const [alerted, setAlerted] = useState(false);
+  const [callError, setCallError] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
 
-  async function fetchCases() {
+  const socketRef = useRef<WebSocket | null>(null);
+  const clientSeqRef = useRef(0);
+
+  const fetchCases = useCallback(async () => {
     try {
       const result = await api.listCases();
       setCases(result);
@@ -38,25 +100,124 @@ export default function CallPage() {
     } finally {
       setLoadingCases(false);
     }
-  }
-
-  function retryCases() {
-    setLoadingCases(true);
-    setCasesError(null);
-    fetchCases();
-  }
+  }, []);
 
   useEffect(() => {
-    // Standard mount-time fetch (no live backend to subscribe to yet — this
-    // loads the case list once). Initial `loading`/`error` state already
-    // covers the pending/clean case; `retryCases` above resets them for
-    // user-triggered retries from a click handler, not from an effect.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchCases();
-  }, []);
+    return () => socketRef.current?.close();
+  }, [fetchCases]);
 
   const selectedCase = cases.find((item) => item.id === selectedCaseId) ?? null;
   const patientAlias = selectedCase?.patientAlias ?? "Paciente";
+
+  function handleServerEnvelope(env: ServerEnvelope, sid: string) {
+    switch (env.type) {
+      case "server.state":
+        setFsmState(env.payload.state);
+        setVoiceState(stateToVoice(env.payload.state));
+        if (env.payload.state === "escalated") setEscalated(true);
+        break;
+      case "server.agent_response":
+        if (env.payload.message) {
+          setTurns((prev) => [...prev, makeTurn(sid, "assistant", env.payload.message)]);
+        }
+        if (env.payload.citations.length > 0) {
+          setCitations(env.payload.citations.map(mapWsCitation));
+        }
+        break;
+      case "server.decision":
+        setDecisionLevel(env.payload.level);
+        setRiskLevel(decisionToRisk(env.payload.level));
+        if (env.payload.escalated) setEscalated(true);
+        break;
+      case "server.summary":
+        setVoiceState("ready");
+        break;
+      case "server.error":
+        setCallError(env.payload.reason);
+        break;
+    }
+  }
+
+  async function startCall() {
+    if (!selectedCaseId) return;
+    setPhase("connecting");
+    setCallError(null);
+    setTurns([]);
+    setCitations([]);
+    setRiskLevel(null);
+    setDecisionLevel(null);
+    setEscalated(false);
+    setAlerted(false);
+    clientSeqRef.current = 0;
+
+    let session;
+    try {
+      session = await api.createSession(selectedCaseId);
+    } catch (error) {
+      setCallError(error instanceof ApiError ? error.message : "No se pudo crear la sesión.");
+      setPhase("idle");
+      return;
+    }
+
+    setSessionId(session.id);
+    setFsmState(session.status);
+
+    const ws = new WebSocket(callSocketUrl(session.id));
+    socketRef.current = ws;
+
+    ws.onopen = () => setPhase("active");
+    ws.onmessage = (event) => {
+      try {
+        const env = JSON.parse(event.data) as ServerEnvelope;
+        handleServerEnvelope(env, session.id);
+      } catch {
+        setCallError("Mensaje del servidor ilegible.");
+      }
+    };
+    ws.onerror = () => {
+      setCallError("Error de conexión con el canal de la llamada.");
+      setVoiceState("failed");
+    };
+    ws.onclose = () => {
+      if (phase !== "closed") setPhase((p) => (p === "active" ? "active" : "idle"));
+    };
+  }
+
+  function sendTurn() {
+    const text = draft.trim();
+    const ws = socketRef.current;
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN || !sessionId) return;
+    clientSeqRef.current += 1;
+    setTurns((prev) => [...prev, makeTurn(sessionId, "patient", text)]);
+    setVoiceState("thinking");
+    ws.send(
+      JSON.stringify({
+        v: 1,
+        type: "client.turn_text",
+        seq: clientSeqRef.current,
+        payload: { text },
+      }),
+    );
+    setDraft("");
+  }
+
+  async function endCall() {
+    const ws = socketRef.current;
+    ws?.close();
+    setPhase("closed");
+    setVoiceState("ready");
+    if (sessionId) {
+      try {
+        await api.finishSession(sessionId);
+      } catch {
+        // finish is best-effort here; the summary view lives in /audit.
+      }
+    }
+  }
+
+  const isActive = phase === "active" || phase === "connecting";
 
   return (
     <>
@@ -89,6 +250,7 @@ export default function CallPage() {
                 id="case-select"
                 value={selectedCaseId}
                 onChange={(event) => setSelectedCaseId(event.target.value)}
+                disabled={isActive}
                 style={{ border: 0, background: "transparent", fontWeight: 700, fontSize: 13 }}
               >
                 <option value="">Selecciona un caso</option>
@@ -112,13 +274,17 @@ export default function CallPage() {
           </span>
         </div>
 
-        <div className="call-status">
+        <div className="call-status" aria-live="polite">
           <span className="dot" aria-hidden="true" />
-          Sin llamada activa · vista previa de interfaz
+          {phase === "idle" && "Sin llamada activa"}
+          {phase === "connecting" && "Conectando…"}
+          {phase === "active" && `En llamada · ${STATE_LABELS[fsmState]}`}
+          {phase === "closed" && "Llamada finalizada"}
         </div>
       </section>
 
-      {casesError ? <StatusBanner message={casesError} onRetry={retryCases} /> : null}
+      {casesError ? <StatusBanner message={casesError} onRetry={fetchCases} /> : null}
+      {callError ? <StatusBanner message={callError} onRetry={() => setCallError(null)} /> : null}
 
       <div className="call-grid" style={{ marginTop: 20 }}>
         <section className="voice-card card card-pad" aria-labelledby="voice-heading">
@@ -129,35 +295,64 @@ export default function CallPage() {
             </div>
             <span className="live-pill">
               <span className="dot" aria-hidden="true" />
-              Vista previa · sin conexión de audio
+              {phase === "active" ? STATE_LABELS[fsmState] : "Sin conexión de audio"}
             </span>
           </div>
 
           <VoiceOrb
             state={voiceState}
-            micEnabled={voiceState === "listening"}
-            onToggleMic={() => setVoiceState((current) => (current === "listening" ? "ready" : "listening"))}
+            micEnabled={phase === "active"}
+            onToggleMic={() => {
+              /* Voice capture (VOI-*) lands in a later ticket; text turns drive the slice today. */
+            }}
           />
 
-          <div className="voice-preview" role="group" aria-label="Vista previa de estados de voz">
-            <span className="voice-preview-label">
-              Vista previa de estados de voz (sin conexión — design.md §5.3)
-            </span>
-            {VOICE_STATES.map((state) => (
+          <div className="call-controls" role="group" aria-label="Controles de llamada">
+            {phase === "idle" || phase === "closed" ? (
               <button
-                key={state}
                 type="button"
                 className="voice-preview-btn"
-                aria-pressed={voiceState === state}
-                onClick={() => setVoiceState(state)}
+                onClick={startCall}
+                disabled={!selectedCaseId}
               >
-                {VOICE_STATE_LABELS[state]}
+                Iniciar llamada
               </button>
-            ))}
+            ) : (
+              <button type="button" className="voice-preview-btn" onClick={endCall}>
+                Finalizar llamada
+              </button>
+            )}
           </div>
 
+          {phase === "active" ? (
+            <form
+              className="turn-composer"
+              onSubmit={(e) => {
+                e.preventDefault();
+                sendTurn();
+              }}
+              style={{ display: "flex", gap: 8, marginTop: 16 }}
+            >
+              <label htmlFor="turn-input" className="sr-only">
+                Turno del paciente (texto)
+              </label>
+              <input
+                id="turn-input"
+                type="text"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Escribe lo que dice el paciente…"
+                autoComplete="off"
+                style={{ flex: 1, padding: "10px 12px", borderRadius: 10 }}
+              />
+              <button type="submit" className="voice-preview-btn" disabled={!draft.trim()}>
+                Enviar turno
+              </button>
+            </form>
+          ) : null}
+
           <h2 style={{ marginTop: 24, marginBottom: 12, fontSize: 15 }}>Transcripción</h2>
-          <TranscriptPanel turns={[]} patientAlias={patientAlias} />
+          <TranscriptPanel turns={turns} patientAlias={patientAlias} />
         </section>
 
         <aside className="clinical-rail" aria-label="Supervisión clínica">
@@ -168,15 +363,22 @@ export default function CallPage() {
                 <h2 id="evidence-heading">Fuentes citadas en esta llamada</h2>
               </div>
             </div>
-            <EvidencePanel citations={[]} />
+            <EvidencePanel citations={citations} />
           </section>
 
           <RiskPanel
-            riskLevel={null}
-            alerted={alerted}
+            riskLevel={riskLevel}
+            alerted={alerted || escalated}
             onEscalate={() => setAlerted(true)}
             onReset={() => setAlerted(false)}
           />
+
+          {decisionLevel ? (
+            <p className="decision-code" translate="no" style={{ fontSize: 12, opacity: 0.75 }}>
+              Nivel de decisión del motor: <strong>{decisionLevel}</strong>
+              {escalated ? " · escalado" : ""}
+            </p>
+          ) : null}
 
           <div className="editorial-note">
             <strong>Referencia institucional</strong>

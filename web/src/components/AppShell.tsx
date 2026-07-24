@@ -20,7 +20,7 @@ function useBackendReadiness(): ReadinessStatus {
     let cancelled = false;
 
     api
-      .healthReady()
+      .health()
       .then(() => {
         if (!cancelled) setStatus("ready");
       })

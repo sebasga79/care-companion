@@ -98,17 +98,50 @@ export type RiskLevel =
   | "urgent_human_review"
   | "failed_safe";
 
-/** architecture.md §7 — state machine driving a call. */
+/**
+ * Backend decision precedence (api/app/domain/decision.py). This is the REAL
+ * enum the WebSocket sends; the UI maps it to `RiskLevel` for display via
+ * `decisionToRisk` below. Never invent a friendlier level than the backend
+ * reported — a downgrade here would defeat the whole non-degradable-decision
+ * guarantee.
+ */
+export type DecisionLevel =
+  | "HARD_RED_FLAG"
+  | "DATA_INTEGRITY_FAILURE"
+  | "EVIDENCE_INSUFFICIENT_WITH_RISK"
+  | "MODEL_HIGH_RISK"
+  | "MODEL_MODERATE_RISK"
+  | "ROUTINE_FOLLOW_UP";
+
+/** UI mapping only — display, never a clinical re-classification. */
+export function decisionToRisk(level: DecisionLevel): RiskLevel {
+  switch (level) {
+    case "HARD_RED_FLAG":
+      return "urgent_human_review";
+    case "DATA_INTEGRITY_FAILURE":
+      return "failed_safe";
+    case "EVIDENCE_INSUFFICIENT_WITH_RISK":
+    case "MODEL_HIGH_RISK":
+      return "human_review";
+    case "MODEL_MODERATE_RISK":
+      return "needs_clarification";
+    case "ROUTINE_FOLLOW_UP":
+      return "routine";
+  }
+}
+
+/** architecture.md §7 / api/app/domain/session_fsm.py — real FSM state values. */
 export type SessionStatus =
-  | "initializing"
+  | "created"
   | "consent"
-  | "interview"
-  | "retrieve"
-  | "assess"
-  | "respond"
-  | "escalate"
-  | "summarize"
-  | "closed";
+  | "interviewing"
+  | "retrieving"
+  | "deciding"
+  | "responding"
+  | "summarizing"
+  | "closed"
+  | "fail_safe"
+  | "escalated";
 
 /** design.md §5.3 — voice states table. */
 export type VoiceState =
@@ -126,6 +159,8 @@ export interface CaseSummary {
   label: string;
   procedure: string;
   patientAlias: string;
+  phase: string;
+  daysSinceProcedure: number;
 }
 
 export interface ChallengeCase extends CaseSummary {
@@ -139,6 +174,46 @@ export interface Session {
   knowledgeVersion: number;
   startedAt: string;
   endedAt: string | null;
+}
+
+/* Raw backend shapes (snake_case) — mapped to the clean types above. */
+interface RawCase {
+  case_id: string;
+  patient_display_name: string;
+  procedure: string;
+  phase: string;
+  days_since_procedure: number;
+}
+
+interface RawSession {
+  id: string;
+  case_id: string;
+  state: SessionStatus;
+  knowledge_version: number;
+  created_at: string;
+  closed_at: string | null;
+}
+
+function mapCase(raw: RawCase): CaseSummary {
+  return {
+    id: raw.case_id,
+    label: `${raw.patient_display_name} · ${raw.phase}`,
+    procedure: raw.procedure,
+    patientAlias: raw.patient_display_name,
+    phase: raw.phase,
+    daysSinceProcedure: raw.days_since_procedure,
+  };
+}
+
+function mapSession(raw: RawSession): Session {
+  return {
+    id: raw.id,
+    caseId: raw.case_id,
+    status: raw.state,
+    knowledgeVersion: raw.knowledge_version,
+    startedAt: raw.created_at,
+    endedAt: raw.closed_at,
+  };
 }
 
 export interface Turn {
@@ -277,52 +352,165 @@ export interface AuditFilters {
 
 export interface AuditSessionRow {
   sessionId: string;
+  caseId: string;
+  state: SessionStatus;
   startedAt: string;
-  durationSeconds: number;
-  riskLevel: RiskLevel;
+  closedAt: string | null;
+  durationSeconds: number | null;
+  decisionLevel: DecisionLevel | null;
+  riskLevel: RiskLevel | null;
   citationCount: number;
-  latencyP95Ms: number | null;
-  tokens: number | null;
-  costUsd: number | null;
   escalated: boolean;
 }
 
 /* -------------------------------------------------------------------- */
-/* Endpoints — docs/architecture.md §12.1                               */
+/* WebSocket envelope contract — api/app/api/routes/ws.py                */
+/* -------------------------------------------------------------------- */
+
+export const ENVELOPE_VERSION = 1;
+
+export interface ClientTurnText {
+  v: 1;
+  type: "client.turn_text";
+  seq: number;
+  payload: { text: string };
+}
+
+/** Citation as the WS serializes it (api/app/domain/models.py CitationRef). */
+export interface WsCitation {
+  citation_id: string;
+  document_id: string;
+  document_version: number;
+  chunk_id: string;
+  title: string;
+  section: string | null;
+  page: number | null;
+  knowledge_version: number;
+}
+
+export type ServerEnvelope =
+  | { v: 1; type: "server.state"; seq: number; payload: { state: SessionStatus }; correlation_id: string }
+  | {
+      v: 1;
+      type: "server.agent_response";
+      seq: number;
+      payload: {
+        message: string;
+        intent: string | null;
+        needs_clarification: boolean;
+        citations: WsCitation[];
+      };
+      correlation_id: string;
+    }
+  | {
+      v: 1;
+      type: "server.decision";
+      seq: number;
+      payload: { level: DecisionLevel; should_escalate: boolean; escalated: boolean };
+      correlation_id: string;
+    }
+  | { v: 1; type: "server.summary"; seq: number; payload: Record<string, unknown>; correlation_id: string }
+  | { v: 1; type: "server.error"; seq: number; payload: { reason: string }; correlation_id: string };
+
+/** Map a WS citation to the UI `CitationRef` shape used by EvidencePanel. */
+export function mapWsCitation(c: WsCitation): CitationRef {
+  return {
+    chunkId: c.chunk_id,
+    documentId: c.document_id,
+    documentTitle: c.title,
+    version: String(c.document_version),
+    section: c.section,
+    page: c.page,
+    snippet: "",
+  };
+}
+
+/** Build the ws:// URL for a session channel from the HTTP base. */
+export function callSocketUrl(sessionId: string): string {
+  const wsBase = API_BASE_URL.replace(/^http/, "ws");
+  return `${wsBase}/ws/sessions/${sessionId}`;
+}
+
+/* -------------------------------------------------------------------- */
+/* Endpoints — real backend (api/app/main.py registers under /api/v1)   */
 /* -------------------------------------------------------------------- */
 
 export const api = {
-  healthLive: () => request<{ status: string }>("/health/live"),
-  healthReady: () => request<{ status: string }>("/health/ready"),
+  health: () => request<{ status: string; version: string; db: string }>("/health"),
 
-  listCases: () => request<CaseSummary[]>("/api/cases"),
-
-  createSession: (caseId: string) =>
-    request<Session>("/api/sessions", {
-      method: "POST",
-      body: JSON.stringify({ case_id: caseId }),
-    }),
-
-  finishSession: (sessionId: string) =>
-    request<CallSummary>(`/api/sessions/${sessionId}/finish`, {
-      method: "POST",
-    }),
-
-  getSession: (sessionId: string) => request<Session>(`/api/sessions/${sessionId}`),
-
-  getSessionTrace: (sessionId: string) =>
-    request<SessionTrace>(`/api/sessions/${sessionId}/trace`),
-
-  listAuditSessions: (filters?: AuditFilters) => {
-    const params = new URLSearchParams();
-    if (filters) {
-      for (const [key, value] of Object.entries(filters)) {
-        if (value !== undefined) params.set(key, String(value));
-      }
-    }
-    const query = params.toString();
-    return request<AuditSessionRow[]>(`/api/sessions${query ? `?${query}` : ""}`);
+  listCases: async (): Promise<CaseSummary[]> => {
+    const raw = await request<RawCase[]>("/api/v1/cases");
+    return raw.map(mapCase);
   },
 
-  getMetrics: () => request<MetricsSnapshot>("/api/metrics"),
+  createSession: async (caseId: string): Promise<Session> => {
+    const raw = await request<RawSession>("/api/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify({ case_id: caseId }),
+    });
+    return mapSession(raw);
+  },
+
+  getSession: async (sessionId: string): Promise<Session> => {
+    const raw = await request<RawSession>(`/api/v1/sessions/${sessionId}`);
+    return mapSession(raw);
+  },
+
+  // Backend returns the SUM-002 CallSummary shape (snake_case); the /audit
+  // page consumes it directly. Kept loosely typed until the audit read
+  // endpoints (trace/metrics) exist server-side.
+  finishSession: (sessionId: string) =>
+    request<Record<string, unknown>>(`/api/v1/sessions/${sessionId}/finish`, {
+      method: "POST",
+    }),
+
+  listAuditSessions: async (): Promise<AuditSessionRow[]> => {
+    const body = await request<{ sessions: RawAuditRow[] }>("/api/v1/audit/sessions");
+    return body.sessions.map(mapAuditRow);
+  },
+
+  getMetrics: async (): Promise<MetricsSnapshot> => {
+    const raw = await request<{
+      latency_p50: MetricValue;
+      latency_p95: MetricValue;
+      tokens: MetricValue;
+      cost: MetricValue;
+    }>("/api/v1/metrics");
+    return {
+      latencyP50: raw.latency_p50,
+      latencyP95: raw.latency_p95,
+      tokens: raw.tokens,
+      cost: raw.cost,
+    };
+  },
+
+  getTrace: (sessionId: string) =>
+    request<SessionTrace>(`/api/v1/audit/sessions/${sessionId}/trace`),
 };
+
+interface RawAuditRow {
+  session_id: string;
+  case_id: string;
+  state: SessionStatus;
+  started_at: string;
+  closed_at: string | null;
+  duration_seconds: number | null;
+  decision_level: DecisionLevel | null;
+  citation_count: number;
+  escalated: boolean;
+}
+
+function mapAuditRow(raw: RawAuditRow): AuditSessionRow {
+  return {
+    sessionId: raw.session_id,
+    caseId: raw.case_id,
+    state: raw.state,
+    startedAt: raw.started_at,
+    closedAt: raw.closed_at,
+    durationSeconds: raw.duration_seconds,
+    decisionLevel: raw.decision_level,
+    riskLevel: raw.decision_level ? decisionToRisk(raw.decision_level) : null,
+    citationCount: raw.citation_count,
+    escalated: raw.escalated,
+  };
+}

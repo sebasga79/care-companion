@@ -28,8 +28,19 @@ export default function AuditPage() {
 
   async function fetchSessions(nextFilters: AuditFilters) {
     try {
-      const result = await api.listAuditSessions(nextFilters);
-      setRows(result);
+      // The backend returns all sessions; filtering is applied client-side
+      // here (server-side filter params are a later ticket). This keeps the
+      // filter UI honest instead of silently ignoring it.
+      const result = await api.listAuditSessions();
+      const filtered = result.filter((row) => {
+        if (nextFilters.result && row.riskLevel !== nextFilters.result) return false;
+        if (nextFilters.escalated !== undefined && row.escalated !== nextFilters.escalated)
+          return false;
+        if (nextFilters.dateFrom && row.startedAt < nextFilters.dateFrom) return false;
+        if (nextFilters.dateTo && row.startedAt > `${nextFilters.dateTo}T23:59:59`) return false;
+        return true;
+      });
+      setRows(filtered);
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error desconocido.");
@@ -173,24 +184,20 @@ export default function AuditPage() {
               <thead>
                 <tr>
                   <th scope="col">Inicio</th>
-                  <th scope="col">Duración</th>
-                  <th scope="col">Nivel</th>
+                  <th scope="col">Estado</th>
+                  <th scope="col">Nivel de decisión</th>
                   <th scope="col">Fuentes</th>
-                  <th scope="col">Latencia P95</th>
-                  <th scope="col">Tokens</th>
-                  <th scope="col">Costo</th>
+                  <th scope="col">Escalamiento</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.sessionId}>
                     <td>{new Date(row.startedAt).toLocaleString("es")}</td>
-                    <td>{Math.round(row.durationSeconds / 60)} min</td>
-                    <td>{row.riskLevel}</td>
+                    <td>{row.state}</td>
+                    <td translate="no">{row.decisionLevel ?? "—"}</td>
                     <td>{row.citationCount}</td>
-                    <td>{row.latencyP95Ms ? `${row.latencyP95Ms} ms` : "—"}</td>
-                    <td>{row.tokens ?? "—"}</td>
-                    <td>{row.costUsd ? `$${row.costUsd.toFixed(3)}` : "—"}</td>
+                    <td>{row.escalated ? "Sí" : "No"}</td>
                   </tr>
                 ))}
               </tbody>

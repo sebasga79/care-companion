@@ -14,12 +14,13 @@ from fastapi import FastAPI
 from app.adapters.fake_embeddings import FakeEmbeddings
 from app.adapters.fake_llm import FakeLLM
 from app.adapters.fixture_cases import FixtureCaseAdapter
-from app.api.routes import cases, health, knowledge, sessions, ws
+from app.api.routes import audit, cases, health, knowledge, sessions, ws
 from app.core.config import LLMProvider, get_settings
 from app.core.logging import configure_logging
 from app.core.middleware import CorrelationIdMiddleware
 from app.orchestrator.call_cycle import CallCycleOrchestrator
 from app.ports.llm import LLMPort
+from app.repositories.audit import AuditRepository
 from app.repositories.db import apply_schema, get_connection
 from app.repositories.decisions import DecisionRepository
 from app.repositories.documents import DocumentRepository
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     app.state.observation_repo = ObservationRepository(settings.database_path)
     app.state.decision_repo = DecisionRepository(settings.database_path)
     app.state.escalation_repo = EscalationRepository(settings.database_path)
+    app.state.audit_repo = AuditRepository(settings.database_path)
 
     app.state.llm = _build_llm_adapter(settings.llm_provider, model=settings.llm_model)
     app.state.call_cycle_orchestrator = CallCycleOrchestrator(
@@ -97,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(cases.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(knowledge.router, prefix="/api/v1")
+    app.include_router(audit.router, prefix="/api/v1")
     app.include_router(ws.router)
 
     logger.info(
