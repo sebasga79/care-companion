@@ -1,0 +1,35 @@
+# Care Companion — configuración base de gitleaks
+# v0.1 · 23 de julio de 2026 · Ticket: PRE-012
+#
+# Complementa docs/policies/secrets.md. Mantiene las reglas por defecto de
+# gitleaks (no se redefinen regex propias, frágiles o redundantes) y agrega
+# solo la allowlist mínima necesaria para no bloquear placeholders conocidos.
+
+title = "care-companion gitleaks config"
+
+# Hereda el conjunto de reglas por defecto de gitleaks (detección de API keys,
+# tokens, credenciales de proveedores comunes, claves privadas, etc.).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders y archivos de ejemplo, no secretos reales"
+
+  # Los .env.example siempre contienen nombres de variable reales con
+  # valores placeholder; nunca deben disparar el scanner.
+  paths = [
+    '''\.env\.example$''',
+    '''\.env\.sample$''',
+  ]
+
+  # Placeholders obvios usados en documentación y .env.example. Se mantiene
+  # esta lista deliberadamente corta y literal, sin regex ambiguas que
+  # puedan ocultar un secreto real por coincidencia parcial.
+  regexes = [
+    '''(?i)changeme''',
+    '''(?i)your-key-here''',
+    '''(?i)your-api-key-here''',
+    '''(?i)replace-me''',
+    '''(?i)placeholder''',
+    '''x{8,}''',
+  ]
