@@ -1,5 +1,7 @@
 # Nota de compromiso — Stop-work preinicio
 
+> ⚠️ **SUPERSEDED (23 de julio de 2026):** el propietario decidió iniciar la construcción anticipada de la solución. Ver `docs/adr/ADR-001-construccion-anticipada.md`. Esta nota se conserva como registro histórico.
+
 > v0.1 · 23 de julio de 2026 · Ticket: PRE-037
 
 ## Declaración

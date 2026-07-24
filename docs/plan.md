@@ -150,7 +150,7 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 | PRE-034 Actualizar/copiar herramientas offline permitidas | P1 | Docker images/caches solo si reglas lo permiten; verificar licencias | no depende de herramientas no autorizadas | inventory | Backlog |
 | PRE-035 Verificar registro y correo | P0 | preinscripción, spam, zona horaria, canal de soporte | material localizable en T0 | checklist | Backlog |
 | PRE-036 Plan de salud y turnos | P0 | bloques de foco, comida, sueño y buffers | no planear 72h continuas sin descanso | `docs/t0/health-shift-plan.md` — bloques 90-120m, sueño ≥6h, alineado a C0–C5 | Done |
-| PRE-037 Stop-work preinicio | P0 | no crear solución final antes de T0; preservar equidad | cumplimiento explícito | `docs/t0/stop-work-note.md` — vigente hasta T0; cumplimiento continuo | Done |
+| PRE-037 Stop-work preinicio | P0 | no crear solución final antes de T0; preservar equidad | cumplimiento explícito | `docs/t0/stop-work-note.md` — **Superseded** por decisión del propietario (ADR-001, 23 jul): construcción anticipada con puertos obligatorios | Superseded |
 
 ## 5. Fase C — Construcción del concurso
 
