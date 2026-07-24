@@ -1,0 +1,19 @@
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=development
+      - DATABASE_PATH=/app/data/care_companion.db
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LLM_PROVIDER=fake
+      - LLM_MODEL=fake-model-v1
+    volumes:
+      - care_companion_data:/app/data
+
+volumes:
+  care_companion_data:

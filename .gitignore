@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+
+# Secretos locales — nunca versionar (docs/policies/secrets.md)
+.env
+*.env.local
+!.env.example
+!.env.sample
+
+# Bases de datos SQLite locales
+*.db
+*.db-wal
+*.db-shm
+/data/
+api/data/
+
+# Frontend (web/, cuando exista)
+node_modules/
+.next/
+dist/
+build/
+
+# Sistema operativo / editores
+.DS_Store
+.vscode/
+.idea/
