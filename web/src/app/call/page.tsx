@@ -6,6 +6,7 @@ import { TranscriptPanel } from "@/components/TranscriptPanel";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { RiskPanel } from "@/components/RiskPanel";
 import { StatusBanner } from "@/components/StatusBanner";
+import { useVoiceSession } from "@/lib/useVoiceSession";
 import {
   api,
   ApiError,
@@ -89,6 +90,11 @@ export default function CallPage() {
 
   const socketRef = useRef<WebSocket | null>(null);
   const clientSeqRef = useRef(0);
+  // Refs so the WebSocket onmessage closure (captured once at connect time)
+  // always reaches the latest voice behavior without being recreated.
+  const voiceModeRef = useRef(false);
+  const speakRef = useRef<(text: string) => void>(() => {});
+  const sessionIdRef = useRef<string | null>(null);
 
   const fetchCases = useCallback(async () => {
     try {
@@ -121,6 +127,8 @@ export default function CallPage() {
       case "server.agent_response":
         if (env.payload.message) {
           setTurns((prev) => [...prev, makeTurn(sid, "assistant", env.payload.message)]);
+          // Speak the reply only when the operator is running the call by voice.
+          if (voiceModeRef.current) speakRef.current(env.payload.message);
         }
         if (env.payload.citations.length > 0) {
           setCitations(env.payload.citations.map(mapWsCitation));
@@ -162,6 +170,7 @@ export default function CallPage() {
     }
 
     setSessionId(session.id);
+    sessionIdRef.current = session.id;
     setFsmState(session.status);
 
     const ws = new WebSocket(callSocketUrl(session.id));
@@ -185,12 +194,13 @@ export default function CallPage() {
     };
   }
 
-  function sendTurn() {
-    const text = draft.trim();
+  const sendText = useCallback((rawText: string) => {
+    const text = rawText.trim();
     const ws = socketRef.current;
-    if (!text || !ws || ws.readyState !== WebSocket.OPEN || !sessionId) return;
+    const sid = sessionIdRef.current;
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN || !sid) return;
     clientSeqRef.current += 1;
-    setTurns((prev) => [...prev, makeTurn(sessionId, "patient", text)]);
+    setTurns((prev) => [...prev, makeTurn(sid, "patient", text)]);
     setVoiceState("thinking");
     ws.send(
       JSON.stringify({
@@ -200,10 +210,28 @@ export default function CallPage() {
         payload: { text },
       }),
     );
+  }, []);
+
+  function sendTurn() {
+    sendText(draft);
     setDraft("");
   }
 
+  // Voice pipeline (VOI-*): browser-native STT/TTS with barge-in, behind a
+  // provider-agnostic hook. A recognized patient utterance is sent as a WS
+  // text turn — identical contract to typing.
+  const voice = useVoiceSession({
+    onFinalTurn: (text) => sendText(text),
+    onBargeIn: () => setVoiceState("interrupted"),
+    lang: "es-CO",
+  });
+  useEffect(() => {
+    speakRef.current = voice.speak;
+  }, [voice.speak]);
+
   async function endCall() {
+    voice.stop();
+    voiceModeRef.current = false;
     const ws = socketRef.current;
     ws?.close();
     setPhase("closed");
@@ -217,7 +245,26 @@ export default function CallPage() {
     }
   }
 
+  function toggleMic() {
+    if (voice.listening) {
+      voice.stop();
+      voiceModeRef.current = false;
+    } else {
+      voiceModeRef.current = true;
+      voice.start();
+    }
+  }
+
   const isActive = phase === "active" || phase === "connecting";
+
+  // Voice status takes precedence over FSM-derived state for the orb display.
+  const displayVoiceState: VoiceState = voice.speaking
+    ? "assistant_speaking"
+    : voice.partial
+      ? "patient_speaking"
+      : voice.listening
+        ? "listening"
+        : voiceState;
 
   return (
     <>
@@ -300,12 +347,17 @@ export default function CallPage() {
           </div>
 
           <VoiceOrb
-            state={voiceState}
-            micEnabled={phase === "active"}
-            onToggleMic={() => {
-              /* Voice capture (VOI-*) lands in a later ticket; text turns drive the slice today. */
-            }}
+            state={displayVoiceState}
+            micEnabled={voice.listening}
+            micDisabled={phase !== "active" || !voice.supported}
+            onToggleMic={toggleMic}
           />
+
+          {voice.partial ? (
+            <p className="voice-partial" aria-live="polite" style={{ fontStyle: "italic", opacity: 0.8 }}>
+              «{voice.partial}»
+            </p>
+          ) : null}
 
           <div className="call-controls" role="group" aria-label="Controles de llamada">
             {phase === "idle" || phase === "closed" ? (
@@ -318,11 +370,28 @@ export default function CallPage() {
                 Iniciar llamada
               </button>
             ) : (
-              <button type="button" className="voice-preview-btn" onClick={endCall}>
-                Finalizar llamada
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="voice-preview-btn"
+                  onClick={toggleMic}
+                  disabled={phase !== "active" || !voice.supported}
+                  aria-pressed={voice.listening}
+                >
+                  {voice.listening ? "Detener voz" : "Hablar por voz"}
+                </button>
+                <button type="button" className="voice-preview-btn" onClick={endCall}>
+                  Finalizar llamada
+                </button>
+              </>
             )}
           </div>
+
+          {phase === "active" && !voice.supported ? (
+            <p className="voice-note" style={{ fontSize: 12, opacity: 0.75, marginTop: 8 }}>
+              Este navegador no soporta reconocimiento de voz; continúa por texto abajo.
+            </p>
+          ) : null}
 
           {phase === "active" ? (
             <form
