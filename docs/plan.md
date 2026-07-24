@@ -135,22 +135,22 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 | PRE-021 Ensayar captura de video | P1 | audio, cámara, resolución, zoom, privacidad y backup | voz y UI legibles; sin notificaciones/datos privados | video desechable | Backlog |
 | PRE-022 Ensayar fallo de red | P1 | hotspot/segundo enlace, descarga de dependencias permitida, recuperación Git | plan de continuidad probado | checklist | Backlog |
 | PRE-023 Ensayar micrófono/navegador | P1 | permisos, eco, auriculares, barge-in manual | ruta principal y alternativa funcionan | registro | Backlog |
-| PRE-024 Ensayar explicación de 2 preguntas | P2 | problema/valor y decisión técnica/opciones/riesgos/2 semanas | respuestas preliminares ≤90 s cada una | guion v0 | Backlog |
+| PRE-024 Ensayar explicación de 2 preguntas | P2 | problema/valor y decisión técnica/opciones/riesgos/2 semanas | respuestas preliminares ≤90 s cada una | `docs/video/two-questions-script.md` v0 (11 marcas PENDIENTE-T0); ensayo hablado pendiente (humano) | In review |
 | PRE-025 Revisar accesibilidad del mockup | P2 | contraste, foco, labels, color, reduced motion | sin blockers AA en primera vista | auditoría | Backlog |
-| PRE-026 Preparar consulta de dudas al organizador | P2 | consolidar solo preguntas no publicadas | correo listo, sin solicitar material anticipado | borrador | Backlog |
+| PRE-026 Preparar consulta de dudas al organizador | P2 | consolidar solo preguntas no publicadas | correo listo, sin solicitar material anticipado | `docs/comms/organizer-questions-draft.md` — 8 preguntas mapeadas a OQ-001…010; envío pendiente (humano) | In review |
 
 ### Sprint P3 — Freeze · 3–6 ago
 
 | Ticket | P | Tareas | Aceptación | Evidencia | Estado |
 |---|---:|---|---|---|---|
 | PRE-030 Congelar baseline SDD | P0 | revisar docs; registrar supuestos; no seguir expandiendo alcance | v0.2 fechada y consistente | tag/versión | Backlog |
-| PRE-031 Preparar agenda T0 | P0 | checklist de correo, descarga, lectura, decisiones y timeboxes | primeros 120 min definidos | agenda | Backlog |
-| PRE-032 Preparar matriz de decisión de voz | P0 | WebSocket pipeline vs realtime provider; criterios y cutoff | decisión posible en 90 min | scorecard | Backlog |
-| PRE-033 Preparar matriz de decisión de RAG | P1 | corpus/volumen→SQLite hybrid o adapter alterno | decisión posible en 45 min | scorecard | Backlog |
+| PRE-031 Preparar agenda T0 | P0 | checklist de correo, descarga, lectura, decisiones y timeboxes | primeros 120 min definidos | `docs/t0/agenda-t0.md` — CH-001…010 mapeados; discrepancia 160/120 min documentada | Done |
+| PRE-032 Preparar matriz de decisión de voz | P0 | WebSocket pipeline vs realtime provider; criterios y cutoff | decisión posible en 90 min | `docs/t0/voice-decision-scorecard.md` — pesos/spikes/desempate, scores vacíos → ADR-007 | Done |
+| PRE-033 Preparar matriz de decisión de RAG | P1 | corpus/volumen→SQLite hybrid o adapter alterno | decisión posible en 45 min | `docs/t0/rag-decision-scorecard.md` — default SQLite híbrido, scores vacíos | Done |
 | PRE-034 Actualizar/copiar herramientas offline permitidas | P1 | Docker images/caches solo si reglas lo permiten; verificar licencias | no depende de herramientas no autorizadas | inventory | Backlog |
 | PRE-035 Verificar registro y correo | P0 | preinscripción, spam, zona horaria, canal de soporte | material localizable en T0 | checklist | Backlog |
-| PRE-036 Plan de salud y turnos | P0 | bloques de foco, comida, sueño y buffers | no planear 72h continuas sin descanso | calendario | Backlog |
-| PRE-037 Stop-work preinicio | P0 | no crear solución final antes de T0; preservar equidad | cumplimiento explícito | nota de freeze | Backlog |
+| PRE-036 Plan de salud y turnos | P0 | bloques de foco, comida, sueño y buffers | no planear 72h continuas sin descanso | `docs/t0/health-shift-plan.md` — bloques 90-120m, sueño ≥6h, alineado a C0–C5 | Done |
+| PRE-037 Stop-work preinicio | P0 | no crear solución final antes de T0; preservar equidad | cumplimiento explícito | `docs/t0/stop-work-note.md` — vigente hasta T0; cumplimiento continuo | Done |
 
 ## 5. Fase C — Construcción del concurso
 
@@ -170,6 +170,8 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 | CH-008 Delta de requisitos | P0 | 15m | actualizar `spec/architecture/plan`; crear tickets nuevos; resolver FR-004 (consentimiento) según exigencia de la ficha | v1.0 sin supuestos críticos; FR-004 con ticket o descope registrado |
 | CH-009 Congelar alcance P0/P1/P2 | P0 | 10m | MoSCoW, cutline y exclusiones | backlog ordenado |
 | CH-010 Baseline repo | P0 | 10m | licencia/branch/initial checks según reglas | commit inicial trazable |
+
+> **Nota (23 jul, auditoría PRE-031):** los timeboxes CH-001…CH-010 suman **160 min** sobre la ventana nominal de 120 (T0–T+2h). Son máximos, no presupuesto secuencial garantizado: la brecha se cierra en T0 (comprimir, paralelizar CH-007 con CH-008–010, o aceptar C0 ≈ 2h40m) con la ficha real en mano — ver `docs/t0/agenda-t0.md`.
 
 **Exit gate C0**
 

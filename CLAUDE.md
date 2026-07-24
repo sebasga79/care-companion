@@ -20,6 +20,12 @@ No hay comandos de build/lint/test todavía. Cuando exista código, el arranque 
 |---|---|---|---|
 | 23 jul | PRE-005 | Done | Dirección visual Family-first Pediatric ya aprobada en `design.md` v0.2 y handoff v1.0; plan.md sincronizado. |
 | 23 jul | PRE-006 | Done | `docs/traceability.md` creado por ejecutor Sonnet; auditado por Fable: 100% de FR/BR/NFR de spec.md mapeados, 0 IDs inventados, 5 gates y 6 criterios con owner/test/evidencia. Huecos genuinos: FR-004 (consentimiento) y FR-054 (export evidencia) sin ticket dedicado — pendiente decisión. |
+| 23 jul | Huecos FR-004/FR-054 | Done | FR-004 → resolver en CH-008 (T0); FR-054 → ticket nuevo DOC-009 en C4. Trazabilidad 100/100 con owner. Commit baseline `2c59a47`. |
+| 23 jul | PRE-013/014/015/016 | Done | Batch A Sonnet, auditado: CONTRIBUTING.md, ADR template, evidence ledger (schema §2.4 verificado idéntico), política de dependencias. Rama renombrada a `main`. Commit `8cdb0bb`. |
+| 23 jul | PRE-010/011 | In review | Parte automatizable hecha: stack verificado (git/Docker/Python/Node/uv/ffmpeg) + clean-install template. Pendiente humano: micrófono, cámara, grabación, VM limpia, plan B. |
+| 23 jul | PRE-012/017/018 | Done* | Batch B Sonnet, auditado: secrets.md + .gitleaks.toml, 5 escenarios sintéticos SCEN-A…E, glosario 25 entradas sin inferencia diagnóstica. Commit `825b71a`. *PRE-012 In review: falta instalar gitleaks/pre-commit y password manager (humano). |
+| 23 jul | PRE-031/032/033/036/037 | Done | Batch C Sonnet, auditado: agenda T0 (CH-001…010), scorecards voz/RAG con scores vacíos (ninguna decisión del 7 ago pre-tomada), plan de turnos, nota stop-work. **Hallazgo del ejecutor:** timeboxes C0 suman 160 min vs ventana de 120 — registrado en plan.md §5 como nota, se resuelve en T0. |
+| 23 jul | PRE-024/026 | In review | Guion de video v0 (11 PENDIENTE-T0) y correo al organizador (8 preguntas ← OQ-001…010) listos; ensayo hablado y envío del correo son acción humana. |
 
 ## Documentos canónicos (leer antes de editar)
 
