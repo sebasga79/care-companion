@@ -12,21 +12,19 @@ __pycache__/
 *.env.local
 !.env.example
 !.env.sample
-
 # Bases de datos SQLite locales
 *.db
 *.db-wal
 *.db-shm
 /data/
 api/data/
-
 # Frontend (web/, cuando exista)
 node_modules/
 .next/
 dist/
 build/
-
 # Sistema operativo / editores
 .DS_Store
 .vscode/
 .idea/
+.run/

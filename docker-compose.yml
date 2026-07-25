@@ -4,7 +4,9 @@ services:
       context: ./api
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      # Puerto host inusual (49317) para no chocar con otros proyectos; el
+      # contenedor sigue escuchando en 8000 internamente.
+      - "49317:8000"
     environment:
       - APP_ENV=development
       - DATABASE_PATH=/app/data/care_companion.db
@@ -20,10 +22,11 @@ services:
       context: ./web
       dockerfile: Dockerfile
       args:
-        # El navegador llama al api publicado en el host (localhost:8000).
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        # El navegador llama al api publicado en el host (puerto raro 49317).
+        NEXT_PUBLIC_API_URL: http://localhost:49317
     ports:
-      - "3000:3000"
+      # Puerto host inusual (49318); el contenedor escucha en 3000.
+      - "49318:3000"
     depends_on:
       - api
 

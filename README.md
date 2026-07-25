@@ -41,31 +41,42 @@ Detalle en [`docs/architecture.md`](docs/architecture.md).
 No se necesitan credenciales para correr el prototipo: usa el proveedor LLM
 `fake` determinista. No hay secretos en el repositorio.
 
-## Arranque rápido (Docker, ≤15 min)
+> **Puertos:** el proyecto usa puertos altos e inusuales para no chocar con
+> otros servicios locales — backend **49317**, frontend **49318**.
+
+## Arranque rápido (un solo script)
 
 ```bash
 git clone <repo-url> care-companion && cd care-companion
+./levantar_app.sh
+```
+
+Instala dependencias la primera vez, levanta backend + frontend, espera a que
+estén sanos y sigue los logs. **Ctrl+C** detiene todo de forma limpia.
+Opciones: `--reinstall` (reinstala deps), `--clean` (borra la BD local).
+
+- Frontend: <http://localhost:49318> (redirige a `/call`)
+- API + OpenAPI: <http://localhost:49317/docs>
+- Health: <http://localhost:49317/health>
+
+## Arranque con Docker (≤15 min)
+
+```bash
 docker compose up --build
 ```
 
-- Frontend: <http://localhost:3000> (redirige a `/call`)
-- API + OpenAPI: <http://localhost:8000/docs>
-- Health: <http://localhost:8000/health>
+Mismos puertos host (49318 frontend, 49317 API).
 
-## Arranque local (sin Docker)
+## Arranque local manual (sin script ni Docker)
 
 ```bash
 # Backend
-cd api
-uv sync
-uv run uvicorn app.main:app --port 8000
-# → http://localhost:8000
+cd api && uv sync
+uv run uvicorn app.main:app --port 49317
 
 # Frontend (otra terminal)
-cd web
-pnpm install
-pnpm dev
-# → http://localhost:3000
+cd web && pnpm install
+NEXT_PUBLIC_API_URL=http://localhost:49317 pnpm dev --port 49318
 ```
 
 ## Probar que funciona
