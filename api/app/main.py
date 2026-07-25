@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters.fake_embeddings import FakeEmbeddings
 from app.adapters.fake_llm import FakeLLM
@@ -91,6 +92,19 @@ def create_app() -> FastAPI:
         evidence_score_threshold=settings.rag_evidence_score_threshold,
         candidate_pool_size=settings.rag_candidate_pool_size,
         retrieval_top_k=settings.rag_retrieval_top_k,
+    )
+
+    # CORS: el frontend corre en otro puerto (cross-origin) y el navegador
+    # exige cabeceras CORS para fetch. En dev permitimos cualquier origen
+    # localhost/127.0.0.1 en cualquier puerto (regex), sin credenciales (no se
+    # usan cookies; el auth futuro irá por header). En T0/despliegue real se
+    # restringe a los orígenes concretos vía CORS_ALLOW_ORIGINS.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     app.add_middleware(CorrelationIdMiddleware, event_repo=app.state.event_repo)
