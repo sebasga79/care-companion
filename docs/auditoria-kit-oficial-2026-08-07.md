@@ -411,3 +411,34 @@ condiciones reales, no solo mockeadas; (3) cargar el corpus real de 107 PDFs ví
 consola; (4) cronometrar G2 con todo lo anterior en su lugar; (5) probar G4 de punta a
 punta con voz + LLM real; (6) informe final con la declaración de modelo que exige G3
 textualmente; (7) diagrama actualizado; (8) video.
+
+### 9.1 Segunda pasada (misma tarde) — foco explícito en "voz y respuestas"
+
+El propietario pidió priorizar que el modelo de voz y las respuestas funcionen
+correctamente antes de seguir con el dataset. Auditoría dirigida a esa ruta crítica
+(`InterviewAgent`/`TriageAgent`/`ResponseAgent`, `agents/support.py`, `ws.py`,
+`AuditRepository`) encontró y corrigió dos problemas reales, no cosméticos:
+
+- **`/metrics` medía la latencia equivocada.** `BaseHTTPMiddleware` (de donde salía el
+  único `latency_ms` persistido hasta ahora) no se ejecuta sobre conexiones WebSocket — así
+  que P50/P95 promediaba latencia de tráfico HTTP administrativo (subir un documento,
+  listar `/audit/sessions`) y **nunca** la del turno conversacional real. Corregido:
+  `ws.py` instrumenta cada turno (`client.turn_text` → `server.agent_response` enviado)
+  como evento `turn.response_sent`, y `AuditRepository.latency_percentiles()` ahora filtra
+  estrictamente a ese `event_type`. Sin esta corrección, el número que iba a terminar en el
+  README habría sido honesto en apariencia ("medido", con muestras) pero **factualmente
+  otra cosa** frente a lo que pide la rúbrica — exactamente el tipo de discrepancia que la
+  sesión de evaluación cruza contra los logs.
+- **Interview/TriageAgent no pedían JSON mode al proveedor real y el parser no toleraba
+  fences de markdown.** Con `FakeLLM`/`ScriptedFakeLLM` esto nunca se notó (siempre
+  devuelven JSON limpio); un LLM real a veces envuelve la respuesta en ` ```json ... ``` `
+  pese a que el prompt pida "solo JSON". Corregido: ambos agentes ahora pasan
+  `response_schema={"type": "object"}` (activa `response_format=json_object` en
+  `OpenAICompatLLM`) y `extract_json_payload` (`agents/support.py`) pela fences/prosa antes
+  de `json.loads`. Sin esto, el riesgo concreto era que turnos perfectamente respondibles
+  cayeran en `AgentInvocationError` → fail-safe/abstención por un problema de parsing, no de
+  criterio clínico — indistinguible desde afuera de "el modelo no funciona".
+
+`make verify` = 274 tests. **Sigue sin probarse contra la API real de Groq/Ollama** — las
+dos correcciones de arriba se verificaron con `httpx.MockTransport`/`ScriptedFakeLLM`, no
+con tráfico real; el propietario va a correr esa prueba con su propia API key.

@@ -106,6 +106,36 @@ def test_ws_full_turn_cycle_sends_versioned_envelopes_with_monotonic_seq(
     assert summary_env["payload"]["risk"]["level"] == "ROUTINE_FOLLOW_UP"
 
 
+def test_ws_turn_persists_conversational_latency_event(clean_env: None) -> None:
+    """La latencia real del turno (no HTTP genérico) queda en `events` como
+    `turn.response_sent` y alimenta `/metrics` — corrección de la auditoría
+    del 7 de agosto (docs/auditoria-kit-oficial-2026-08-07.md §9): antes,
+    `/metrics` promediaba latencia de cualquier request HTTP."""
+    client, _llm = _client_with_scripted_llm(clean_env)
+    session_id = _create_session(client)
+
+    with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
+        ws.send_json(
+            {
+                "v": 1, "type": "client.turn_text", "seq": 1,
+                "payload": {"text": "hoy amaneció jugando, comió normal"},
+                "correlation_id": "corr-latency-1",
+            }
+        )
+        for _ in range(4):
+            ws.receive_json()
+
+    trace = client.get(f"/api/v1/audit/sessions/{session_id}/trace").json()
+    turn_events = [e for e in trace["events"] if e["event_type"] == "turn.response_sent"]
+    assert len(turn_events) == 1
+    assert turn_events[0]["latency_ms"] >= 0
+    assert turn_events[0]["component"] == "ws"
+
+    metrics = client.get("/api/v1/metrics").json()
+    assert metrics["latency_p50"]["status"] == "medido"
+    assert metrics["latency_p95"]["status"] == "medido"
+
+
 def test_ws_unsupported_message_type_errors_without_closing_connection(
     clean_env: None,
 ) -> None:

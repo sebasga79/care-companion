@@ -15,7 +15,7 @@ import pytest
 from app.adapters.fake_llm import ScriptedFakeLLM
 from app.agents.interview import InterviewAgent, InterviewTurnInput
 from app.agents.response import ResponseAgent, ResponseTurnInput
-from app.agents.support import AgentInvocationError, invoke_structured
+from app.agents.support import AgentInvocationError, extract_json_payload, invoke_structured
 from app.agents.triage import TriageAgent, TriageTurnInput
 from app.domain.models import AgentRequest
 from app.ports.llm import LLMMessage
@@ -79,6 +79,36 @@ async def test_invoke_structured_retries_on_invalid_parse_then_succeeds() -> Non
         response_schema=None, deadline_ms=1000, parse=_parse,
     )
     assert parsed == "not-json"
+
+
+# --------------------------------------------------------------------- #
+# extract_json_payload — resiliencia ante proveedores reales que no
+# respetan "solo JSON" al 100% (Groq/Ollama, ver docs/auditoria-kit-
+# oficial-2026-08-07.md §9 y app/agents/support.py)
+# --------------------------------------------------------------------- #
+
+
+def test_extract_json_payload_passthrough_for_clean_json() -> None:
+    assert extract_json_payload('{"a": 1}') == '{"a": 1}'
+
+
+def test_extract_json_payload_strips_markdown_fence_with_json_tag() -> None:
+    text = '```json\n{"a": 1, "b": "hola"}\n```'
+    assert extract_json_payload(text) == '{"a": 1, "b": "hola"}'
+
+
+def test_extract_json_payload_strips_markdown_fence_without_tag() -> None:
+    text = '```\n{"a": 1}\n```'
+    assert extract_json_payload(text) == '{"a": 1}'
+
+
+def test_extract_json_payload_strips_surrounding_prose() -> None:
+    text = 'Aquí tienes el resultado:\n{"a": 1}\nEspero que ayude.'
+    assert extract_json_payload(text) == '{"a": 1}'
+
+
+def test_extract_json_payload_returns_original_when_no_json_object_found() -> None:
+    assert extract_json_payload("solo texto, sin json") == "solo texto, sin json"
 
 
 # --------------------------------------------------------------------- #
@@ -157,6 +187,38 @@ async def test_interview_agent_ambiguous_expression_requests_clarification() -> 
     obs = result.output["observations"][0]
     assert obs["certainty"] == "uncertain"
     assert obs["original_text"] == "la he visto un poco maluca"
+
+
+async def test_interview_agent_tolerates_markdown_fenced_json_from_real_provider() -> None:
+    """Un proveedor real (Groq/Ollama) a veces envuelve el JSON en fences
+    de markdown pese al prompt/response_format=json_object — el agente
+    debe seguir funcionando (extract_json_payload en _parse_interview_output)."""
+    payload = json.dumps(
+        {
+            "needs_clarification": False, "clarification_question": None,
+            "next_question": "¿cómo sigue?",
+            "observations": [
+                {
+                    "code": "FEVER", "label": "fiebre", "value": False,
+                    "certainty": "denied", "original_text": "no tiene fiebre",
+                    "normalized_text": None,
+                }
+            ],
+        }
+    )
+    fenced_response = f"```json\n{payload}\n```"
+    llm = ScriptedFakeLLM(default=fenced_response)
+    agent = InterviewAgent(llm)
+    result = await agent.run(
+        _request(
+            InterviewTurnInput(
+                turns=[], remaining_objectives=[{"code": "FEVER", "label": "fiebre"}],
+                last_patient_utterance="no tiene fiebre", last_patient_turn_id="t1",
+            ).model_dump()
+        )
+    )
+    assert result.status == "ok"
+    assert result.output["observations"][0]["code"] == "FEVER"
 
 
 async def test_interview_agent_needs_clarification_without_question_is_invalid_output() -> None:

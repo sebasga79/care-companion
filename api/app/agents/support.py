@@ -18,6 +18,7 @@ exclusivamente el mecanismo de invocación del `LLMPort` inyectado."""
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Callable
 from typing import TypeVar
@@ -28,6 +29,28 @@ from app.domain.models import UsageMetrics
 from app.ports.llm import LLMMessage, LLMPort
 
 T = TypeVar("T")
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+
+
+def extract_json_payload(text: str) -> str:
+    """Pela el envoltorio más común que un LLM real agrega alrededor de un
+    objeto JSON pese a que el prompt pida "solo JSON": fences de markdown
+    (```json ... ```) o una frase antes/después del objeto. No es un parser
+    laxo — solo recorta hasta el primer `{`/último `}` plausible; `parse`
+    (Pydantic) sigue validando la forma real. `FakeLLM`/`ScriptedFakeLLM`
+    siempre devuelven JSON limpio, así que esto solo importa con un
+    proveedor real (Groq/Ollama) que no respete el formato al 100 % pese a
+    `response_format=json_object`."""
+    stripped = text.strip()
+    match = _JSON_FENCE_RE.search(stripped)
+    if match:
+        return match.group(1).strip()
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return stripped[start : end + 1]
+    return stripped
 
 
 class AgentInvocationError(Exception):
@@ -97,4 +120,4 @@ async def invoke_structured(
     raise AgentInvocationError(last_reason, attempts=attempts, usage=usage)
 
 
-__all__ = ["AgentInvocationError", "invoke_structured"]
+__all__ = ["AgentInvocationError", "extract_json_payload", "invoke_structured"]

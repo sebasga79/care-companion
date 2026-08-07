@@ -16,7 +16,7 @@ import json
 
 from pydantic import BaseModel, Field
 
-from app.agents.support import AgentInvocationError, invoke_structured
+from app.agents.support import AgentInvocationError, extract_json_payload, invoke_structured
 from app.domain.decision import DecisionLevel
 from app.domain.models import AgentRequest, AgentResult, CitationRef
 from app.ports.llm import LLMMessage, LLMPort
@@ -49,7 +49,7 @@ class TriageLLMOutput(BaseModel):
 
 
 def _parse_triage_output(text: str) -> TriageLLMOutput:
-    data = json.loads(text)
+    data = json.loads(extract_json_payload(text))
     parsed = TriageLLMOutput.model_validate(data)
     if parsed.model_level not in _MODEL_LEVELS:
         raise ValueError(
@@ -81,7 +81,9 @@ class TriageAgent:
             parsed, usage = await invoke_structured(
                 self._llm,
                 messages=messages,
-                response_schema=None,
+                # No-None: activa response_format=json_object en el adapter
+                # real (ver interview.py, misma razón).
+                response_schema={"type": "object"},
                 deadline_ms=request.deadline_ms,
                 parse=_parse_triage_output,
             )

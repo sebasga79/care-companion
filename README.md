@@ -44,6 +44,29 @@ No se necesitan credenciales para correr el prototipo: usa el proveedor LLM
 > **Puertos:** el proyecto usa puertos altos e inusuales para no chocar con
 > otros servicios locales — backend **49317**, frontend **49318**.
 
+### Probar con el modelo real (Groq)
+
+Por defecto todo corre con `fake` (determinista, sin red). Para hablar de
+verdad con Llama 3.1 70B vía Groq:
+
+1. Crea una API key gratis en <https://console.groq.com/keys>.
+2. `cp api/.env.example api/.env` y edita dos líneas:
+   ```bash
+   LLM_PROVIDER=groq
+   LLM_API_KEY=gsk_tu_api_key_real
+   ```
+   `LLM_BASE_URL`/`LLM_MODEL` se completan solos con los defaults de Groq
+   (`app/core/config.py`) — no hace falta tocarlos.
+3. (Opcional) resguardo local con [Ollama](https://ollama.com/): instala,
+   `ollama pull phi3.5`, y agrega `LLM_FALLBACK_PROVIDER=ollama` al `.env` —
+   si Groq falla/no responde, el turno sigue con el modelo local en vez de
+   quedarse sin respuesta.
+4. Reinicia el backend (`./levantar_app.sh --reinstall` o `uv run uvicorn
+   app.main:app --port 49317` si corres manual).
+
+Nunca commitees `api/.env` (ya está en `.gitignore`); la key real solo vive
+ahí, en tu máquina.
+
 ## Arranque rápido (un solo script)
 
 ```bash

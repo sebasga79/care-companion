@@ -125,13 +125,26 @@ class AuditRepository:
             }
 
     def latency_percentiles(self) -> dict[str, float | None]:
-        """P50/P95 de latencia por evento instrumentado. Devuelve None si no
-        hay muestras (PERF-001 aún no corrió) — el llamador reporta 'pendiente'."""
+        """P50/P95 de la latencia conversacional real (rúbrica §5: "desde
+        que el paciente termina de hablar hasta que empieza a sonar el
+        audio del agente"), NO de cualquier request HTTP.
+
+        Filtra estrictamente a `event_type = 'turn.response_sent'`
+        (instrumentado en `app/api/routes/ws.py`, un evento por turno de
+        `/ws/sessions/{id}`) — antes de esta corrección se agregaba
+        `latency_ms` de CUALQUIER evento, lo que mezclaba HTTP
+        administrativo (subir un documento, listar `/audit/sessions`) con
+        latencia conversacional real y habría producido un P50/P95
+        engañoso frente a los logs de la sesión de evaluación (spec.md §11,
+        docs/auditoria-kit-oficial-2026-08-07.md §9).
+
+        Devuelve None si no hay muestras — el llamador reporta 'pendiente'."""
         with session_scope(self._database_path) as conn:
             values = [
                 r["latency_ms"]
                 for r in conn.execute(
-                    "SELECT latency_ms FROM events WHERE latency_ms IS NOT NULL"
+                    "SELECT latency_ms FROM events "
+                    "WHERE event_type = 'turn.response_sent' AND latency_ms IS NOT NULL"
                 ).fetchall()
             ]
         if not values:

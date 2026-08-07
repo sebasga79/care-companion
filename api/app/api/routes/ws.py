@@ -29,6 +29,15 @@ Tipos:
 - `server.summary` (saliente): `CallSummary` (SUM-002) cuando el turno deja
   la sesión en `SUMMARIZING`/`FAIL_SAFE`.
 
+Cada turno completo (recepción de `client.turn_text` -> envío de
+`server.agent_response`) se instrumenta como evento `turn.response_sent`
+con `latency_ms` real (`_log_turn_latency`) — es la única fuente que
+`AuditRepository.latency_percentiles()` agrega para el P50/P95 exigido en
+el README (rúbrica §5). Antes de esto, `/metrics` promediaba latencia de
+CUALQUIER request HTTP (incluidos uploads de conocimiento, polling de
+`/audit`), no la del turno conversacional — corregido tras la auditoría del
+7 de agosto (`docs/auditoria-kit-oficial-2026-08-07.md` §9).
+
 Consistencia ante desconexión: cada escritura de dominio (turno,
 observación, decisión, escalamiento) ya vive en su propia transacción
 corta dentro de `CallCycleOrchestrator.handle_turn` (DB-002) — si el socket
@@ -42,6 +51,7 @@ socket ya está cerrado, deja de enviar y el loop termina en el próximo
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -55,6 +65,7 @@ from app.orchestrator.call_cycle import (
     SessionNotAcceptingTurnsError,
     SessionNotFoundError,
 )
+from app.repositories.events import EventRepository
 
 logger = logging.getLogger("care_companion.ws")
 
@@ -97,6 +108,37 @@ async def _send(
         return True
     except (WebSocketDisconnect, RuntimeError):
         return False
+
+
+def _log_turn_latency(
+    websocket: WebSocket,
+    *,
+    session_id: str,
+    correlation_id: str,
+    state: str,
+    intent: str,
+    latency_ms: float,
+) -> None:
+    """Telemetría no clínica: fail-open (architecture.md §13.1), igual que
+    `CallCycleOrchestrator._log_event` — un fallo de escritura nunca tumba
+    el turno de voz, pero tampoco se oculta, siempre queda en el log.
+    `event_type="turn.response_sent"` es el único que
+    `AuditRepository.latency_percentiles()` agrega para P50/P95 (RAG-002/
+    PERF-001) — así el HTTP administrativo (uploads, polling de /audit) no
+    contamina la métrica de latencia conversacional."""
+    try:
+        event_repo: EventRepository = websocket.app.state.event_repo
+        event_repo.add_event(
+            session_id=session_id, correlation_id=correlation_id, component="ws",
+            event_type="turn.response_sent",
+            payload={"state": state, "intent": intent},
+            latency_ms=latency_ms,
+        )
+    except Exception:
+        logger.exception(
+            "turn_latency_persist_failed session_id=%s correlation_id=%s",
+            session_id, correlation_id,
+        )
 
 
 @router.websocket("/ws/sessions/{session_id}")
@@ -143,6 +185,7 @@ async def session_turn_websocket(websocket: WebSocket, session_id: str) -> None:
                 return
             continue
 
+        turn_started_at = time.perf_counter()
         try:
             result = await orchestrator.handle_turn(session_id, turn_payload.text)
         except SessionNotFoundError:
@@ -178,6 +221,21 @@ async def session_turn_websocket(websocket: WebSocket, session_id: str) -> None:
             correlation_id=correlation_id,
         ):
             return
+        # Rúbrica §5: "latencia P50/P95 medida desde que el paciente termina
+        # de hablar hasta que empieza a sonar el audio del agente". Este es
+        # el mejor proxy medible en el backend: desde que se recibió
+        # `client.turn_text` (fin del turno de STT, ya ocurrido en el
+        # navegador) hasta que el envelope con el texto de respuesta salió
+        # por el socket — el cliente inicia TTS inmediatamente al recibirlo.
+        # No incluye el tiempo de red del envelope ni el arranque real del
+        # motor de TTS en el navegador (Web Speech API es sincrónico y
+        # rápido, pero no es 0ms) — límite conocido, documentado en vez de
+        # fingir precisión que el backend no puede medir por sí solo.
+        _log_turn_latency(
+            websocket, session_id=session_id, correlation_id=correlation_id,
+            state=result.state.value, intent=result.intent,
+            latency_ms=(time.perf_counter() - turn_started_at) * 1000,
+        )
 
         if not await _send(
             websocket, type_="server.decision", seq=seq.next(),

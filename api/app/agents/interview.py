@@ -21,7 +21,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.agents.support import AgentInvocationError, invoke_structured
+from app.agents.support import AgentInvocationError, extract_json_payload, invoke_structured
 from app.domain.models import AgentRequest, AgentResult, UsageMetrics
 from app.domain.observation import Certainty, Observation
 from app.ports.llm import LLMMessage, LLMPort
@@ -120,7 +120,7 @@ class InterviewLLMOutput(BaseModel):
 
 
 def _parse_interview_output(text: str) -> InterviewLLMOutput:
-    data = json.loads(text)
+    data = json.loads(extract_json_payload(text))
     return InterviewLLMOutput.model_validate(data)
 
 
@@ -154,7 +154,10 @@ class InterviewAgent:
             parsed, usage = await invoke_structured(
                 self._llm,
                 messages=messages,
-                response_schema=None,
+                # No-None: hace que OpenAICompatLLM pida response_format
+                # json_object a Groq/Ollama — el prompt ya menciona "JSON"
+                # explícitamente, requisito del proveedor para ese modo.
+                response_schema={"type": "object"},
                 deadline_ms=request.deadline_ms,
                 parse=_parse_interview_output,
             )
