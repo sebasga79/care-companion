@@ -330,3 +330,43 @@ async def test_learn_rejects_pdf_without_extractable_text(db_path: str) -> None:
     with pytest.raises(UploadRejected) as exc_info:
         await svc.learn(raw_filename="escaneado.pdf", content=buf.getvalue(), applicability={})
     assert exc_info.value.code == "pdf_no_text_layer"
+
+
+async def test_learn_canary_survives_shared_boilerplate_at_moderate_scale(
+    db_path: str,
+) -> None:
+    """Regresión (docs/auditoria-kit-oficial-2026-08-07.md §9.2): probando
+    contra los 107 PDFs reales del corpus oficial, ~46% de las cargas
+    fallaban con `KnowledgeCanaryError` — la consulta canaria toma las
+    primeras 8 palabras del primer chunk, que en un PDF real casi siempre es
+    boilerplate de journal ("Contents lists available at ScienceDirect...",
+    fechas de revisión) compartido por decenas de documentos. Con
+    `top_k=5` (el de antes), el chunk recién insertado quedaba fuera del
+    top-5 aunque SÍ estuviera indexado. Aquí se simula esa dinámica: 10
+    documentos "ruido" comparten el mismo primer-chunk boilerplate antes de
+    cargar el documento real bajo prueba — con `top_k=5` este test habría
+    fallado (falso negativo); con el fix (`_CANARY_SEARCH_TOP_K=50`) debe
+    pasar."""
+    _init_db(db_path)
+    svc, _cache, _settings = _service(db_path)
+
+    boilerplate = (
+        b"Contents lists available at ScienceDirect Journal of Surgery Review "
+        b"began published online available"
+    )
+    for i in range(10):
+        await svc.learn(
+            raw_filename=f"ruido_{i}.md",
+            content=boilerplate + f" Documento de ruido numero {i} sin relacion.".encode(),
+            applicability={},
+        )
+
+    # El documento real bajo prueba comparte el mismo boilerplate como
+    # primer chunk (lo que produce la consulta canaria) — antes del fix,
+    # esto revertía la carga completa.
+    result = await svc.learn(
+        raw_filename="documento_real.md",
+        content=boilerplate + b" Este es el contenido real y distintivo del documento.",
+        applicability={},
+    )
+    assert result.document["status"] == "ready"

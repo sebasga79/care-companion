@@ -10,6 +10,7 @@ import pytest
 
 from app.adapters.fake_embeddings import FakeEmbeddings
 from app.adapters.fake_llm import ScriptedFakeLLM
+from app.adapters.fixture_cases import FixtureCaseAdapter
 from app.core.config import Settings
 from app.domain.decision import DecisionLevel
 from app.domain.session_fsm import SessionState
@@ -19,9 +20,11 @@ from app.orchestrator.call_cycle import (
     SessionNotFoundError,
 )
 from app.repositories.db import apply_schema, get_connection
+from app.repositories.events import EventRepository
 from app.repositories.knowledge import get_current_knowledge_version
 from app.repositories.sessions import SessionRepository
 from app.services.embeddings_cache import EmbeddingsCache
+from app.services.ingestion import KnowledgeIngestionService
 
 _INTERVIEW_MARKER = "extraer observaciones estructuradas del último turno"
 _TRIAGE_MARKER = "evaluador de riesgo estructurado"
@@ -41,6 +44,7 @@ def _orchestrator(db_path: str, llm: ScriptedFakeLLM) -> CallCycleOrchestrator:
     embeddings = EmbeddingsCache(FakeEmbeddings(dimensions=settings.rag_embedding_dimensions))
     return CallCycleOrchestrator(
         database_path=db_path, llm=llm, embeddings=embeddings,
+        case_port=FixtureCaseAdapter(),
         evidence_score_threshold=settings.rag_evidence_score_threshold,
         candidate_pool_size=settings.rag_candidate_pool_size,
         retrieval_top_k=settings.rag_retrieval_top_k,
@@ -312,3 +316,61 @@ async def test_follow_up_loop_returns_to_interviewing_when_objectives_pending(
 
     assert result.state is SessionState.INTERVIEWING
     assert result.decision_level == DecisionLevel.ROUTINE_FOLLOW_UP
+
+
+async def test_retrieval_is_scoped_to_case_procedure_via_applicability(db_path: str) -> None:
+    """Regresión (docs/auditoria-kit-oficial-2026-08-07.md §9.2): antes,
+    `hybrid_search` nunca recibía `applicability_filter` — con el corpus
+    real del reto (5 procedimientos en la misma base de conocimiento), un
+    documento de OTRO procedimiento podía aparecer como evidencia de una
+    sesión que no lo cubre. `demo-case-001` (FixtureCaseAdapter) tiene
+    `procedure_category="cirugia_ambulatoria_general_x"`."""
+    _init_db(db_path)
+    settings = Settings(DATABASE_PATH=db_path)
+    embeddings = EmbeddingsCache(FakeEmbeddings(dimensions=settings.rag_embedding_dimensions))
+    ingestion = KnowledgeIngestionService(db_path, embeddings_cache=embeddings, settings=settings)
+
+    await ingestion.learn(
+        raw_filename="guia_relevante.md",
+        content=(
+            b"Si presenta fiebre alta o calor en la zona de la cirugia general, "
+            b"contacte al equipo medico de inmediato."
+        ),
+        applicability={"procedure": "cirugia_ambulatoria_general_x"},
+    )
+    await ingestion.learn(
+        raw_filename="guia_no_relacionada.md",
+        content=(
+            b"Si presenta fiebre alta o calor en la zona de la cirugia general, "
+            b"avise al personal a cargo cuanto antes."
+        ),
+        applicability={"procedure": "otro_procedimiento_no_relacionado"},
+    )
+
+    session_id = _new_session(db_path)
+    llm = ScriptedFakeLLM(default="placeholder")
+    orchestrator = CallCycleOrchestrator(
+        database_path=db_path, llm=llm, embeddings=embeddings,
+        case_port=FixtureCaseAdapter(),
+        evidence_score_threshold=settings.rag_evidence_score_threshold,
+        candidate_pool_size=settings.rag_candidate_pool_size,
+        retrieval_top_k=settings.rag_retrieval_top_k,
+    )
+    _script(
+        llm,
+        interview_json=_interview_json(observations=_ALL_OBJECTIVES_HARMLESS),
+        triage_json=_triage_json(model_level="ROUTINE_FOLLOW_UP"),
+        response_text="Respuesta anclada en la guía.",
+    )
+
+    result = await orchestrator.handle_turn(session_id, "tiene fiebre alta y calor en la herida")
+
+    titles = {c.title for c in result.citations}
+    assert "guia_relevante.md" in titles
+    assert "guia_no_relacionada.md" not in titles
+
+    events = EventRepository(db_path).list_for_session(session_id)
+    retrieval_events = [e for e in events if e["event_type"] == "rag.retrieval.completed"]
+    assert len(retrieval_events) == 1
+    payload = json.loads(retrieval_events[0]["payload"])
+    assert payload["applicability_filter"] == {"procedure": "cirugia_ambulatoria_general_x"}

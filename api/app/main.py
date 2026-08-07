@@ -12,6 +12,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.adapters.dataset_case_source import DatasetCaseAdapter, DatasetFilesMissingError
 from app.adapters.fake_embeddings import FakeEmbeddings
 from app.adapters.fake_llm import FakeLLM
 from app.adapters.fallback_llm import FallbackLLM
@@ -23,6 +24,7 @@ from app.core.config import EmbeddingsProvider, LLMProvider, Settings, get_setti
 from app.core.logging import configure_logging
 from app.core.middleware import CorrelationIdMiddleware
 from app.orchestrator.call_cycle import CallCycleOrchestrator
+from app.ports.challenge_case import ChallengeCasePort
 from app.ports.embeddings import EmbeddingsPort
 from app.ports.llm import LLMPort
 from app.repositories.audit import AuditRepository
@@ -60,7 +62,7 @@ def create_app() -> FastAPI:
     )
 
     app.state.settings = settings
-    app.state.case_port = FixtureCaseAdapter()
+    app.state.case_port = _build_case_port(settings)
     app.state.session_repo = SessionRepository(settings.database_path)
     app.state.turn_repo = TurnRepository(settings.database_path)
     app.state.event_repo = EventRepository(settings.database_path)
@@ -90,6 +92,7 @@ def create_app() -> FastAPI:
         database_path=settings.database_path,
         llm=app.state.llm,
         embeddings=app.state.embeddings_cache,
+        case_port=app.state.case_port,
         evidence_score_threshold=settings.rag_evidence_score_threshold,
         candidate_pool_size=settings.rag_candidate_pool_size,
         retrieval_top_k=settings.rag_retrieval_top_k,
@@ -118,12 +121,30 @@ def create_app() -> FastAPI:
     app.include_router(ws.router)
 
     logger.info(
-        "care_companion_app_ready env=%s db=%s llm_provider=%s",
+        "care_companion_app_ready env=%s db=%s llm_provider=%s case_port=%s",
         settings.app_env,
         settings.database_path,
         settings.llm_provider.value,
+        type(app.state.case_port).__name__,
     )
     return app
+
+
+def _build_case_port(settings: Settings) -> ChallengeCasePort:
+    """Dataset real si está descargado (`scripts/fetch_dataset.py`),
+    fixtures ficticios si no. A diferencia de LLM/embeddings, esto NUNCA
+    impide el arranque: un caso claramente ficticio (`demo-case-001`,
+    "Camila (paciente ficticia)") no engaña a nadie sobre qué está viendo,
+    así que fallar rápido aquí solo rompería el gate de instalación de 15
+    minutos (G2) para quien todavía no descargó el dataset — se loguea un
+    warning explícito en vez de fingir silencio (spec.md §11.2)."""
+    try:
+        return DatasetCaseAdapter(settings.dataset_dir)
+    except DatasetFilesMissingError as exc:
+        logger.warning(
+            "dataset_case_adapter_unavailable_using_fixtures reason=%s", exc
+        )
+        return FixtureCaseAdapter()
 
 
 def _build_llm_adapter(settings: Settings) -> LLMPort:

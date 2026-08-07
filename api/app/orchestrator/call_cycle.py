@@ -49,6 +49,7 @@ from app.domain.models import AgentRequest, CitationRef, UsageMetrics
 from app.domain.observation import Observation
 from app.domain.session_fsm import CallOrchestrator, SessionState
 from app.domain.summary import CallSummary, build_call_summary
+from app.ports.challenge_case import ChallengeCasePort
 from app.ports.embeddings import EmbeddingsPort
 from app.ports.llm import LLMPort
 from app.repositories.citations import CitationRepository
@@ -180,12 +181,14 @@ class CallCycleOrchestrator:
         database_path: str,
         llm: LLMPort,
         embeddings: EmbeddingsPort,
+        case_port: ChallengeCasePort,
         evidence_score_threshold: float,
         candidate_pool_size: int = 200,
         retrieval_top_k: int = 5,
     ) -> None:
         self._database_path = database_path
         self._embeddings = embeddings
+        self._case_port = case_port
         self._evidence_score_threshold = evidence_score_threshold
         self._candidate_pool_size = candidate_pool_size
         self._retrieval_top_k = retrieval_top_k
@@ -230,6 +233,7 @@ class CallCycleOrchestrator:
         try:
             result = await self._run_cycle(
                 session_id=session_id,
+                case_id=session["case_id"],
                 fsm=fsm,
                 patient_text=patient_text,
                 knowledge_version=knowledge_version,
@@ -253,6 +257,7 @@ class CallCycleOrchestrator:
         self,
         *,
         session_id: str,
+        case_id: str,
         fsm: CallOrchestrator,
         patient_text: str,
         knowledge_version: int,
@@ -330,6 +335,24 @@ class CallCycleOrchestrator:
 
         fsm.transition(SessionState.RETRIEVING, event="observations_extracted")
 
+        # Acota el retrieval al procedimiento del caso (RAG-005 ampliado,
+        # docs/auditoria-kit-oficial-2026-08-07.md §9.2): el corpus real del
+        # reto cubre 5 procedimientos distintos en la misma base de
+        # conocimiento (apendicectomía, colecistectomía, mastectomía,
+        # colectomía, artroplastia) — sin este filtro, una sesión sobre una
+        # apendicectomía podría recibir evidencia de un reemplazo de cadera
+        # si el ranking léxico/semántico las confunde. Un documento que no
+        # declara `applicability.procedure` sigue aplicando a cualquier
+        # caso (contenido general); solo se excluyen los que declaran
+        # explícitamente OTRO procedimiento (app/services/retrieval.py
+        # `_applicability_matches`).
+        case = await self._case_port.get_case(case_id)
+        applicability_filter = (
+            {"procedure": case.procedure_category}
+            if case is not None and case.procedure_category
+            else None
+        )
+
         retrieval_query = interview_result.output.get("next_question") or patient_text
         conn = get_connection(self._database_path)
         try:
@@ -337,6 +360,7 @@ class CallCycleOrchestrator:
                 conn, retrieval_query, embeddings=self._embeddings,
                 session_knowledge_version=knowledge_version,
                 top_k=self._retrieval_top_k, candidate_pool_size=self._candidate_pool_size,
+                applicability_filter=applicability_filter,
             )
         finally:
             conn.close()
@@ -351,6 +375,7 @@ class CallCycleOrchestrator:
                 "top_k": self._retrieval_top_k,
                 "result_count": len(retrieval_results),
                 "knowledge_version": knowledge_version,
+                "applicability_filter": applicability_filter,
             },
         )
 
@@ -466,8 +491,21 @@ class CallCycleOrchestrator:
                 payload=ResponseTurnInput(
                     evidence_sufficient=evidence_sufficient,
                     should_escalate=decision.should_escalate,
+                    # Bug real encontrado y corregido (docs/auditoria-kit-
+                    # oficial-2026-08-07.md §9.2): antes solo se pasaba
+                    # {title, text}, que NO alcanza para reconstruir un
+                    # `CitationRef` válido (faltan citation_id/document_id/
+                    # document_version/chunk_id/knowledge_version) —
+                    # `ResponseAgent._parse` descartaba silenciosamente
+                    # CADA fragmento (`except Exception: continue`), así que
+                    # `result.citations` quedaba SIEMPRE vacío aunque
+                    # `intent == "grounded_answer"`. Ahora se pasa el
+                    # `CitationRef` completo (`model_dump`) más el campo
+                    # extra `text` que necesita el prompt — Pydantic ignora
+                    # el campo desconocido al revalidar, así que el
+                    # round-trip ya no pierde nada.
                     evidence_fragments=[
-                        {"title": c.title, "text": text_by_chunk.get(c.chunk_id, "")}
+                        {**c.model_dump(mode="json"), "text": text_by_chunk.get(c.chunk_id, "")}
                         for c in evidence_decision.citations
                     ],
                     observations_summary=[_obs_summary(o) for o in new_observations],

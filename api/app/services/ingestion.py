@@ -38,6 +38,8 @@ from app.services.upload_validation import UploadRejected, ValidatedUpload, vali
 
 _MIME_BY_EXTENSION = {"txt": "text/plain", "md": "text/markdown", "pdf": "application/pdf"}
 _CANARY_WORD_COUNT = 8
+_CANARY_SEARCH_TOP_K = 50
+_CANARY_SEARCH_CANDIDATE_POOL_SIZE = 500
 
 
 class KnowledgeCanaryError(Exception):
@@ -285,12 +287,26 @@ class KnowledgeIngestionService:
     async def _canary_found(
         self, conn: sqlite3.Connection, *, query: str, session_knowledge_version: int
     ) -> list[RetrievalResult]:
+        # top_k/candidate_pool_size deliberadamente MÁS ALTOS que los de
+        # retrieval normal (Settings.rag_retrieval_top_k, típicamente 5):
+        # el propósito de la canaria no es "¿rankea entre los mejores
+        # resultados clínicos?" sino "¿el chunk recién escrito es
+        # localizable en absoluto?". Con top_k=5 fallaba en la práctica
+        # contra un corpus real de tamaño moderado (probado con los 107 PDFs
+        # del reto, docs/auditoria-kit-oficial-2026-08-07.md §9.2): un
+        # snippet de las primeras palabras de un chunk suele ser boilerplate
+        # de journal ("Contents lists available at ScienceDirect...",
+        # fechas de revisión) que decenas de otros documentos comparten:
+        # con miles de chunks ya indexados, el fragmento recién insertado
+        # quedaba fuera del top-5 aunque SÍ estuviera indexado — falso
+        # negativo que revertía una carga válida.
         return await hybrid_search(
             conn,
             query,
             embeddings=self._embeddings_cache,
             session_knowledge_version=session_knowledge_version,
-            top_k=5,
+            top_k=_CANARY_SEARCH_TOP_K,
+            candidate_pool_size=_CANARY_SEARCH_CANDIDATE_POOL_SIZE,
         )
 
 

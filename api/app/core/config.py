@@ -101,6 +101,13 @@ class Settings(BaseSettings):
 
     database_path: str = Field(default="./data/care_companion.db", alias="DATABASE_PATH")
 
+    # Dataset real del reto (docs/auditoria-kit-oficial-2026-08-07.md §4.2):
+    # `.xlsx` descargados por `scripts/fetch_dataset.py`, nunca commiteados
+    # (`.gitignore`). Si faltan archivos, `main.py` cae a `FixtureCaseAdapter`
+    # con un warning — nunca falla el arranque por esto (a diferencia de
+    # LLM/embeddings: un caso ficticio es honesto, un modelo fingido no).
+    dataset_dir: str = Field(default="./data/dataset", alias="DATASET_DIR")
+
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
 
@@ -157,7 +164,11 @@ class Settings(BaseSettings):
     # pequeño/mediano de reto (architecture.md §9.1); todos overrideables
     # por entorno para tests y ajuste sin tocar código.
     rag_allowed_extensions: str = Field(default="txt,md,pdf", alias="RAG_ALLOWED_EXTENSIONS")
-    rag_max_upload_bytes: int = Field(default=2_000_000, alias="RAG_MAX_UPLOAD_BYTES")
+    # 15 MB: el PDF más grande del corpus real del reto (dataset/textos/)
+    # pesa ~9.6 MB — 2 MB (default original, pensado para txt/md) rechazaba
+    # varios PDFs académicos reales legítimos. Ver
+    # docs/auditoria-kit-oficial-2026-08-07.md §9.2.
+    rag_max_upload_bytes: int = Field(default=15_000_000, alias="RAG_MAX_UPLOAD_BYTES")
     rag_chunk_size_chars: int = Field(default=800, alias="RAG_CHUNK_SIZE_CHARS")
     rag_chunk_overlap_chars: int = Field(default=150, alias="RAG_CHUNK_OVERLAP_CHARS")
     rag_embedding_dimensions: int = Field(default=128, alias="RAG_EMBEDDING_DIMENSIONS")

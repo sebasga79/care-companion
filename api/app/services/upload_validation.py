@@ -11,10 +11,31 @@ unas pocas líneas de stdlib, no ameritan `python-magic` ni similares."""
 from __future__ import annotations
 
 import hashlib
-import re
 from dataclasses import dataclass
 
-_SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# Deny-list, no allow-list (corregido tras probar contra el corpus real del
+# reto, docs/auditoria-kit-oficial-2026-08-07.md §9.2): el allowlist ASCII
+# original (`^[A-Za-z0-9][A-Za-z0-9._-]*$`) rechazaba ~70% de los 107 PDFs
+# reales — títulos académicos reales llevan espacios, tildes, paréntesis,
+# comas ("Adult appendicitis: Clinical practice guidelines...",
+# "PLAN DE CUIDADO EN CASA..."). El filename nunca se usa para escribir un
+# archivo real a disco ni se pasa a un shell (se guarda como texto en
+# SQLite vía parámetro — `app/repositories/documents.py`); el riesgo real
+# es más acotado que "cualquier carácter raro", así que se bloquean
+# explícitamente los que sí importan: separadores de ruta (ya inalcanzables
+# tras el basename de abajo, pero se listan por defensa en profundidad),
+# caracteres de control/null, y los metacaracteres de shell clásicos —
+# nunca vistos en los 107 nombres reales, así que no cuesta nada seguir
+# bloqueándolos.
+_DANGEROUS_CHARS = frozenset("/\\`$|<>;~") | {chr(i) for i in range(0x20)} | {chr(0x7F)}
+
+# Puntuación vista en los 107 nombres de archivo reales del corpus oficial,
+# más un margen razonable para lo que alguien suba manualmente desde la
+# consola (comillas, corchetes, símbolos usuales en títulos). Los
+# alfanuméricos Unicode (incluye tildes/ñ) se validan aparte con
+# `str.isalnum()`, no están en este set.
+_ALLOWED_EXTRA_PUNCTUATION = frozenset(" ._-(),+'’‘\"[]&%!?:‐‑≥≤")
+_MAX_FILENAME_LENGTH = 255
 
 # Firma de bytes iniciales -> familia real de archivo, para detectar un MIME
 # "falso" (extensión .txt/.md sobre contenido que en realidad es otra cosa).
@@ -50,7 +71,9 @@ class ValidatedUpload:
 def sanitize_filename(raw_filename: str) -> str:
     """Quita cualquier componente de directorio (defensa contra path
     traversal: `../../etc/passwd`, `..\\..\\win.ini`, rutas absolutas) y
-    exige una allowlist estricta de caracteres en lo que queda."""
+    rechaza caracteres peligrosos en lo que queda — ver `_DANGEROUS_CHARS`/
+    `_ALLOWED_EXTRA_PUNCTUATION` arriba para el porqué de un deny-list en
+    vez de un allowlist ASCII."""
     # basename manual: corta en el último separador de cualquiera de los
     # dos estilos de ruta, sin depender de `os.path` (cuyo comportamiento
     # de separador varía por plataforma — aquí queremos la misma regla
@@ -60,7 +83,17 @@ def sanitize_filename(raw_filename: str) -> str:
         raise UploadRejected(
             "Nombre de archivo vacío o inválido tras sanear la ruta", code="invalid_filename"
         )
-    if not _SAFE_FILENAME_RE.match(candidate):
+    if len(candidate) > _MAX_FILENAME_LENGTH:
+        raise UploadRejected(
+            f"Nombre de archivo demasiado largo ({len(candidate)} > {_MAX_FILENAME_LENGTH})",
+            code="invalid_filename",
+        )
+    if any(char in _DANGEROUS_CHARS for char in candidate):
+        raise UploadRejected(
+            f"Nombre de archivo contiene caracteres no permitidos: {candidate!r}",
+            code="invalid_filename",
+        )
+    if not all(char.isalnum() or char in _ALLOWED_EXTRA_PUNCTUATION for char in candidate):
         raise UploadRejected(
             f"Nombre de archivo contiene caracteres no permitidos: {candidate!r}",
             code="invalid_filename",

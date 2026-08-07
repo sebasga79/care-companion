@@ -51,6 +51,7 @@ def _client_with_scripted_llm(clean_env: None) -> tuple[TestClient, ScriptedFake
         database_path=app.state.settings.database_path,
         llm=llm,
         embeddings=app.state.embeddings_cache,
+        case_port=app.state.case_port,
         evidence_score_threshold=app.state.settings.rag_evidence_score_threshold,
         candidate_pool_size=app.state.settings.rag_candidate_pool_size,
         retrieval_top_k=app.state.settings.rag_retrieval_top_k,

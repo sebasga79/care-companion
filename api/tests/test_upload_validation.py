@@ -24,6 +24,27 @@ def test_valid_txt_upload_passes() -> None:
 
 
 @pytest.mark.parametrize(
+    "real_filename",
+    [
+        # Nombres reales del corpus oficial del reto (dataset/textos/) —
+        # regresión directa: el allowlist ASCII original (`^[A-Za-z0-9]
+        # [A-Za-z0-9._-]*$`) rechazaba estos, ~70% del corpus real, antes de
+        # la corrección (docs/auditoria-kit-oficial-2026-08-07.md §9.2).
+        "Adult appendicitis- Clinical practice guidelines from the French Society.txt",
+        "PLAN DE CUIDADO EN CASA DE PACIENTE EN POSTOPERATORIO DE APENDICECTOMÍA.txt",
+        "Epidemiología de la apendicitis aguda en Colombia.txt",
+        "Acute Care Surgery Comprehensive Recovery Guide (Appendectomy).txt",
+        "diagnóstico, tratamiento y seguimiento del paciente.txt",
+        "Postoperative Infections After Appendectomy_ The Surgeon’s Checklist.txt",
+        "Niveles de dolor, rigidez y funcionalidad (2023).txt",
+        "Total Hip Arthroplasty in Patients with BMI ≥ 30 kg_m2.txt",
+    ],
+)
+def test_sanitize_filename_accepts_real_academic_titles(real_filename: str) -> None:
+    assert sanitize_filename(real_filename) == real_filename
+
+
+@pytest.mark.parametrize(
     "raw_filename",
     [
         "../../etc/passwd.txt",
@@ -208,3 +229,9 @@ def test_upload_rejects_missing_extension() -> None:
             existing_active_checksums=frozenset(),
         )
     assert exc_info.value.code == "missing_extension"
+
+
+def test_sanitize_filename_rejects_excessively_long_name() -> None:
+    with pytest.raises(UploadRejected) as exc_info:
+        sanitize_filename("a" * 300 + ".txt")
+    assert exc_info.value.code == "invalid_filename"

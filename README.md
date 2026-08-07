@@ -85,6 +85,30 @@ regionalismos). Para embeddings semánticos de verdad:
 Nunca commitees `api/.env` (ya está en `.gitignore`); la key real solo vive
 ahí, en tu máquina.
 
+### Dataset y corpus clínico real del reto
+
+El repo no incluye el dataset oficial (`.xlsx` + 107 PDFs, ~127 MB) — se
+descarga aparte:
+
+```bash
+cd api
+uv run python scripts/fetch_dataset.py   # 4 .xlsx + 107 PDFs a ./data/dataset
+uv run python scripts/load_corpus.py     # los carga al RAG (misma consola /knowledge)
+```
+
+Con esto: el selector de casos de `/call` pasa de 3 pacientes ficticios a
+los 160 casos reales del dataset (`DatasetCaseAdapter`, con fallback
+automático a los 3 ficticios si no descargaste el dataset), y el RAG queda
+poblado con ~103 de los 107 PDFs reales (los 4 restantes son 3 PDFs
+protegidos con contraseña y 1 escaneado sin capa de texto — casos
+esperados, documentados en el propio kit oficial). Cada documento queda
+etiquetado por procedimiento (`applicability.procedure`), así que el
+retrieval de una llamada solo usa evidencia del procedimiento del caso en
+curso, no de los otros cuatro.
+
+`fetch_dataset.py --no-textos` descarga solo los `.xlsx` (rápido) si no
+necesitas el corpus PDF todavía.
+
 ## Arranque rápido (un solo script)
 
 ```bash

@@ -401,7 +401,7 @@ Ejecutado en la misma sesión, después de escribir §0–§8. `make verify` = 2
 | §4.4 / §3 | Ningún LLM real conectado (alto) | **Resuelto.** `OpenAICompatLLM` ([api/app/adapters/openai_compat_llm.py](../api/app/adapters/openai_compat_llm.py)) + `FallbackLLM` ([api/app/adapters/fallback_llm.py](../api/app/adapters/fallback_llm.py)) tras `LLMPort`. `LLMProvider` allowlist pasó de `fake\|openai_compat` a `fake\|groq\|ollama` (`app/core/config.py`), con defaults de `base_url`/`model` por proveedor y validación de credenciales al arranque (Groq exige `LLM_API_KEY` real; Ollama no). `_build_llm_adapter` en `main.py` arma primario + resguardo opcional vía `LLM_FALLBACK_PROVIDER`. 14 tests con `httpx.MockTransport` (éxito, HTTP 4xx/5xx, red caída, forma inesperada, `response_schema`→`json_object`, fallback activándose/no activándose, ambos fallando). **No probado contra la API real de Groq/Ollama todavía** — el mock cubre el contrato HTTP, no la disponibilidad/latencia/calidad real del proveedor en vivo; sigue pendiente antes de la sesión de evaluación. |
 | §4.1 | Corpus real es PDF, sistema lo rechaza (bloqueante) | **Resuelto.** `pypdf` (BSD, ver §3 de dependencies.md) agregado; `app/services/pdf_extraction.py` extrae texto por página y rechaza explícito PDF cifrado/corrupto/sin texto (`pdf_encrypted`/`pdf_unreadable`/`pdf_no_text_layer`). `chunk_document` ahora acepta `page`/`chunk_index_start`; cada chunk de PDF lleva el número de página real. `rag_allowed_extensions` default pasó a `txt,md,pdf`. `detect_declared_mime_mismatch` valida la firma `%PDF-` simétrico al chequeo existente de txt/md. 12 tests nuevos (extracción aislada + e2e vía `/api/v1/knowledge/documents`). **No probado contra los 107 PDFs reales del kit** — falta descargar `dataset/textos/` y cargarlo por la consola para validar a la escala/variedad real (nombres con espacios, duplicados, el PDF de `Appendicitis/` sin capa de texto). |
 | §4.6 | Tokens/costo hardcodeados "pendiente" (medio) | **Resuelto en el lado de tokens; costo sigue condicionalmente pendiente.** `AuditRepository.usage_summary()` agrega tokens/invocaciones LLM/consultas RAG desde `events` reales (nuevo evento `rag.retrieval.completed` logueado una vez por turno en `call_cycle.py`). `/metrics` ya no fabrica nada: tokens se reportan "medido" en cuanto hay sesiones reales; costo queda "pendiente" hasta fijar `LLM_COST_PER_MILLION_INPUT_TOKENS`/`_OUTPUT_TOKENS` (deliberado — no se inventó un precio de Groq sin verificarlo contra su página de pricing vigente al momento de la entrega). |
-| §4.2 | Dataset real no integrado, `ChallengeCasePort` con 3 casos inventados (bloqueante) | **Sigue abierto.** Es el ítem más grande que queda del plan de §7 (punto 4) — parsear los 4 `.xlsx`, resolver el join `caso_id = "caso_" + trayectoria_id`, y ampliar `ChallengeCase` con los campos clínicos reales. No se tocó en esta sesión. |
+| §4.2 | Dataset real no integrado, `ChallengeCasePort` con 3 casos inventados (bloqueante) | **Resuelto (§9.3).** `DatasetCaseAdapter` parsea los 4 `.xlsx` reales, 160 casos verificados contra el dataset descargado de verdad. |
 | §4.5 | Voz depende de Web Speech API del navegador (medio) | **Sigue abierto**, sin cambios. Groq Whisper como STT real queda disponible (mismo proveedor ya conectado) pero no se implementó. |
 | §5/§6 gates y criterios | — | G3 pasa de 🔴 a 🟡: el adapter existe y tiene tests, pero **no se ha ejercitado ni una sola vez contra Groq/Ollama reales** ni contra el flujo de voz completo (G4) — de "declarado y verificado contra dependencias/config/código" solo falta la verificación en vivo. G1 sigue 🔴: repo ya público, pero informe (declarar el modelo, texto exigido por G3) y video siguen sin existir. |
 
@@ -442,3 +442,87 @@ correctamente antes de seguir con el dataset. Auditoría dirigida a esa ruta cr�
 `make verify` = 274 tests. **Sigue sin probarse contra la API real de Groq/Ollama** — las
 dos correcciones de arriba se verificaron con `httpx.MockTransport`/`ScriptedFakeLLM`, no
 con tráfico real; el propietario va a correr esa prueba con su propia API key.
+
+## 9.3 Tercera pasada (misma noche) — dataset real, RAG y hallazgos con datos reales
+
+El propietario pidió releer con cuidado los requisitos de RAG del kit e implementar el
+dataset real y la carga del corpus. Esta pasada descargó y probó contra los datos
+**reales** del reto (no fixtures, no simulacros) — lo que expuso bugs que ningún test con
+datos sintéticos pequeños había atrapado nunca.
+
+**Esquema real confirmado con `openpyxl`** (no asumido — inspeccionado archivo por
+archivo): `dataset_final.xlsx` (3.991 filas, columnas `dialogo_id/caso_id/paciente_id/
+dia_postop/turno_idx/hablante/texto/label_ground_truth/estilo_paciente/.../capa`),
+`trayectorias_postop_silver.xlsx` (160 filas, `dolor_nrs/fiebre_c/movilidad/herida/
+apetito/sueno`), `perfiles_clinicos_pacientes_silver_contest.xlsx` (`modulo_synthea` mapea
+1:1 a las 5 carpetas de `dataset/textos/`), `perfiles_pacientes_co.xlsx`. Confirmado: 160
+casos, 123/25/12 verde/amarillo/rojo, 107 PDFs exactos en 5 carpetas (24+19+17+25+22) —
+coincide con lo documentado en el README oficial.
+
+**Decisión de embeddings** (pedida explícitamente antes de implementar): se consideró
+Gemini embeddings y se descartó — no es open-weight (solo API cerrada de Google, aunque
+tenga free tier) y hubiera sumado una segunda dependencia de nube en la sesión de
+evaluación en vivo. Se eligió Ollama + BGE-M3 (el modelo que el propio kit sugiere),
+reusando la infraestructura de Ollama ya decidida como resguardo del LLM.
+
+### Qué se implementó
+
+| Pieza | Archivo | Qué hace |
+|---|---|---|
+| Embeddings reales | [api/app/adapters/openai_compat_embeddings.py](../api/app/adapters/openai_compat_embeddings.py) | `EmbeddingsProvider` allowlist `fake\|ollama`, mismo patrón HTTP que el LLM. 10 tests con `httpx.MockTransport`. |
+| Dataset real | [api/app/adapters/dataset_case_source.py](../api/app/adapters/dataset_case_source.py) | `DatasetCaseAdapter` parsea los 3 `.xlsx` de perfil/trayectoria (no `dataset_final.xlsx`, que es para un futuro arnés de evaluación), construye `caso_id = "caso_" + trayectoria_id`. `ChallengeCase` ampliado con edad/género/comorbilidades/ciudad/departamento/`ReferenceTrajectory` (cuadro clínico real — **nunca se pasa al prompt de `InterviewAgent`**, es contexto para quien actúa de paciente en la demo). `main.py` cae a `FixtureCaseAdapter` si el dataset no está descargado (nunca falla el arranque por esto). 13 tests con `.xlsx` construidos en el propio test + verificado contra los 160 casos reales. |
+| Descarga del dataset | [api/scripts/fetch_dataset.py](../api/scripts/fetch_dataset.py) | Descarga los 4 `.xlsx` + 107 PDFs del repo oficial a `DATASET_DIR` (gitignored). Corrido de verdad: 127 MB, 107/107 archivos. |
+| Carga del corpus al RAG | [api/scripts/load_corpus.py](../api/scripts/load_corpus.py) | Ingesta en lote vía el mismo `KnowledgeIngestionService` de la consola, etiquetando `applicability.procedure` por carpeta. |
+| Retrieval acotado por procedimiento | [api/app/orchestrator/call_cycle.py](../api/app/orchestrator/call_cycle.py) | `CallCycleOrchestrator` ahora recibe `case_port` y pasa `applicability_filter={"procedure": ...}` a `hybrid_search` — **antes no pasaba ningún filtro**, así que con 5 procedimientos en la misma base, una sesión de apendicectomía podía recibir evidencia de un reemplazo de cadera. 1 test que ingesta 2 documentos con procedimientos distintos y confirma que solo el correcto aparece citado. |
+
+### Bugs reales encontrados corriendo contra el corpus real (no hipotéticos)
+
+Cada uno se descubrió porque el corpus real es grande y variado — ninguno era visible con
+los fixtures pequeños de texto limpio que usan los tests hasta ahora. Los cuatro están
+corregidos y cada uno tiene un test de regresión que falla sin el fix (verificado
+revirtiendo el fix y confirmando que el test nuevo rompe):
+
+1. **Citas nunca llegaban al resultado, aunque hubiera evidencia suficiente.**
+   `evidence_fragments` se armaba como `{"title":..., "text":...}` — le faltan los campos
+   que `CitationRef.model_validate()` exige (`citation_id`/`document_id`/`chunk_id`/etc.),
+   así que `ResponseAgent` descartaba CADA fragmento en silencio (`except Exception:
+   continue`) y `result.citations` quedaba vacío siempre, sin importar el intent. Directamente
+   contradice el criterio de 20 pts "si cada respuesta clínica puede rastrearse hasta el
+   documento que la sustenta" — nunca se podía. Corregido: se pasa `citation.model_dump()`
+   completo más el campo extra `text`; Pydantic ignora el campo desconocido.
+2. **El validador de nombre de archivo rechazaba ~70% de los PDFs reales.** El allowlist
+   ASCII original (`^[A-Za-z0-9][A-Za-z0-9._-]*$`) no permitía espacios — y casi ningún
+   título académico real carece de espacios. Tampoco tildes, paréntesis, comas. Corregido:
+   deny-list (bloquea separadores de ruta, caracteres de control, metacaracteres de shell
+   clásicos — ninguno aparece en los 107 nombres reales) en vez de allow-list ASCII.
+3. **Límite de tamaño (2 MB) rechazaba PDFs académicos reales legítimos** de hasta 10 MB.
+   Subido a 15 MB.
+4. **La consulta canaria fallaba ~46% de las veces a partir de un corpus de tamaño
+   moderado.** Toma las primeras 8 palabras del primer chunk como consulta de verificación
+   — en un PDF real eso casi siempre es boilerplate de journal ("Contents lists available
+   at ScienceDirect...", fechas de revisión) que decenas de documentos comparten. Con
+   `top_k=5` (el de retrieval clínico normal), el chunk recién insertado quedaba fuera del
+   top-5 aunque SÍ estuviera indexado — la carga se revertía por un falso negativo, no por
+   un problema real. Corregido: la canaria usa `top_k=50`/`candidate_pool_size=500`,
+   deliberadamente más generoso que el retrieval real (el propósito es "¿es localizable en
+   absoluto?", no "¿rankea entre los mejores resultados?").
+
+**Resultado verificado end-to-end** (no solo tests unitarios): `fetch_dataset.py` + `load_corpus.py`
+corridos de verdad contra el repo oficial → **103 de 107 PDFs cargados** al RAG con
+embeddings, chunking por página y `applicability` por procedimiento. Los 4 restantes son
+rechazos legítimos ya conocidos por el propio kit: 3 PDFs protegidos con contraseña + el
+PDF escaneado sin capa de texto de `Appendicitis/` que el README oficial ya advertía.
+`DatasetCaseAdapter` sirve los 160 casos reales verificados contra el dataset descargado
+(no simulado).
+
+`make verify` = 310 tests, ruff limpio.
+
+### Lo que sigue abierto
+
+- **G3 sigue sin probarse contra Groq/Ollama reales** (heredado de §9.1/§9.2).
+- **Voz sigue en Web Speech API del navegador** (§4.5, sin cambios).
+- Cronometrar G2 con el dataset+corpus reales ya cargados (el arranque limpio nunca se
+  midió con este volumen: 127 MB de descarga + ~9.000 chunks de embeddings).
+- El informe final y el video (§4.7/plan original) no se tocaron.
+- `docs/plan.md`/`docs/spec.md` siguen con referencias a "Delta Share" — actualizar antes
+  de que alguien las relea sin este documento a mano.
