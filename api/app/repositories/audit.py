@@ -8,10 +8,17 @@ llamador debe reportarlo como "pendiente", nunca inventarlo.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
 from app.repositories.db import session_scope
+
+_LLM_CALL_EVENT_TYPES = (
+    "agent.interview.completed",
+    "agent.triage.completed",
+    "agent.response.completed",
+)
 
 
 def _duration_seconds(created_at: str, closed_at: str | None) -> float | None:
@@ -136,3 +143,56 @@ class AuditRepository:
             return values[k]
 
         return {"p50": pct(0.50), "p95": pct(0.95), "sample_size": len(values)}
+
+    def usage_summary(self) -> dict[str, Any]:
+        """Agrega tokens/invocaciones LLM/consultas RAG desde `events`
+        (rúbrica §5: "tokens de entrada y salida por turno y por llamada,
+        invocaciones al modelo por turno, consultas al RAG por llamada").
+
+        Cada `agent.*.completed` ya trae `usage.model_dump()` como payload
+        (`app/orchestrator/call_cycle.py`); cada `rag.retrieval.completed`
+        se loguea una vez por turno. Ninguna cifra se inventa: si no hay
+        eventos instrumentados todavía (p. ej. `LLM_PROVIDER=fake` recién
+        arrancado sin sesiones), se devuelve `sample_size=0` y el caller
+        reporta "pendiente" — mismo patrón que `latency_percentiles`."""
+        placeholders = ",".join("?" for _ in _LLM_CALL_EVENT_TYPES)
+        with session_scope(self._database_path) as conn:
+            llm_rows = conn.execute(
+                f"SELECT payload FROM events WHERE event_type IN ({placeholders})",  # noqa: S608
+                _LLM_CALL_EVENT_TYPES,
+            ).fetchall()
+            rag_call_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM events WHERE event_type = 'rag.retrieval.completed'"
+            ).fetchone()["n"]
+            turn_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM turns WHERE speaker = 'patient'"
+            ).fetchone()["n"]
+            session_count = conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"]
+
+        if not llm_rows:
+            return {
+                "sample_size": 0,
+                "input_tokens_total": 0,
+                "output_tokens_total": 0,
+                "llm_calls_total": 0,
+                "rag_queries_total": 0,
+                "turn_count": turn_count,
+                "session_count": session_count,
+            }
+
+        input_tokens_total = 0
+        output_tokens_total = 0
+        for row in llm_rows:
+            payload = json.loads(row["payload"]) if row["payload"] else {}
+            input_tokens_total += int(payload.get("input_tokens", 0))
+            output_tokens_total += int(payload.get("output_tokens", 0))
+
+        return {
+            "sample_size": len(llm_rows),
+            "input_tokens_total": input_tokens_total,
+            "output_tokens_total": output_tokens_total,
+            "llm_calls_total": len(llm_rows),
+            "rag_queries_total": rag_call_count,
+            "turn_count": turn_count,
+            "session_count": session_count,
+        }

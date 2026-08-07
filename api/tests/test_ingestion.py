@@ -243,3 +243,90 @@ async def test_document_repository_reflects_full_lifecycle(db_path: str) -> None
     assert after["status"] == "deleted"
     assert after["deleted_at"] is not None
     assert after["knowledge_version_deleted"] is not None
+
+
+def _build_test_pdf(*page_texts: str) -> bytes:
+    """PDF real generado con `pypdf` (mismo mecanismo que
+    `test_pdf_extraction.py`) — corpus mínimo para el pipeline completo,
+    no fixture binaria opaca."""
+    import io
+
+    from pypdf import PdfWriter
+    from pypdf.generic import DictionaryObject, NameObject, StreamObject
+
+    writer = PdfWriter()
+    for text in page_texts:
+        page = writer.add_blank_page(width=200, height=200)
+        font = DictionaryObject()
+        font[NameObject("/Type")] = NameObject("/Font")
+        font[NameObject("/Subtype")] = NameObject("/Type1")
+        font[NameObject("/BaseFont")] = NameObject("/Helvetica")
+        resources = DictionaryObject()
+        fonts = DictionaryObject()
+        fonts[NameObject("/F1")] = writer._add_object(font)  # noqa: SLF001
+        resources[NameObject("/Font")] = fonts
+        page[NameObject("/Resources")] = resources
+        stream_obj = StreamObject()
+        stream_obj.set_data(f"BT /F1 24 Tf 10 100 Td ({text}) Tj ET".encode())
+        page[NameObject("/Contents")] = writer._add_object(stream_obj)  # noqa: SLF001
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+async def test_learn_e2e_pdf_extracts_text_indexes_by_page_and_is_findable(
+    db_path: str,
+) -> None:
+    """RAG-002 ampliado: el corpus real del reto (`dataset/textos/`) es
+    PDF. Corre el pipeline completo (validación -> extracción por página ->
+    chunk -> embed -> index -> canaria) contra un PDF real de dos páginas y
+    verifica que el fragmento recuperado lleva el número de página real."""
+    _init_db(db_path)
+    svc, cache, _settings = _service(db_path)
+
+    pdf_bytes = _build_test_pdf(
+        "Signos de alarma postoperatoria fiebre",
+        "Segunda pagina con informacion adicional",
+    )
+
+    result = await svc.learn(
+        raw_filename="protocolo.pdf", content=pdf_bytes, applicability={}
+    )
+    assert result.document["status"] == "ready"
+    assert result.document["mime"] == "application/pdf"
+    assert result.chunk_count == 2  # una página con texto -> un chunk cada una
+
+    conn = get_connection(db_path)
+    try:
+        found = await hybrid_search(
+            conn,
+            "signos de alarma fiebre postoperatoria",
+            embeddings=cache,
+            session_knowledge_version=result.knowledge_version,
+            top_k=3,
+        )
+        match = next((r for r in found if r.document_id == result.document["id"]), None)
+        assert match is not None
+        assert match.page == 1
+    finally:
+        conn.close()
+
+
+async def test_learn_rejects_pdf_without_extractable_text(db_path: str) -> None:
+    """PDF escaneado sin capa de texto (caso conocido en el corpus oficial,
+    carpeta `Appendicitis/`) — se rechaza explícito, nunca se indexa vacío."""
+    import io
+
+    from pypdf import PdfWriter
+
+    _init_db(db_path)
+    svc, _cache, _settings = _service(db_path)
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    writer.write(buf)
+
+    with pytest.raises(UploadRejected) as exc_info:
+        await svc.learn(raw_filename="escaneado.pdf", content=buf.getvalue(), applicability={})
+    assert exc_info.value.code == "pdf_no_text_layer"

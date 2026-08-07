@@ -340,6 +340,19 @@ class CallCycleOrchestrator:
             )
         finally:
             conn.close()
+        # Rúbrica §5 exige reportar "consultas al RAG por llamada" de forma
+        # verificable en logs, no solo inferida de la estructura del código
+        # (una consulta por turno hoy) — se instrumenta igual que el uso de
+        # tokens de los agentes, vía el mismo `_log_event` fail-open.
+        self._log_event(
+            session_id=session_id, correlation_id=correlation_id,
+            event_type="rag.retrieval.completed",
+            payload={
+                "top_k": self._retrieval_top_k,
+                "result_count": len(retrieval_results),
+                "knowledge_version": knowledge_version,
+            },
+        )
 
         evidence_decision = evaluate_evidence(
             retrieval_results, score_threshold=self._evidence_score_threshold,

@@ -58,13 +58,16 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 _UPLOAD_REJECTION_STATUS: dict[str, int] = {
     "invalid_filename": status.HTTP_400_BAD_REQUEST,
     "missing_extension": status.HTTP_400_BAD_REQUEST,
-    "pdf_not_supported": status.HTTP_400_BAD_REQUEST,
     "extension_not_allowed": status.HTTP_400_BAD_REQUEST,
     "empty_file": status.HTTP_400_BAD_REQUEST,
     "empty_after_chunking": status.HTTP_400_BAD_REQUEST,
     "file_too_large": status.HTTP_413_CONTENT_TOO_LARGE,
     "mime_mismatch": status.HTTP_400_BAD_REQUEST,
     "duplicate_checksum": status.HTTP_409_CONFLICT,
+    "invalid_encoding": status.HTTP_400_BAD_REQUEST,
+    "pdf_unreadable": status.HTTP_400_BAD_REQUEST,
+    "pdf_encrypted": status.HTTP_400_BAD_REQUEST,
+    "pdf_no_text_layer": status.HTTP_400_BAD_REQUEST,
 }
 
 

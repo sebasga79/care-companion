@@ -117,7 +117,10 @@ def test_upload_rejects_disallowed_extension() -> None:
     assert exc_info.value.code == "extension_not_allowed"
 
 
-def test_upload_rejects_pdf_as_explicitly_unsupported() -> None:
+def test_upload_rejects_pdf_when_not_in_allowed_extensions() -> None:
+    # `_ALLOWED` en este archivo es txt/md deliberadamente (no toda la
+    # allowlist real) para seguir probando el rechazo por extensión no
+    # permitida como caso independiente del soporte de PDF en sí.
     with pytest.raises(UploadRejected) as exc_info:
         validate_upload(
             raw_filename="informe.pdf",
@@ -126,8 +129,35 @@ def test_upload_rejects_pdf_as_explicitly_unsupported() -> None:
             max_bytes=1000,
             existing_active_checksums=frozenset(),
         )
-    assert exc_info.value.code == "pdf_not_supported"
-    assert "no soportado" in exc_info.value.reason.lower()
+    assert exc_info.value.code == "extension_not_allowed"
+
+
+def test_valid_pdf_upload_passes_validation() -> None:
+    """La validación de bytes/tamaño/tipo pasa para un PDF real; la
+    extracción de texto (RAG-002 ampliado) es responsabilidad de
+    `app/services/pdf_extraction.py`, no de esta capa."""
+    result = validate_upload(
+        raw_filename="guia.pdf",
+        content=b"%PDF-1.4\ncontenido binario simulado de un PDF real",
+        allowed_extensions=frozenset({"txt", "md", "pdf"}),
+        max_bytes=1000,
+        existing_active_checksums=frozenset(),
+    )
+    assert result.extension == "pdf"
+
+
+def test_upload_rejects_fake_pdf_disguised_as_pdf() -> None:
+    """Extensión .pdf pero los bytes no empiezan con la firma real de PDF
+    (`%PDF-`) — rechazo simétrico al caso txt/md con MIME falso."""
+    with pytest.raises(UploadRejected) as exc_info:
+        validate_upload(
+            raw_filename="falso.pdf",
+            content=b"esto no es un PDF de verdad",
+            allowed_extensions=frozenset({"txt", "md", "pdf"}),
+            max_bytes=1000,
+            existing_active_checksums=frozenset(),
+        )
+    assert exc_info.value.code == "mime_mismatch"
 
 
 def test_upload_rejects_fake_mime_pdf_disguised_as_txt() -> None:

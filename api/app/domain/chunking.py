@@ -12,8 +12,13 @@ principio a fin, requisito para el test de snapshot y para que
 2. **Ventana deslizante por caracteres dentro de cada sección** — con
    tamaño y solape configurables (`chunk_size_chars`/`overlap_chars`),
    ajustando el corte al siguiente espacio en blanco para no partir
-   palabras a la mitad. Solo aplicable a texto plano; el manejo de páginas
-   reales (PDF) llega cuando exista un parser aprobado (RAG-002).
+   palabras a la mitad.
+
+Para PDF (RAG-002 ampliado, `app/services/pdf_extraction.py`), el caller
+invoca esta misma función una vez por página ya extraída, pasando `page` y
+un `chunk_index_start` acumulado — el número de página real queda estampado
+en cada `ChunkRecord` y el índice de chunk sigue siendo global y estable
+para todo el documento.
 
 `chunk_id` es `sha256(document_id|chunk_index|text)` (RAG-003: "chunk ids
 estables y deterministas") — no un UUID aleatorio, para que dos corridas
@@ -52,6 +57,8 @@ def chunk_document(
     *,
     chunk_size_chars: int = 800,
     overlap_chars: int = 150,
+    page: int | None = None,
+    chunk_index_start: int = 0,
 ) -> list[ChunkRecord]:
     if chunk_size_chars <= 0:
         raise ValueError("chunk_size_chars debe ser positivo")
@@ -60,7 +67,7 @@ def chunk_document(
 
     sections = _split_sections(text)
     records: list[ChunkRecord] = []
-    chunk_index = 0
+    chunk_index = chunk_index_start
     for section in sections:
         for window_text, start, end in _sliding_windows(
             section.text, chunk_size_chars, overlap_chars
@@ -74,7 +81,7 @@ def chunk_document(
                     chunk_id=chunk_id,
                     chunk_index=chunk_index,
                     section=section.title,
-                    page=None,
+                    page=page,
                     text=stripped,
                     char_start=section.offset + start,
                     char_end=section.offset + end,

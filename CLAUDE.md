@@ -43,6 +43,12 @@ No hay comandos de build/lint/test todavía. Cuando exista código, el arranque 
 | 24 jul | UX-005 | Done | `/audit` funcional: fila clickeable → traza real (timeline de eventos + decisiones + escalamientos). Verificado en vivo (2 eventos, 1 decisión, 1 escalamiento). Commit `99d84bf`. |
 | 24 jul | DOC-003/004 + SEC-004 | Done | Informe final, apéndice de prompts/config (hashes SHA-256, sin CoT/secretos), NOTICE de licencias (todas permisivas). Commit `efbb29e`. |
 | 24 jul | Corte de sesión | Nota | 20 commits. Rúbrica completa con implementación; pendiente = validación humana (correr stack + micrófono + cronometrar 15 min) y tickets T0 (AI-001 modelo, DATA-001 Delta Share, métricas oficiales). |
+| 7 ago | Auditoría kit oficial | Done | Kit real descargado y leído completo (README/rúbrica/stack-técnico de `TechSphere2026/ParticipantArtifacts`) y contrastado contra el repo. `docs/auditoria-kit-oficial-2026-08-07.md`: 3 supuestos invalidados (no hay "modelo obligatorio" sino lista de 4; dataset no es Delta Share, es `.xlsx`+107 PDFs en el propio repo del reto; corpus real es PDF y el sistema lo rechazaba a propósito). |
+| 7 ago | Repo publicado | Done | `github.com/sebasga79/care-companion`, público — cierra entregable 01 (antes no había remoto). |
+| 7 ago | AI-001 (modelo real) | Done | `OpenAICompatLLM` (Groq/Llama 3.1 70B primario) + `FallbackLLM` (Ollama/Phi-3.5 Mini resguardo) tras `LLMPort`; `LLMProvider` allowlist `fake|groq|ollama`; `Settings` aplica defaults por proveedor y valida credenciales al arranque. 14 tests nuevos con `httpx.MockTransport`. |
+| 7 ago | RAG-002 ampliado (PDF) | Done | `pypdf` (BSD) — el corpus real del reto (`dataset/textos/`, 107 PDFs) ya no se rechaza; extracción por página con `page` estampado en cada chunk, rechazo explícito de PDF escaneado sin texto/cifrado/corrupto. 12 tests nuevos. |
+| 7 ago | Tokens/costo en `/metrics` | Done | `AuditRepository.usage_summary()` agrega tokens/invocaciones LLM/consultas RAG desde `events` reales (nuevo evento `rag.retrieval.completed`); costo queda "pendiente" hasta fijar `LLM_COST_PER_MILLION_*_TOKENS` (sin inventar precio). `make verify` = 266 tests, ruff limpio. |
+| 7 ago | Pendiente | Nota | DATA-001 (dataset real vía `.xlsx`, `ChallengeCasePort` sigue en `FixtureCaseAdapter` con 3 casos inventados), cronometrar G2 con LLM real, probar G4 de punta a punta con Groq, informe final (declarar modelo, exigido por G3) y video — ver plan de acción en la auditoría §7. |
 
 ## Documentos canónicos (leer antes de editar)
 
@@ -75,6 +81,28 @@ No hay comandos de build/lint/test todavía. Cuando exista código, el arranque 
 8. No push, merge, deploy ni cambios de acceso sin instrucción humana explícita. No desactivar lint, typecheck, tests ni secret scanning. Sin `except: pass` ni defaults inseguros en rutas clínicas.
 9. Detenerse y pedir decisión humana si un cambio contradice la ficha técnica, amplía el alcance clínico o requiere credenciales/permisos nuevos (protocolo completo en spec.md §11.3).
 
-## Decisiones pendientes del 7 de agosto
+## Kit oficial recibido (7 de agosto) — auditoría y decisiones
 
-Modelo obligatorio y modalidades, schema/licencia del dataset Delta Share, estrategia de voz (ADR-007), formato oficial de métricas P50/P95, y deadline exacto — ver `docs/spec.md` §13 (OQ-001…OQ-010). No adivinar estas decisiones; si la ficha técnica entrega un starter, su estructura prevalece y esta arquitectura se adapta mediante puertos.
+El kit real llegó el 7 de agosto (`https://github.com/TechSphere2026/ParticipantArtifacts`)
+y resuelve la mayoría de las OQ-001…OQ-010 de `docs/spec.md` §13, con sorpresas que
+invalidan supuestos de la construcción anticipada: **no hay un "modelo obligatorio"** sino
+una lista cerrada de 4 opciones; **no hay Delta Share**, el dataset es `.xlsx` + 107 PDFs
+dentro del propio repo del reto; **el corpus real es PDF** y el sistema hoy lo rechaza a
+propósito (`upload_validation.py`).
+
+Auditoría completa, hallazgos priorizados y plan de acción:
+[`docs/auditoria-kit-oficial-2026-08-07.md`](docs/auditoria-kit-oficial-2026-08-07.md).
+
+**Decisión de modelo (7 ago), implementada el mismo día:** Groq · Llama 3.1 70B como LLM
+primario (`app/adapters/openai_compat_llm.py`, protocolo Chat Completions vía `httpx`, sin
+SDK de proveedor), con Ollama local (Phi-3.5 Mini) como resguardo si Groq no responde en
+la sesión de evaluación (`app/adapters/fallback_llm.py`). `LLMProvider` allowlist ahora es
+`fake|groq|ollama`; `_build_llm_adapter` en `api/app/main.py` construye el primario y,
+si `LLM_FALLBACK_PROVIDER` está configurado, lo envuelve en `FallbackLLM`. 14 tests con
+`httpx.MockTransport`, sin red real. De paso: soporte de PDF real en RAG (`pypdf`, corpus
+del reto son 107 PDFs) y `/metrics` con tokens/costo reales en vez de "pendiente"
+hardcodeado. Repo publicado: `github.com/sebasga79/care-companion` (público).
+
+`docs/spec.md` §13 y `docs/plan.md` (tickets DATA-001/AI-001, que anticipaban Delta Share)
+quedan pendientes de re-especificar contra la realidad del kit — no reabrir esas preguntas
+sin antes leer la auditoría de arriba.

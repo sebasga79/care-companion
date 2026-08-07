@@ -71,8 +71,12 @@ def test_gate_decision_not_degradable() -> None:
 # Gate: un solo modelo (allowlist de proveedores; sin adapters clandestinos)
 # ---------------------------------------------------------------------------
 def test_gate_single_model_allowlist() -> None:
-    # Solo dos proveedores en el allowlist; el real de T0 es openai_compat.
-    assert {p.value for p in LLMProvider} == {"fake", "openai_compat"}
+    # `fake` es solo para tests/desarrollo sin credenciales; los dos
+    # proveedores reales son `groq` (primario, Llama 3.1 70B) y `ollama`
+    # (resguardo local, Phi-3.5 Mini) — decisión en
+    # docs/auditoria-kit-oficial-2026-08-07.md §3, ambos dentro de la
+    # allowlist de modelos permitidos del reto (G3).
+    assert {p.value for p in LLMProvider} == {"fake", "groq", "ollama"}
 
 
 # ---------------------------------------------------------------------------

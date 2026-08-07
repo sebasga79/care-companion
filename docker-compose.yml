@@ -12,6 +12,11 @@ services:
       - DATABASE_PATH=/app/data/care_companion.db
       - API_HOST=0.0.0.0
       - API_PORT=8000
+      # Producción del reto: LLM_PROVIDER=groq + LLM_API_KEY real (ver
+      # .env.example y docs/auditoria-kit-oficial-2026-08-07.md §3). `fake`
+      # es el default de este compose para que `docker compose up --build`
+      # arranque sin credenciales (gate G2 no depende de tener una API key
+      # a mano solo para levantar el contenedor).
       - LLM_PROVIDER=fake
       - LLM_MODEL=fake-model-v1
     volumes:

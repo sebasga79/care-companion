@@ -26,16 +26,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import Settings
-from app.domain.chunking import chunk_document
+from app.domain.chunking import ChunkRecord, chunk_document
 from app.repositories.db import session_scope
 from app.repositories.document_chunks import DocumentChunkRepository
 from app.repositories.documents import DocumentRepository
 from app.repositories.knowledge import increment_knowledge_version_conn
 from app.services.embeddings_cache import EmbeddingsCache, text_checksum
+from app.services.pdf_extraction import extract_pdf_pages
 from app.services.retrieval import RetrievalResult, hybrid_search
 from app.services.upload_validation import UploadRejected, ValidatedUpload, validate_upload
 
-_MIME_BY_EXTENSION = {"txt": "text/plain", "md": "text/markdown"}
+_MIME_BY_EXTENSION = {"txt": "text/plain", "md": "text/markdown", "pdf": "application/pdf"}
 _CANARY_WORD_COUNT = 8
 
 
@@ -108,15 +109,8 @@ class KnowledgeIngestionService:
             max_bytes=self._settings.rag_max_upload_bytes,
             existing_active_checksums=self._document_repo.active_checksums(),
         )
-        text = content.decode("utf-8")
         document_id = str(uuid.uuid4())
-
-        chunks = chunk_document(
-            document_id,
-            text,
-            chunk_size_chars=self._settings.rag_chunk_size_chars,
-            overlap_chars=self._settings.rag_chunk_overlap_chars,
-        )
+        chunks = self._chunk_content(document_id, validated.extension, content)
         if not chunks:
             raise UploadRejected(
                 "El documento no produjo ningún fragmento indexable "
@@ -187,6 +181,47 @@ class KnowledgeIngestionService:
         assert document is not None  # acabamos de confirmarlo en la misma transacción
         return LearnResult(
             document=document, knowledge_version=new_version, chunk_count=len(chunks)
+        )
+
+    def _chunk_content(
+        self, document_id: str, extension: str, content: bytes
+    ) -> list[ChunkRecord]:
+        """Deriva el texto según el tipo de archivo y lo fragmenta.
+
+        `txt`/`md`: un único blob de texto UTF-8, `page=None` (comportamiento
+        original). `pdf`: una página a la vez (`app/services/pdf_extraction`),
+        con `page` real estampado y `chunk_index` global acumulado entre
+        páginas — dos páginas nunca comparten `chunk_index`, así que el id
+        determinista (`document_id|chunk_index|text`) sigue siendo único."""
+        if extension == "pdf":
+            chunks: list[ChunkRecord] = []
+            for page_number, page_text in enumerate(extract_pdf_pages(content), start=1):
+                if not page_text.strip():
+                    continue
+                chunks.extend(
+                    chunk_document(
+                        document_id,
+                        page_text,
+                        chunk_size_chars=self._settings.rag_chunk_size_chars,
+                        overlap_chars=self._settings.rag_chunk_overlap_chars,
+                        page=page_number,
+                        chunk_index_start=len(chunks),
+                    )
+                )
+            return chunks
+
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise UploadRejected(
+                f"El archivo no es texto UTF-8 válido: {exc}",
+                code="invalid_encoding",
+            ) from exc
+        return chunk_document(
+            document_id,
+            text,
+            chunk_size_chars=self._settings.rag_chunk_size_chars,
+            overlap_chars=self._settings.rag_chunk_overlap_chars,
         )
 
     async def forget(self, document_id: str, *, actor: str | None = None) -> ForgetResult:

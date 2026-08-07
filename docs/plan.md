@@ -225,6 +225,21 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 > `make verify` = 235 tests. Pendiente-T0: adapter del modelo obligatorio
 > (AI-001), Delta Share (DATA-001), voz realtime STT/TTS (VOI-*).
 
+> **Ejecución 7 ago (kit oficial recibido):** AI-001 implementado — adapter
+> `OpenAICompatLLM` (Groq primario, `llama-3.1-70b-versatile`) + `FallbackLLM`
+> (Ollama local de resguardo, `phi3.5`) tras `LLMPort`, sin SDK de proveedor
+> (protocolo Chat Completions vía `httpx`; 14 tests con `httpx.MockTransport`,
+> sin red real). RAG-002 ampliado con soporte de PDF real (`pypdf`, BSD) — el
+> corpus del reto (`dataset/textos/`, 107 PDFs) ya no se rechaza a propósito.
+> `/metrics` deja de hardcodear tokens/costo como "pendiente": agrega uso real
+> desde `events` (`AuditRepository.usage_summary`). Repositorio publicado en
+> GitHub (`sebasga79/care-companion`, público) — cierra el entregable 01.
+> `make verify` = 266 tests. **DATA-001 sigue pendiente y cambió de forma**:
+> el dataset real no es Delta Share, es `.xlsx` + PDFs dentro del propio repo
+> del reto — `ChallengeCasePort` sigue sobre `FixtureCaseAdapter` (3 casos
+> inventados). Detalle completo, decisión de modelo y hallazgos priorizados:
+> `docs/auditoria-kit-oficial-2026-08-07.md`.
+
 ## Sprint C2 — Clinical Core · T+12h–T+28h
 
 ### Epic RAG — conocimiento vivo

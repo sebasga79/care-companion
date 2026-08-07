@@ -28,6 +28,11 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, db_path: str) -> Iterator[None]:
         "LLM_BASE_URL",
         "LLM_API_KEY",
         "LLM_MODEL",
+        "LLM_REQUEST_TIMEOUT_SECONDS",
+        "LLM_FALLBACK_PROVIDER",
+        "LLM_FALLBACK_BASE_URL",
+        "LLM_FALLBACK_API_KEY",
+        "LLM_FALLBACK_MODEL",
     ]:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DATABASE_PATH", db_path)

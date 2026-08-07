@@ -14,9 +14,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters.fake_embeddings import FakeEmbeddings
 from app.adapters.fake_llm import FakeLLM
+from app.adapters.fallback_llm import FallbackLLM
 from app.adapters.fixture_cases import FixtureCaseAdapter
+from app.adapters.openai_compat_llm import OpenAICompatLLM
 from app.api.routes import audit, cases, health, knowledge, sessions, ws
-from app.core.config import LLMProvider, get_settings
+from app.core.config import LLMProvider, Settings, get_settings
 from app.core.logging import configure_logging
 from app.core.middleware import CorrelationIdMiddleware
 from app.orchestrator.call_cycle import CallCycleOrchestrator
@@ -84,7 +86,7 @@ def create_app() -> FastAPI:
     app.state.escalation_repo = EscalationRepository(settings.database_path)
     app.state.audit_repo = AuditRepository(settings.database_path)
 
-    app.state.llm = _build_llm_adapter(settings.llm_provider, model=settings.llm_model)
+    app.state.llm = _build_llm_adapter(settings)
     app.state.call_cycle_orchestrator = CallCycleOrchestrator(
         database_path=settings.database_path,
         llm=app.state.llm,
@@ -125,20 +127,53 @@ def create_app() -> FastAPI:
     return app
 
 
-def _build_llm_adapter(provider: LLMProvider, *, model: str) -> LLMPort:
-    """Único punto de construcción del `LLMPort` real usado por los
-    agentes (ADR-001/ADR-005): el dominio nunca importa un SDK de
-    proveedor, solo este adapter concreto. `openai_compat` (el modelo
-    obligatorio del 7 de agosto) todavía no tiene adapter — se falla rápido
-    y explícito en el arranque en vez de degradar silenciosamente a un
-    fake, para no fingir que el modelo obligatorio está conectado cuando no
-    lo está (spec.md §11.2, "no defaults inseguros")."""
+def _build_llm_adapter(settings: Settings) -> LLMPort:
+    """Único punto de construcción del `LLMPort` real usado por los agentes
+    (ADR-001/ADR-005): el dominio nunca importa un SDK de proveedor, solo
+    este adapter concreto. Decisión de modelo y arquitectura de resguardo en
+    `docs/auditoria-kit-oficial-2026-08-07.md` §3 — Groq (Llama 3.1 70B)
+    primario, Ollama local (Phi-3.5 Mini) de resguardo si `LLM_FALLBACK_
+    PROVIDER` está configurado."""
+    primary = _build_single_adapter(
+        provider=settings.llm_provider,
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=settings.llm_model,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
+    if settings.llm_fallback_provider is None:
+        return primary
+
+    fallback = _build_single_adapter(
+        provider=settings.llm_fallback_provider,
+        base_url=settings.llm_fallback_base_url,
+        api_key=settings.llm_fallback_api_key,
+        model=settings.llm_fallback_model,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
+    return FallbackLLM(primary, fallback)
+
+
+def _build_single_adapter(
+    *,
+    provider: LLMProvider,
+    base_url: str | None,
+    api_key: str | None,
+    model: str | None,
+    timeout_seconds: float,
+) -> LLMPort:
     if provider is LLMProvider.FAKE:
-        return FakeLLM(model=model)
-    raise RuntimeError(
-        f"LLM_PROVIDER={provider.value!r} todavía no tiene adapter implementado "
-        "(pendiente del modelo obligatorio del 7 de agosto, ADR-005/ADR-008); "
-        "usa LLM_PROVIDER=fake mientras tanto."
+        return FakeLLM(model=model or "fake-model-v1")
+    # `Settings._apply_llm_defaults_and_validate` ya garantizó que
+    # base_url/model son valores reales para GROQ/OLLAMA antes de que la
+    # app pueda arrancar — nunca llegamos aquí con placeholders.
+    assert base_url is not None and model is not None
+    return OpenAICompatLLM(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        provider_name=provider.value,
+        timeout_seconds=timeout_seconds,
     )
 
 

@@ -79,8 +79,16 @@ def extract_extension(safe_filename: str) -> str:
 def detect_declared_mime_mismatch(content: bytes, extension: str) -> str | None:
     """Compara los bytes iniciales contra `_MAGIC_SIGNATURES`. Devuelve una
     descripción del formato real detectado si contradice la extensión
-    declarada (txt/md nunca deberían empezar con estas firmas), o `None`
-    si no hay señal de falsificación."""
+    declarada, o `None` si no hay señal de falsificación.
+
+    Dos direcciones de chequeo:
+    - **txt/md**: nunca deberían empezar con ninguna firma binaria conocida
+      (PDF/ZIP/ELF/PE/PNG/JPEG) — si empiezan, alguien renombró un binario.
+    - **pdf**: al revés — SÍ debe empezar con la firma `%PDF-`; si no,
+      alguien renombró otra cosa a `.pdf` (defensa simétrica a la anterior,
+      spec.md §11 "no defaults inseguros")."""
+    if extension == "pdf":
+        return None if content.startswith(b"%PDF-") else "no-pdf-signature"
     if extension not in {"txt", "md"}:
         return None
     for signature, detected in _MAGIC_SIGNATURES:
@@ -103,13 +111,6 @@ def validate_upload(
     safe_filename = sanitize_filename(raw_filename)
     extension = extract_extension(safe_filename)
 
-    if extension == "pdf":
-        raise UploadRejected(
-            "PDF no soportado aún: no hay librería de extracción aprobada "
-            "(docs/policies/dependencies.md — sin dependencias nuevas sin necesidad "
-            "demostrada); cargue .txt o .md mientras tanto.",
-            code="pdf_not_supported",
-        )
     if extension not in allowed_extensions:
         raise UploadRejected(
             f"Tipo de archivo no permitido: .{extension} "

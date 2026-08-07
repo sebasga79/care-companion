@@ -63,11 +63,46 @@ def test_upload_rejects_disallowed_extension(client: TestClient) -> None:
     assert response.json()["detail"]["code"] == "extension_not_allowed"
 
 
-def test_upload_rejects_pdf_as_unsupported(client: TestClient) -> None:
+def test_upload_rejects_unreadable_pdf(client: TestClient) -> None:
     files = {"file": ("informe.pdf", b"%PDF-1.4 x", "application/pdf")}
     response = client.post("/api/v1/knowledge/documents", files=files)
     assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "pdf_not_supported"
+    assert response.json()["detail"]["code"] == "pdf_unreadable"
+
+
+def test_upload_valid_pdf_extracts_text_and_returns_ready(client: TestClient) -> None:
+    """RAG-002 ampliado: el corpus real del reto es PDF (`dataset/textos/`)
+    — un PDF con texto real se acepta y sigue el mismo pipeline que
+    txt/md, vía `/api/v1/knowledge` (RAG-010)."""
+    import io
+
+    from pypdf import PdfWriter
+    from pypdf.generic import DictionaryObject, NameObject, StreamObject
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=200, height=200)
+    font = DictionaryObject()
+    font[NameObject("/Type")] = NameObject("/Font")
+    font[NameObject("/Subtype")] = NameObject("/Type1")
+    font[NameObject("/BaseFont")] = NameObject("/Helvetica")
+    resources = DictionaryObject()
+    fonts = DictionaryObject()
+    fonts[NameObject("/F1")] = writer._add_object(font)  # noqa: SLF001
+    resources[NameObject("/Font")] = fonts
+    page[NameObject("/Resources")] = resources
+    stream_obj = StreamObject()
+    stream_obj.set_data(b"BT /F1 24 Tf 10 100 Td (Guia clinica en PDF) Tj ET")
+    page[NameObject("/Contents")] = writer._add_object(stream_obj)  # noqa: SLF001
+    buf = io.BytesIO()
+    writer.write(buf)
+
+    files = {"file": ("guia.pdf", buf.getvalue(), "application/pdf")}
+    response = client.post("/api/v1/knowledge/documents", files=files)
+    assert response.status_code == 201
+    body = response.json()
+    assert body["document"]["status"] == "ready"
+    assert body["document"]["mime"] == "application/pdf"
+    assert body["chunk_count"] == 1
 
 
 def test_upload_rejects_duplicate_checksum(client: TestClient) -> None:
