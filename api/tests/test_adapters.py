@@ -3,6 +3,8 @@ deterministas (ADR-001: dominio detrás de puertos, adapters reemplazables)."""
 
 from __future__ import annotations
 
+import json
+
 from app.adapters.fake_embeddings import FakeEmbeddings
 from app.adapters.fake_llm import FakeLLM
 from app.adapters.fake_stt import FakeSTT
@@ -20,6 +22,58 @@ async def test_fake_llm_is_deterministic() -> None:
     assert first.text == second.text
     assert first.provider == "fake"
     assert first.model == "fake-model-v1"
+
+
+async def test_fake_llm_returns_valid_json_for_interview_agent_prompt() -> None:
+    """Regresión (docs/auditoria-kit-oficial-2026-08-07.md §9.2): antes,
+    `FakeLLM` respondía texto plano no-JSON a CUALQUIER prompt, incluido el
+    de InterviewAgent, que exige JSON estricto — cada llamada real con el
+    proveedor `fake` por defecto caía en fail-safe en el primer turno."""
+    llm = FakeLLM()
+    result = await llm.generate(
+        messages=[
+            LLMMessage(
+                role="system",
+                content="... extraer observaciones estructuradas del último turno ...",
+            ),
+            LLMMessage(
+                role="user",
+                content=(
+                    "## Objetivos pendientes del checklist\n- FEVER: fiebre\n\n"
+                    "## Último turno del cuidador/paciente a interpretar\nno ha tenido fiebre"
+                ),
+            ),
+        ]
+    )
+    data = json.loads(result.text)  # no debe lanzar — era justo lo que fallaba
+    assert "needs_clarification" in data
+    assert isinstance(data["observations"], list)
+
+
+async def test_fake_llm_returns_valid_json_for_triage_agent_prompt() -> None:
+    llm = FakeLLM()
+    result = await llm.generate(
+        messages=[
+            LLMMessage(role="system", content="... evaluador de riesgo estructurado ..."),
+            LLMMessage(role="user", content="## Observaciones normalizadas\n(sin observaciones)"),
+        ]
+    )
+    data = json.loads(result.text)
+    assert data["model_level"] == "ROUTINE_FOLLOW_UP"
+
+
+async def test_fake_llm_returns_nonempty_text_for_response_agent_prompt() -> None:
+    llm = FakeLLM()
+    result = await llm.generate(
+        messages=[
+            LLMMessage(
+                role="system",
+                content="... asistente de voz de seguimiento postoperatorio ...",
+            ),
+            LLMMessage(role="user", content="## Contexto del turno\n(sin pregunta explícita)"),
+        ]
+    )
+    assert result.text.strip()
 
 
 async def test_fake_stt_returns_text() -> None:

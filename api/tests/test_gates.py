@@ -83,6 +83,15 @@ def test_gate_single_model_allowlist() -> None:
 # Gate: voz realtime — contrato WebSocket con envelopes versionados y seq
 # ---------------------------------------------------------------------------
 def test_gate_websocket_realtime_contract(client: TestClient) -> None:
+    """`client` usa el `LLM_PROVIDER=fake` DEFAULT del proyecto (el mismo
+    con el que arranca `./levantar_app.sh`/`docker compose up` sin ningún
+    `.env`) — a propósito, no un `ScriptedFakeLLM` a medida. Regresión
+    (docs/auditoria-kit-oficial-2026-08-07.md §9.2): hasta el 7 de agosto,
+    `FakeLLM` devolvía texto plano no-JSON y CUALQUIER turno con el
+    proveedor por defecto caía en fail-safe con
+    `DATA_INTEGRITY_FAILURE` en el primer intento — el camino "sin
+    credenciales" que el README anuncia como funcional nunca completaba una
+    llamada real. Este test falla si eso vuelve a pasar."""
     case_id = client.get("/api/v1/cases").json()[0]["case_id"]
     session_id = client.post("/api/v1/sessions", json={"case_id": case_id}).json()["id"]
 
@@ -90,21 +99,38 @@ def test_gate_websocket_realtime_contract(client: TestClient) -> None:
         ws.send_json(
             {"v": 1, "type": "client.turn_text", "seq": 1, "payload": {"text": "tiene fiebre"}}
         )
-        seqs: list[int] = []
-        types: list[str] = []
-        for _ in range(6):
-            env = ws.receive_json()
+        # Un turno SIEMPRE produce exactamente estos tres envelopes, en este
+        # orden (app/api/routes/ws.py); `server.summary` solo aparece si el
+        # turno dejó la sesión en un estado terminal. Se leen los tres de
+        # forma explícita en vez de "hasta 6 o hasta ver summary": ese bucle
+        # bloqueaba indefinidamente cuando el turno NO es terminal, porque
+        # `receive_json()` no tiene timeout.
+        envs = [ws.receive_json() for _ in range(3)]
+        for env in envs:
             assert env["v"] == 1
             assert "correlation_id" in env
-            seqs.append(env["seq"])
-            types.append(env["type"])
-            if env["type"] == "server.summary":
-                break
+        seqs = [env["seq"] for env in envs]
+        types = [env["type"] for env in envs]
+        decision_envs = [env for env in envs if env["type"] == "server.decision"]
+
+        state = envs[0]["payload"]["state"]
+        if state in ("summarizing", "fail_safe"):
+            summary_env = ws.receive_json()
+            assert summary_env["type"] == "server.summary"
+            seqs.append(summary_env["seq"])
+            types.append(summary_env["type"])
 
     # Envelopes versionados, seq del servidor estrictamente creciente.
     assert seqs == sorted(seqs)
     assert len(set(seqs)) == len(seqs)
     assert "server.decision" in types
+
+    # El PRIMER turno de una llamada nueva, con el proveedor fake por
+    # defecto, nunca debe fallar por un problema técnico interno del propio
+    # adapter (parsing/contrato) — eso es un bug del proveedor `fake`, no
+    # una decisión clínica legítima. `DATA_INTEGRITY_FAILURE` es
+    # exactamente la señal de ese tipo de fallo (app/domain/decision.py).
+    assert decision_envs[0]["payload"]["level"] != "DATA_INTEGRITY_FAILURE"
 
 
 # ---------------------------------------------------------------------------
