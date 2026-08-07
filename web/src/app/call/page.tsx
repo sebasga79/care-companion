@@ -56,6 +56,19 @@ const STATE_LABELS: Record<SessionStatus, string> = {
 
 type CallPhase = "idle" | "connecting" | "active" | "closed";
 
+/**
+ * Estados en los que el backend YA NO acepta turnos nuevos — complemento
+ * exacto de `_ACCEPTS_TURN` (app/orchestrator/call_cycle.py). Si el
+ * frontend sigue enviando turnos en estos estados, el backend responde
+ * `server.error` en cada uno.
+ */
+const TERMINAL_STATES = new Set<SessionStatus>([
+  "summarizing",
+  "closed",
+  "escalated",
+  "fail_safe",
+]);
+
 let turnCounter = 0;
 function makeTurn(sessionId: string, speaker: Turn["speaker"], text: string): Turn {
   turnCounter += 1;
@@ -95,6 +108,10 @@ export default function CallPage() {
   const voiceModeRef = useRef(false);
   const speakRef = useRef<(text: string) => void>(() => {});
   const sessionIdRef = useRef<string | null>(null);
+  const stopListeningRef = useRef<() => void>(() => {});
+  // El último estado FSM conocido, leído desde closures del socket/voz sin
+  // recrearlas (el estado de React no está disponible dentro de ellas).
+  const fsmStateRef = useRef<SessionStatus>("created");
 
   const fetchCases = useCallback(async () => {
     try {
@@ -121,8 +138,19 @@ export default function CallPage() {
     switch (env.type) {
       case "server.state":
         setFsmState(env.payload.state);
+        fsmStateRef.current = env.payload.state;
         setVoiceState(stateToVoice(env.payload.state));
         if (env.payload.state === "escalated") setEscalated(true);
+        // Una vez que el backend deja la sesión en un estado que ya no
+        // acepta turnos (`_ACCEPTS_TURN` en app/orchestrator/call_cycle.py),
+        // hay que dejar de escuchar. Antes el micrófono seguía activo y cada
+        // frase capturada disparaba un `server.error` ("la sesión está en
+        // estado 'summarizing' y no acepta turnos nuevos") — ruido en
+        // pantalla que parecía un fallo del sistema cuando en realidad la
+        // llamada simplemente había terminado.
+        if (TERMINAL_STATES.has(env.payload.state)) {
+          stopListeningRef.current();
+        }
         break;
       case "server.agent_response":
         if (env.payload.message) {
@@ -172,6 +200,7 @@ export default function CallPage() {
     setSessionId(session.id);
     sessionIdRef.current = session.id;
     setFsmState(session.status);
+    fsmStateRef.current = session.status;
 
     const ws = new WebSocket(callSocketUrl(session.id));
     socketRef.current = ws;
@@ -199,6 +228,10 @@ export default function CallPage() {
     const ws = socketRef.current;
     const sid = sessionIdRef.current;
     if (!text || !ws || ws.readyState !== WebSocket.OPEN || !sid) return;
+    // Defensa en profundidad: aunque `stopListeningRef` ya apaga el
+    // micrófono al llegar a un estado terminal, un turno en vuelo (o el
+    // cuadro de texto) no debe provocar un `server.error` innecesario.
+    if (TERMINAL_STATES.has(fsmStateRef.current)) return;
     clientSeqRef.current += 1;
     setTurns((prev) => [...prev, makeTurn(sid, "patient", text)]);
     setVoiceState("thinking");
@@ -225,6 +258,12 @@ export default function CallPage() {
     onBargeIn: () => setVoiceState("interrupted"),
     lang: "es-CO",
   });
+  useEffect(() => {
+    stopListeningRef.current = () => {
+      voiceModeRef.current = false;
+      voice.stop();
+    };
+  }, [voice]);
   useEffect(() => {
     speakRef.current = voice.speak;
   }, [voice.speak]);

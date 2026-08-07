@@ -133,6 +133,38 @@ def test_gate_websocket_realtime_contract(client: TestClient) -> None:
     assert decision_envs[0]["payload"]["level"] != "DATA_INTEGRITY_FAILURE"
 
 
+def test_greeting_alone_does_not_escalate_the_call(client: TestClient) -> None:
+    """Regresión de un falso positivo real visto en `/call` en vivo: saludar
+    ("aló, buenas tardes") escalaba la llamada a revisión humana en dos
+    turnos. Causa: `FakeLLM` marcaba el siguiente objetivo del checklist
+    como `uncertain` sin mirar el contenido del turno, y el segundo objetivo
+    es FEVER (código de regla clínica) — "fiebre incierta" sin evidencia
+    dispara `evidence_insufficient_with_risk`. La rúbrica evalúa
+    explícitamente el comportamiento "en situaciones donde escalar
+    claramente NO es lo correcto"."""
+    case_id = client.get("/api/v1/cases").json()[0]["case_id"]
+    session_id = client.post("/api/v1/sessions", json={"case_id": case_id}).json()["id"]
+
+    greetings = ["Aló, buenas tardes", "Sí, con él habla", "Bien, gracias"]
+    with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
+        for seq, text in enumerate(greetings, start=1):
+            ws.send_json(
+                {"v": 1, "type": "client.turn_text", "seq": seq, "payload": {"text": text}}
+            )
+            state_env = ws.receive_json()
+            ws.receive_json()  # server.agent_response
+            decision_env = ws.receive_json()
+
+            assert decision_env["payload"]["escalated"] is False, (
+                f"un saludo no debe escalar la llamada (turno {seq}: {text!r})"
+            )
+            if state_env["payload"]["state"] in ("summarizing", "fail_safe", "escalated"):
+                raise AssertionError(
+                    f"la llamada terminó en {state_env['payload']['state']} tras un saludo "
+                    f"(turno {seq}: {text!r})"
+                )
+
+
 # ---------------------------------------------------------------------------
 # Gate: repositorio/entregables — artefactos obligatorios presentes
 # ---------------------------------------------------------------------------

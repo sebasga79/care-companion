@@ -526,3 +526,52 @@ PDF escaneado sin capa de texto de `Appendicitis/` que el README oficial ya adve
 - El informe final y el video (§4.7/plan original) no se tocaron.
 - `docs/plan.md`/`docs/spec.md` siguen con referencias a "Delta Share" — actualizar antes
   de que alguien las relea sin este documento a mano.
+
+## 9.4 Cuarta pasada — bugs encontrados probando `/call` con voz real en el navegador
+
+Probando la llamada de voz de verdad (micrófono + parlantes de un portátil, no tests)
+aparecieron tres fallos que ninguna prueba automatizada podía atrapar, porque los tres
+sólo existen fuera del proceso: en el audio, en el navegador y en la base de datos real.
+
+**1. Bucle de eco: la voz del propio agente entraba como turno del paciente.** En la
+transcripción se veía literalmente al paciente "diciendo" la frase anterior del asistente.
+El micrófono capta el TTS por los parlantes y `SpeechRecognition` lo transcribe como habla
+del usuario; ese texto se enviaba por el WebSocket como `client.turn_text`. Peor: el
+barge-in colgado de `onspeechstart` disparaba con la propia voz del agente, así que el
+asistente se interrumpía solo en cada respuesta. La Web Speech API no da acceso al stream
+de audio, así que no se puede activar cancelación de eco por hardware — se implementó
+**supresión por contenido** ([web/src/lib/useVoiceSession.ts](../web/src/lib/useVoiceSession.ts)):
+mientras el asistente habla (más una cola de 1,5 s, porque los `final` llegan tarde),
+cualquier transcripción que solape ≥60 % de sus tokens con lo que se está diciendo se
+descarta como eco. El barge-in real se conserva: habla que NO coincide con lo que decimos
+sí interrumpe.
+
+**2. La UI seguía escuchando después de que la llamada terminó.** Cuando el backend deja
+la sesión en un estado que ya no acepta turnos (`summarizing`/`closed`/`escalated`/
+`fail_safe` — complemento de `_ACCEPTS_TURN`), el micrófono seguía activo y cada frase
+capturada producía un `server.error` en pantalla ("la sesión … no acepta turnos nuevos"),
+que parecía un fallo del sistema cuando la llamada simplemente había terminado. Corregido
+en [web/src/app/call/page.tsx](../web/src/app/call/page.tsx): al entrar en un estado
+terminal se apaga la escucha, y `sendText` no envía en esos estados (defensa en
+profundidad para turnos en vuelo).
+
+**3. Falso positivo de escalamiento: saludar escalaba la llamada.** Dos turnos de saludo
+("aló, buenas tardes" → "sí, con él habla") terminaban en `EVIDENCE_INSUFFICIENT_WITH_RISK`
+y revisión humana. La cadena: `FakeLLM` marcaba el siguiente objetivo pendiente del
+checklist como `uncertain` **sin mirar el contenido del turno**, y el segundo objetivo es
+`FEVER` — un código que alimenta reglas clínicas deterministas. "Fiebre incierta" sin
+evidencia dispara `evidence_insufficient_with_risk` → escalado. Corregido: el adapter
+`fake` nunca declara `confirmed`/`uncertain` sobre códigos de regla clínica (`FEVER`,
+`PAIN_WORSENING`, `WOUND_DISCHARGE`); usa `not_assessed`, que es la representación honesta
+de "este adapter no evaluó esto" y por diseño no dispara reglas. La rúbrica evalúa
+explícitamente el comportamiento "en situaciones donde escalar claramente NO es lo
+correcto" — un saludo que alerta a una persona es justo el caso.
+
+Además: el corpus se había cargado a una base temporal durante las pruebas, no a la que usa
+la app (`api/data/care_companion.db`), así que `/call` corría con RAG vacío y toda respuesta
+caía en abstención por falta de evidencia. Cargado a la base real: **102 documentos, 8.725
+chunks**.
+
+Los tres bugs tienen test de regresión, y el de escalamiento se verificó revirtiendo el fix
+(el test falla con el mensaje exacto: "un saludo no debe escalar la llamada (turno 2)").
+`make verify` = 311 tests; `pnpm build` + `pnpm lint` verdes.

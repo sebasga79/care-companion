@@ -45,13 +45,30 @@ _LAST_UTTERANCE_RE = re.compile(
 
 _DEFAULT_OBJECTIVE_CODE = "GENERAL_STATE"
 
+# Códigos que alimentan reglas clínicas deterministas
+# (`app/services/rule_engine.py` RULESET_V1). Este adapter NUNCA declara
+# `confirmed`/`uncertain` sobre ellos: no entiende el lenguaje del
+# cuidador, así que afirmar "fiebre incierta" porque alguien dijo "aló
+# buenas tardes" es inventar una señal clínica.
+#
+# Bug real corregido (visto en `/call` en vivo): el fake marcaba el
+# siguiente objetivo pendiente como `uncertain` sin mirar el contenido. El
+# segundo objetivo del checklist es FEVER — así que un simple saludo
+# producía "fiebre incierta" -> `evidence_insufficient_with_risk` ->
+# ESCALADO en el segundo turno de CUALQUIER llamada de demostración. Un
+# falso positivo así de burdo (saludar y que el sistema alerte a una
+# persona) es exactamente lo que la rúbrica evalúa en "situaciones donde
+# escalar claramente NO es lo correcto".
+_RULE_CLINICAL_CODES = frozenset({"FEVER", "PAIN_WORSENING", "WOUND_DISCHARGE"})
+
 
 def _fake_interview_response(full_text: str) -> str:
     """Nunca declara `confirmed`/`denied` (no puede interpretar de verdad el
-    lenguaje del cuidador) — registra `uncertain`, que cuenta como
-    "objetivo cubierto" para el orchestrator (certainty != not_assessed) y
-    permite que la entrevista avance hacia retrieval/decisión sin fingir
-    una lectura clínica que este adapter no hace."""
+    lenguaje del cuidador). Para objetivos NO clínicos registra `uncertain`
+    —que cuenta como "objetivo cubierto" y deja avanzar la entrevista—; para
+    los que alimentan reglas clínicas registra `not_assessed`, la
+    representación honesta de "este adapter no evaluó esto" (y que por
+    diseño no dispara reglas ni cuenta como cubierto)."""
     objective_match = _FIRST_OBJECTIVE_RE.search(full_text)
     code = objective_match.group("code") if objective_match else _DEFAULT_OBJECTIVE_CODE
 
@@ -60,6 +77,7 @@ def _fake_interview_response(full_text: str) -> str:
     if not original_text or original_text.startswith("(sin respuesta"):
         original_text = ""
 
+    certainty = "not_assessed" if code in _RULE_CLINICAL_CODES else "uncertain"
     payload = {
         "needs_clarification": False,
         "clarification_question": None,
@@ -69,7 +87,7 @@ def _fake_interview_response(full_text: str) -> str:
                 "code": code,
                 "label": code.replace("_", " ").lower(),
                 "value": None,
-                "certainty": "uncertain",
+                "certainty": certainty,
                 "original_text": original_text,
                 "normalized_text": None,
             }
