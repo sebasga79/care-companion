@@ -510,6 +510,12 @@ class CallCycleOrchestrator:
                     ],
                     observations_summary=[_obs_summary(o) for o in new_observations],
                     patient_question_or_context=patient_text,
+                    # El agente debe CONDUCIR la entrevista, no solo
+                    # reaccionar: la siguiente pregunta del checklist que
+                    # decidió `InterviewAgent` llega hasta el paciente. Antes
+                    # solo se usaba como consulta de retrieval y se
+                    # descartaba, así que el agente nunca preguntaba nada.
+                    next_question=interview_result.output.get("next_question"),
                 ).model_dump(),
                 deadline_ms=AGENT_DEADLINE_MS,
             )

@@ -39,23 +39,47 @@ function getRecognitionCtor(): typeof SpeechRecognition | null {
 }
 
 /**
- * Echo suppression (fixes a real bug seen in live testing on a laptop with
- * speakers + built-in mic: the agent's own TTS was picked up by the
- * microphone and sent back as a *patient* turn — the transcript literally
- * showed the patient "saying" the assistant's previous sentence).
+ * Echo control — half-duplex, con supresión por contenido como red de
+ * seguridad.
  *
- * The Web Speech API gives no access to the underlying audio stream, so we
- * cannot enable hardware echo cancellation. Instead we suppress by content:
- * while the assistant is speaking (plus a short tail, because recognition
- * delivers finals late), any transcript that substantially overlaps the text
- * we are speaking is treated as echo and dropped.
+ * Bug real (visto dos veces en pruebas en vivo con parlantes + micrófono de
+ * un portátil): el TTS del agente entra por el micrófono, `SpeechRecognition`
+ * lo transcribe como habla del paciente, se envía como turno, el agente
+ * responde, y el ciclo se repite — un bucle infinito donde el paciente
+ * "dice" fragmentos de la frase anterior del asistente ("Gracias", "por
+ * contarme", "Gracias por"…).
  *
- * This preserves real barge-in: speech that does NOT match what we're saying
- * still interrupts the assistant normally.
+ * El primer intento fue solo supresión por contenido (descartar
+ * transcripciones que solapan lo que estamos diciendo). **No alcanzó**: los
+ * fragmentos que el reconocedor entrega son cortos ("Gracias" = 7 caracteres)
+ * y caían bajo cualquier umbral razonable de longitud; bastaba uno para
+ * realimentar el bucle.
+ *
+ * La Web Speech API no expone el stream de audio, así que no hay cancelación
+ * de eco por hardware posible. La única defensa determinista es **half-duplex**:
+ * apagar el reconocimiento mientras el asistente habla y reanudarlo cuando
+ * termina. Eso elimina el bucle por construcción, no por heurística.
+ *
+ * Costo aceptado: se pierde el barge-in por voz mientras suena el audio (no se
+ * puede escuchar y hablar a la vez sin AEC). El usuario puede cortar con
+ * "Detener voz". Un bucle infinito frente al jurado es catastrófico; perder
+ * barge-in con parlantes abiertos es un demérito menor — y con audífonos el
+ * problema no existiría, pero no podemos asumir el hardware del evaluador.
+ *
+ * La supresión por contenido se mantiene como segunda línea para la ventana
+ * de reinicio del reconocedor (donde todavía puede colarse audio del final de
+ * la locución), ahora con umbral de longitud bajo para atrapar fragmentos
+ * cortos.
  */
 const ECHO_TAIL_MS = 1500;
 const ECHO_TOKEN_OVERLAP_THRESHOLD = 0.6;
-const ECHO_MIN_CHARS = 8;
+const ECHO_MIN_CHARS = 3;
+// Chrome a veces no dispara `onend` de speechSynthesis (bug conocido con
+// textos largos). Sin este seguro, el micrófono quedaría apagado para
+// siempre y la llamada moriría en silencio. ~90 ms por carácter cubre con
+// margen una locución en español a velocidad normal.
+const TTS_WATCHDOG_MS_PER_CHAR = 90;
+const TTS_WATCHDOG_MIN_MS = 4000;
 
 function normalizeForEcho(text: string): string {
   return text
@@ -90,6 +114,10 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const wantListeningRef = useRef(false);
   const speakingRef = useRef(false);
+  // Half-duplex: true mientras el reconocimiento está apagado A PROPÓSITO
+  // porque el asistente habla — impide que `onend` lo reinicie solo.
+  const pausedForTtsRef = useRef(false);
+  const ttsWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Echo suppression state: what we are currently saying (normalized) and
   // until when a matching transcript should still be treated as our own echo.
   const spokenNormRef = useRef("");
@@ -114,13 +142,45 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
     setSupported(Boolean(ctor) && ttsOk);
   }, []);
 
+  /** Half-duplex: apaga el micrófono mientras el asistente habla. */
+  const pauseListeningForTts = useCallback(() => {
+    if (!recognitionRef.current || pausedForTtsRef.current) return;
+    pausedForTtsRef.current = true;
+    try {
+      // `abort()` (no `stop()`): descarta lo capturado en vuelo en vez de
+      // entregarlo como final — justo lo que no queremos si es nuestro eco.
+      recognitionRef.current.abort();
+    } catch {
+      // Ya estaba detenido; el estado de arriba es lo que manda.
+    }
+    setListening(false);
+  }, []);
+
+  const resumeListeningAfterTts = useCallback(() => {
+    if (ttsWatchdogRef.current) {
+      clearTimeout(ttsWatchdogRef.current);
+      ttsWatchdogRef.current = null;
+    }
+    if (!pausedForTtsRef.current) return;
+    pausedForTtsRef.current = false;
+    if (!wantListeningRef.current || !recognitionRef.current) return;
+    try {
+      recognitionRef.current.start();
+      setListening(true);
+    } catch {
+      // `start()` lanza si ya estaba corriendo — estado ya consistente.
+    }
+  }, []);
+
   const cancelSpeech = useCallback(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
     speakingRef.current = false;
     setSpeaking(false);
-  }, []);
+    echoWindowUntilRef.current = Date.now() + ECHO_TAIL_MS;
+    resumeListeningAfterTts();
+  }, [resumeListeningAfterTts]);
 
   const speak = useCallback(
     (text: string) => {
@@ -133,20 +193,36 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
       // first words before `onstart` fires.
       spokenNormRef.current = normalizeForEcho(text);
       echoWindowUntilRef.current = Date.now() + ECHO_TAIL_MS;
-      utter.onstart = () => {
-        speakingRef.current = true;
-        setSpeaking(true);
-      };
-      utter.onend = () => {
+      // Half-duplex: micrófono apagado ANTES de emitir el primer sonido.
+      pauseListeningForTts();
+
+      const finish = () => {
         speakingRef.current = false;
         setSpeaking(false);
         // Keep suppressing briefly: finals for audio captured during
         // playback often arrive after synthesis already ended.
         echoWindowUntilRef.current = Date.now() + ECHO_TAIL_MS;
+        resumeListeningAfterTts();
       };
+
+      utter.onstart = () => {
+        speakingRef.current = true;
+        setSpeaking(true);
+      };
+      utter.onend = finish;
+      utter.onerror = finish;
+
+      // Seguro contra `onend` que nunca llega (ver TTS_WATCHDOG_*): sin esto
+      // el micrófono quedaría apagado y la llamada moriría en silencio.
+      if (ttsWatchdogRef.current) clearTimeout(ttsWatchdogRef.current);
+      ttsWatchdogRef.current = setTimeout(
+        finish,
+        Math.max(TTS_WATCHDOG_MIN_MS, text.length * TTS_WATCHDOG_MS_PER_CHAR),
+      );
+
       window.speechSynthesis.speak(utter);
     },
-    [lang],
+    [lang, pauseListeningForTts, resumeListeningAfterTts],
   );
 
   const start = useCallback(() => {
@@ -162,10 +238,15 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
 
     // NOTE: barge-in is deliberately NOT wired to `onspeechstart`. That fired
     // on the assistant's own voice coming back through the speakers, so the
-    // agent interrupted itself on every reply. Barge-in now triggers from
-    // `onresult` only when the recognized text is NOT our own echo.
+    // agent interrupted itself on every reply. Con half-duplex el micrófono
+    // ya está apagado mientras hablamos, así que aquí solo queda la red de
+    // seguridad por contenido para la ventana de reinicio.
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      // Nada de lo capturado mientras hablamos (o justo después) puede
+      // tratarse como turno del paciente.
+      if (speakingRef.current || pausedForTtsRef.current) return;
+
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
@@ -179,11 +260,6 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
               setPartial("");
               continue;
             }
-            if (speakingRef.current) {
-              // Real speech over the assistant → genuine barge-in.
-              cancelSpeech();
-              cbRef.current.onBargeIn?.();
-            }
             cbRef.current.onFinalTurn(finalText);
           }
           interim = "";
@@ -194,10 +270,6 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
       }
       if (interim) {
         if (isEcho(interim)) return;
-        if (speakingRef.current) {
-          cancelSpeech();
-          cbRef.current.onBargeIn?.();
-        }
         setPartial(interim);
         cbRef.current.onPartial?.(interim);
       }
@@ -209,6 +281,14 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
     };
 
     recognition.onend = () => {
+      // Pausa deliberada por TTS (half-duplex): NO reiniciar aquí — lo hace
+      // `resumeListeningAfterTts` cuando termina la locución. Sin esta
+      // guarda, el reinicio automático volvería a abrir el micrófono en
+      // plena locución y reaparecería el bucle de eco.
+      if (pausedForTtsRef.current) {
+        setListening(false);
+        return;
+      }
       // Chrome stops recognition after a silence window; restart while active.
       if (wantListeningRef.current && recognitionRef.current) {
         try {
@@ -229,10 +309,15 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
     } catch {
       // start() throws if called twice; state stays consistent.
     }
-  }, [lang, cancelSpeech, isEcho]);
+  }, [lang, isEcho]);
 
   const stop = useCallback(() => {
     wantListeningRef.current = false;
+    pausedForTtsRef.current = false;
+    if (ttsWatchdogRef.current) {
+      clearTimeout(ttsWatchdogRef.current);
+      ttsWatchdogRef.current = null;
+    }
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
     if (recognition) {
@@ -247,6 +332,8 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
   useEffect(() => {
     return () => {
       wantListeningRef.current = false;
+      pausedForTtsRef.current = false;
+      if (ttsWatchdogRef.current) clearTimeout(ttsWatchdogRef.current);
       recognitionRef.current?.abort();
       recognitionRef.current = null;
       if (typeof window !== "undefined" && "speechSynthesis" in window) {

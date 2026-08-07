@@ -38,9 +38,15 @@ _RESPONSE_MARKER = "asistente de voz de seguimiento postoperatorio"
 _RESPONSE_ABSTAIN_MARKER = "NO tienes evidencia verificada"
 _RESPONSE_HANDOFF_MARKER = "Esta llamada se está escalando"
 
-_FIRST_OBJECTIVE_RE = re.compile(r"^- (?P<code>[A-Z_]+):", re.MULTILINE)
+_OBJECTIVE_RE = re.compile(r"^- (?P<code>[A-Z_]+): (?P<label>.+)$", re.MULTILINE)
+_HISTORY_TURN_RE = re.compile(r"^- \[(?:patient|agent|system)\]", re.MULTILINE)
 _LAST_UTTERANCE_RE = re.compile(
     r"## Último turno del cuidador/paciente a interpretar\n(?P<text>.+)", re.DOTALL
+)
+_NEXT_QUESTION_RE = re.compile(
+    r"## SIGUIENTE PREGUNTA DEL SEGUIMIENTO \(cierra tu respuesta con ella\)\n"
+    r"(?P<question>.+?)(?:\n##|\Z)",
+    re.DOTALL,
 )
 
 _DEFAULT_OBJECTIVE_CODE = "GENERAL_STATE"
@@ -64,13 +70,24 @@ _RULE_CLINICAL_CODES = frozenset({"FEVER", "PAIN_WORSENING", "WOUND_DISCHARGE"})
 
 def _fake_interview_response(full_text: str) -> str:
     """Nunca declara `confirmed`/`denied` (no puede interpretar de verdad el
-    lenguaje del cuidador). Para objetivos NO clínicos registra `uncertain`
-    —que cuenta como "objetivo cubierto" y deja avanzar la entrevista—; para
-    los que alimentan reglas clínicas registra `not_assessed`, la
-    representación honesta de "este adapter no evaluó esto" (y que por
-    diseño no dispara reglas ni cuenta como cubierto)."""
-    objective_match = _FIRST_OBJECTIVE_RE.search(full_text)
-    code = objective_match.group("code") if objective_match else _DEFAULT_OBJECTIVE_CODE
+    lenguaje del cuidador). Registra `uncertain` sólo para objetivos NO
+    clínicos —lo que cuenta como "objetivo cubierto" y deja avanzar la
+    entrevista—; para los que alimentan reglas clínicas registra
+    `not_assessed`, la representación honesta de "este adapter no evaluó
+    esto" (y que por diseño no dispara reglas ni cuenta como cubierto).
+
+    `next_question` rota por los objetivos pendientes según cuántos turnos
+    lleva la llamada: sin esto el fake devolvía siempre la misma pregunta
+    genérica y la demostración se veía como un bucle que no avanzaba."""
+    objectives = [
+        (m.group("code"), m.group("label").strip()) for m in _OBJECTIVE_RE.finditer(full_text)
+    ]
+    turn_count = len(_HISTORY_TURN_RE.findall(full_text))
+
+    if objectives:
+        code, label = objectives[turn_count % len(objectives)]
+    else:
+        code, label = _DEFAULT_OBJECTIVE_CODE, "cómo se siente en general"
 
     utterance_match = _LAST_UTTERANCE_RE.search(full_text)
     original_text = utterance_match.group("text").strip() if utterance_match else ""
@@ -81,11 +98,11 @@ def _fake_interview_response(full_text: str) -> str:
     payload = {
         "needs_clarification": False,
         "clarification_question": None,
-        "next_question": "¿Hay algo más que quieras contarme sobre cómo se siente?",
+        "next_question": f"¿Me puede contar sobre {label}?",
         "observations": [
             {
                 "code": code,
-                "label": code.replace("_", " ").lower(),
+                "label": label,
                 "value": None,
                 "certainty": certainty,
                 "original_text": original_text,
@@ -123,15 +140,32 @@ def _fake_response_text(full_text: str) -> str:
             "Voy a dejar este caso registrado para que lo revise una persona del "
             "equipo; ya quedó anotado lo que me contaste."
         )
+
+    # El agente debe CONDUCIR la entrevista: si el orquestador mandó la
+    # siguiente pregunta del checklist, cerrar con ella. Sin esto, el fake
+    # repetía literalmente la misma frase en cada turno — visible en pruebas
+    # en vivo como un bucle de "Gracias por contarme…" que no avanzaba.
+    next_question = _extract_next_question(full_text)
+
     if _RESPONSE_ABSTAIN_MARKER in full_text:
-        return (
+        base = (
             "No tengo información verificada sobre eso en este momento, así que "
             "prefiero no responder directamente; lo voy a dejar registrado."
         )
-    return (
-        "Gracias por contarme. Con lo que conversamos hasta ahora, todo se ve "
-        "dentro de lo esperado para esta etapa de la recuperación."
-    )
+    else:
+        base = (
+            "Gracias por contarme. Con lo que conversamos hasta ahora, todo se ve "
+            "dentro de lo esperado para esta etapa de la recuperación."
+        )
+    return f"{base} {next_question}".strip() if next_question else base
+
+
+def _extract_next_question(full_text: str) -> str | None:
+    match = _NEXT_QUESTION_RE.search(full_text)
+    if not match:
+        return None
+    question = match.group("question").strip()
+    return question or None
 
 
 class FakeLLM(LLMPort):

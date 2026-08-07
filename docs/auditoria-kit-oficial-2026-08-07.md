@@ -575,3 +575,48 @@ chunks**.
 Los tres bugs tienen test de regresión, y el de escalamiento se verificó revirtiendo el fix
 (el test falla con el mensaje exacto: "un saludo no debe escalar la llamada (turno 2)").
 `make verify` = 311 tests; `pnpm build` + `pnpm lint` verdes.
+
+## 9.5 Quinta pasada — el eco volvió, y el agente no conducía la entrevista
+
+**El bucle de eco reapareció.** La supresión por contenido de §9.4 **no alcanzó**: los
+fragmentos que el reconocedor entrega son cortos ("Gracias" = 7 caracteres, "por
+contarme", "Gracias por") y caían bajo el umbral mínimo de longitud; bastaba que uno se
+colara para realimentar el ciclo. La transcripción quedaba en un bucle infinito del
+paciente "diciendo" trozos de la frase anterior del asistente.
+
+Corregido cambiando de heurística a **half-duplex**: el reconocimiento se apaga
+(`abort()`, que descarta lo capturado en vuelo) antes de emitir el primer sonido y se
+reanuda cuando termina la locución. Elimina el bucle por construcción, no por umbral. Se
+añadió un watchdog por si `onend` de `speechSynthesis` nunca dispara (bug conocido de
+Chrome con textos largos) — sin él, el micrófono quedaría apagado y la llamada moriría en
+silencio. La supresión por contenido se mantiene como segunda línea para la ventana de
+reinicio, con umbral bajado a 3 caracteres.
+
+**Costo aceptado y documentado:** se pierde el barge-in por voz mientras suena el audio.
+Escuchar y hablar a la vez sin cancelación de eco por hardware no es posible, y la Web
+Speech API no expone el stream. Un bucle infinito frente al jurado es catastrófico; perder
+barge-in con parlantes abiertos es un demérito menor. Con audífonos el problema no
+existiría, pero no se puede asumir el hardware del evaluador.
+
+**El agente nunca preguntaba nada.** Hallazgo de producto, no de infraestructura: la
+`next_question` que decide `InterviewAgent` se usaba **sólo como consulta de retrieval** y
+se descartaba — nunca llegaba al `ResponseAgent` ni al paciente. El resultado era una
+"llamada de seguimiento" que no recolectaba información: sólo reaccionaba, repitiendo la
+misma frase. Afecta directamente dos criterios de la rúbrica: "cómo abre, conduce y cierra
+el agente la conversación" (15 pts) y "si indaga antes de decidir" (20 pts).
+
+Corregido: `ResponseTurnInput` lleva `next_question`, el prompt del sistema instruye
+explícitamente a conducir la entrevista y cerrar con esa pregunta (excepto en `handoff`,
+donde seguir el checklist sería incoherente), y el orquestador la pasa. `FakeLLM` ahora
+rota por los objetivos pendientes del checklist según el número de turnos, en vez de
+devolver una pregunta genérica fija.
+
+Verificado end-to-end con una conversación de 5 turnos: el agente pregunta por objetivos
+distintos en cada turno (ánimo → tolerancia a líquidos → fiebre), no escala, y no repite
+la misma frase. `make verify` = 312 tests; `pnpm build` + `pnpm lint` verdes.
+
+**Límite conocido del adapter `fake`:** no puede cerrar objetivos clínicos (nunca afirma
+nada sobre fiebre/dolor/herida), así que con `LLM_PROVIDER=fake` la entrevista se queda
+preguntando por el objetivo clínico pendiente y la llamada no termina sola — se cierra con
+"Finalizar llamada". Es el comportamiento honesto para un adapter sin modelo; con Groq
+real el checklist se cubre normalmente.

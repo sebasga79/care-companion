@@ -133,6 +133,27 @@ def test_gate_websocket_realtime_contract(client: TestClient) -> None:
     assert decision_envs[0]["payload"]["level"] != "DATA_INTEGRITY_FAILURE"
 
 
+def test_agent_asks_the_next_checklist_question(client: TestClient) -> None:
+    """Regresión de un fallo de producto real visto en `/call`: el agente
+    respondía siempre lo mismo y NUNCA preguntaba nada — una llamada de
+    seguimiento que no recolecta información. Causa: `next_question` del
+    `InterviewAgent` sólo se usaba como consulta de retrieval y se
+    descartaba; nunca llegaba al `ResponseAgent` ni al paciente. La rúbrica
+    evalúa "cómo abre, conduce y cierra el agente la conversación"."""
+    case_id = client.get("/api/v1/cases").json()[0]["case_id"]
+    session_id = client.post("/api/v1/sessions", json={"case_id": case_id}).json()["id"]
+
+    with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
+        ws.send_json(
+            {"v": 1, "type": "client.turn_text", "seq": 1, "payload": {"text": "hola, buenas"}}
+        )
+        ws.receive_json()  # server.state
+        response_env = ws.receive_json()
+
+    message = response_env["payload"]["message"]
+    assert "?" in message, f"el agente debe conducir la entrevista preguntando; dijo: {message!r}"
+
+
 def test_greeting_alone_does_not_escalate_the_call(client: TestClient) -> None:
     """Regresión de un falso positivo real visto en `/call` en vivo: saludar
     ("aló, buenas tardes") escalaba la llamada a revisión humana en dos

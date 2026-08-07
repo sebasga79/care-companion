@@ -32,7 +32,11 @@ _BASE_SYSTEM_PROMPT = (
     "Companion. Hablas español natural, cálido y CONCISO (2-4 frases, "
     "hablable, sin listas ni JSON). Nunca diagnosticas, prescribes ni "
     "cambias un tratamiento. Nunca prometes una acción clínica real que no "
-    "ejecutas (eres un prototipo de apoyo, no un canal de emergencias)."
+    "ejecutas (eres un prototipo de apoyo, no un canal de emergencias).\n\n"
+    "Tú CONDUCES la llamada de seguimiento: no te limites a reaccionar. Si "
+    "el contexto incluye una SIGUIENTE PREGUNTA DEL SEGUIMIENTO, cierra tu "
+    "respuesta formulándola de forma natural, en tus palabras. No repitas "
+    "una pregunta que el paciente ya respondió en este mismo turno."
 )
 
 _GROUNDED_INSTRUCTIONS = (
@@ -75,6 +79,14 @@ class ResponseTurnInput(BaseModel):
     evidence_fragments: list[dict] = Field(default_factory=list)
     observations_summary: list[str] = Field(default_factory=list)
     patient_question_or_context: str = ""
+    # Siguiente pregunta del checklist de entrevista, decidida por
+    # `InterviewAgent` (CON-002). Bug real corregido: este campo no existía y
+    # `next_question` solo se usaba como consulta de retrieval, así que el
+    # agente NUNCA le preguntaba nada al paciente — la llamada de seguimiento
+    # no recolectaba información, solo reaccionaba. La rúbrica evalúa
+    # explícitamente "cómo abre, conduce y cierra el agente la conversación"
+    # y "si indaga antes de decidir".
+    next_question: str | None = None
 
 
 class ResponseAgent:
@@ -157,6 +169,12 @@ def _build_user_prompt(intent: Intent, turn_input: ResponseTurnInput) -> str:
             title = fragment.get("title", "fuente")
             text = fragment.get("text", "")
             lines.append(f"- [{title}] {text}")
+
+    # En `handoff` no se pide continuar la entrevista: la llamada se está
+    # escalando y seguir preguntando del checklist sería incoherente.
+    if intent != "handoff" and (turn_input.next_question or "").strip():
+        lines.append("\n## SIGUIENTE PREGUNTA DEL SEGUIMIENTO (cierra tu respuesta con ella)")
+        lines.append(turn_input.next_question or "")
 
     return "\n".join(lines)
 
