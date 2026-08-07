@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import LLMProvider, get_settings
+from app.core.config import EmbeddingsProvider, LLMProvider, get_settings
 
 
 def test_default_settings_use_fake_provider(clean_env: None) -> None:
@@ -104,4 +104,41 @@ def test_fallback_groq_without_api_key_fails(
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
     monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "groq")
     with pytest.raises(ValidationError, match="LLM_FALLBACK_API_KEY"):
+        get_settings()
+
+
+def test_embeddings_default_is_fake(clean_env: None) -> None:
+    settings = get_settings()
+    assert settings.embeddings_provider == EmbeddingsProvider.FAKE
+    assert settings.embeddings_base_url is None
+
+
+def test_embeddings_ollama_applies_known_defaults(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Decisión (auditoría §3/§9): Ollama + BGE-M3, sin necesitar API key
+    (no es un servicio de nube) — solo EMBEDDINGS_PROVIDER=ollama alcanza."""
+    monkeypatch.setenv("EMBEDDINGS_PROVIDER", "ollama")
+    settings = get_settings()
+    assert settings.embeddings_base_url == "http://localhost:11434/v1"
+    assert settings.embeddings_model == "bge-m3"
+    assert settings.embeddings_api_key is None
+
+
+def test_embeddings_ollama_explicit_values_override_defaults(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EMBEDDINGS_PROVIDER", "ollama")
+    monkeypatch.setenv("EMBEDDINGS_BASE_URL", "http://otro-host:11434/v1")
+    monkeypatch.setenv("EMBEDDINGS_MODEL", "nomic-embed-text")
+    settings = get_settings()
+    assert settings.embeddings_base_url == "http://otro-host:11434/v1"
+    assert settings.embeddings_model == "nomic-embed-text"
+
+
+def test_embeddings_provider_allowlist_rejects_unknown_value(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EMBEDDINGS_PROVIDER", "openai-direct-sdk")
+    with pytest.raises(ValidationError):
         get_settings()

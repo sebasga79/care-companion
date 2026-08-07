@@ -10,7 +10,12 @@ Allowlist de modelos (G3, docs/auditoria-kit-oficial-2026-08-07.md §3):
 (Phi-3.5 Mini / Llama 3.2 local) es el de resguardo si el primario no
 responde en la sesión de evaluación en vivo. Ambos hablan el mismo
 protocolo de Chat Completions estilo OpenAI — un solo adapter HTTP basta
-para los dos (`app/adapters/openai_compat_llm.py`)."""
+para los dos (`app/adapters/openai_compat_llm.py`).
+
+Embeddings de RAG (no restringidos por G3, decisión propia): `ollama`
+sirve BGE-M3 localmente por el mismo protocolo HTTP (`app/adapters/
+openai_compat_embeddings.py`), reusando la infraestructura de Ollama que
+ya corre como resguardo del LLM."""
 
 from __future__ import annotations
 
@@ -56,6 +61,33 @@ _PLACEHOLDER_VALUES = {"", "changeme"}
 
 def _is_placeholder(value: str | None) -> bool:
     return not value or value.strip().lower() in _PLACEHOLDER_VALUES
+
+
+class EmbeddingsProvider(str, Enum):
+    """Allowlist de proveedores de embeddings para RAG. A diferencia del
+    LLM (G3), los embeddings NO están restringidos por la rúbrica del reto
+    — esta allowlist es una decisión propia, no un requisito del kit.
+
+    Decisión (docs/auditoria-kit-oficial-2026-08-07.md §3/§9): `ollama`
+    sirve BGE-M3 localmente vía el mismo protocolo HTTP que ya usa el
+    resguardo del LLM — sin sumar un segundo proveedor de nube (se
+    descartó explícitamente usar embeddings de Gemini por esto: hubiera
+    significado una segunda dependencia de red/API key en la sesión de
+    evaluación en vivo, sin necesidad, ya que Ollama corre local)."""
+
+    FAKE = "fake"
+    OLLAMA = "ollama"
+
+
+_EMBEDDINGS_DEFAULT_BASE_URLS: dict[EmbeddingsProvider, str] = {
+    EmbeddingsProvider.OLLAMA: "http://localhost:11434/v1",
+}
+_EMBEDDINGS_DEFAULT_MODELS: dict[EmbeddingsProvider, str] = {
+    # BGE-M3: sugerido explícitamente por docs/stack-tecnico.md §4 por su
+    # desempeño en español ("entiende sinónimos médicos y conceptos
+    # complejos"). Se instala con `ollama pull bge-m3`.
+    EmbeddingsProvider.OLLAMA: "bge-m3",
+}
 
 
 class Settings(BaseSettings):
@@ -106,6 +138,21 @@ class Settings(BaseSettings):
         default=None, alias="LLM_COST_PER_MILLION_OUTPUT_TOKENS"
     )
 
+    # Embeddings reales para RAG (decisión post-auditoría, §3/§9): `fake`
+    # (n-gramas hasheados, sin dependencias, el default de siempre) u
+    # `ollama` (BGE-M3 local). Cambiar de proveedor invalida los vectores ya
+    # indexados (dimensiones distintas) — requiere reingestión completa del
+    # conocimiento cargado (`--clean` en `levantar_app.sh` o borrar la BD).
+    embeddings_provider: EmbeddingsProvider = Field(
+        default=EmbeddingsProvider.FAKE, alias="EMBEDDINGS_PROVIDER"
+    )
+    embeddings_base_url: str | None = Field(default=None, alias="EMBEDDINGS_BASE_URL")
+    embeddings_api_key: str | None = Field(default=None, alias="EMBEDDINGS_API_KEY")
+    embeddings_model: str | None = Field(default=None, alias="EMBEDDINGS_MODEL")
+    embeddings_request_timeout_seconds: float = Field(
+        default=30.0, alias="EMBEDDINGS_REQUEST_TIMEOUT_SECONDS"
+    )
+
     # RAG (Sprint C2, Epic RAG). Defaults conservadores para un corpus
     # pequeño/mediano de reto (architecture.md §9.1); todos overrideables
     # por entorno para tests y ajuste sin tocar código.
@@ -153,6 +200,28 @@ class Settings(BaseSettings):
                 api_key=self.llm_fallback_api_key,
                 env_prefix="LLM_FALLBACK",
             )
+
+        if self.embeddings_provider is not EmbeddingsProvider.FAKE:
+            self.embeddings_base_url = (
+                self.embeddings_base_url
+                if not _is_placeholder(self.embeddings_base_url)
+                else _EMBEDDINGS_DEFAULT_BASE_URLS.get(self.embeddings_provider)
+            )
+            self.embeddings_model = (
+                self.embeddings_model
+                if not _is_placeholder(self.embeddings_model)
+                else _EMBEDDINGS_DEFAULT_MODELS.get(self.embeddings_provider)
+            )
+            missing: list[str] = []
+            if _is_placeholder(self.embeddings_base_url):
+                missing.append("EMBEDDINGS_BASE_URL")
+            if _is_placeholder(self.embeddings_model):
+                missing.append("EMBEDDINGS_MODEL")
+            if missing:
+                raise ValueError(
+                    f"EMBEDDINGS_PROVIDER={self.embeddings_provider.value!r} requiere "
+                    "valores reales para: " + ", ".join(missing)
+                )
         return self
 
     @staticmethod

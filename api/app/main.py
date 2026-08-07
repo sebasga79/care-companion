@@ -16,12 +16,14 @@ from app.adapters.fake_embeddings import FakeEmbeddings
 from app.adapters.fake_llm import FakeLLM
 from app.adapters.fallback_llm import FallbackLLM
 from app.adapters.fixture_cases import FixtureCaseAdapter
+from app.adapters.openai_compat_embeddings import OpenAICompatEmbeddings
 from app.adapters.openai_compat_llm import OpenAICompatLLM
 from app.api.routes import audit, cases, health, knowledge, sessions, ws
-from app.core.config import LLMProvider, Settings, get_settings
+from app.core.config import EmbeddingsProvider, LLMProvider, Settings, get_settings
 from app.core.logging import configure_logging
 from app.core.middleware import CorrelationIdMiddleware
 from app.orchestrator.call_cycle import CallCycleOrchestrator
+from app.ports.embeddings import EmbeddingsPort
 from app.ports.llm import LLMPort
 from app.repositories.audit import AuditRepository
 from app.repositories.db import apply_schema, get_connection
@@ -63,14 +65,11 @@ def create_app() -> FastAPI:
     app.state.turn_repo = TurnRepository(settings.database_path)
     app.state.event_repo = EventRepository(settings.database_path)
 
-    # RAG (Sprint C2, Epic RAG). El adapter de embeddings real llega detrás
-    # del mismo `EmbeddingsPort` en T0 (RAG-004) — hoy siempre es
-    # `FakeEmbeddings`, sin condicionar por `LLM_PROVIDER` (son puertos
-    # independientes; no existe todavía un `EMBEDDINGS_PROVIDER`).
+    # RAG (Sprint C2, Epic RAG). `EMBEDDINGS_PROVIDER` es independiente de
+    # `LLM_PROVIDER` (dos puertos distintos) — decisión de embeddings reales
+    # en docs/auditoria-kit-oficial-2026-08-07.md §3/§9 (Ollama/BGE-M3).
     app.state.document_repo = DocumentRepository(settings.database_path)
-    app.state.embeddings_cache = EmbeddingsCache(
-        FakeEmbeddings(dimensions=settings.rag_embedding_dimensions)
-    )
+    app.state.embeddings_cache = EmbeddingsCache(_build_embeddings_adapter(settings))
     app.state.ingestion_service = KnowledgeIngestionService(
         settings.database_path,
         embeddings_cache=app.state.embeddings_cache,
@@ -174,6 +173,27 @@ def _build_single_adapter(
         model=model,
         provider_name=provider.value,
         timeout_seconds=timeout_seconds,
+    )
+
+
+def _build_embeddings_adapter(settings: Settings) -> EmbeddingsPort:
+    """Único punto de construcción del `EmbeddingsPort` real (mismo
+    principio que `_build_llm_adapter`: el dominio nunca importa un SDK de
+    proveedor). Decisión en docs/auditoria-kit-oficial-2026-08-07.md §3/§9
+    — `ollama` sirve BGE-M3 localmente; sin `EMBEDDINGS_PROVIDER` configurado
+    se mantiene `FakeEmbeddings` (cero dependencias, comportamiento de
+    siempre)."""
+    if settings.embeddings_provider is EmbeddingsProvider.FAKE:
+        return FakeEmbeddings(dimensions=settings.rag_embedding_dimensions)
+    # `Settings._apply_llm_defaults_and_validate` ya garantizó valores
+    # reales para OLLAMA antes de que la app pueda arrancar.
+    assert settings.embeddings_base_url is not None and settings.embeddings_model is not None
+    return OpenAICompatEmbeddings(
+        base_url=settings.embeddings_base_url,
+        api_key=settings.embeddings_api_key,
+        model=settings.embeddings_model,
+        provider_name=settings.embeddings_provider.value,
+        timeout_seconds=settings.embeddings_request_timeout_seconds,
     )
 
 

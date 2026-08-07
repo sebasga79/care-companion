@@ -64,6 +64,24 @@ verdad con Llama 3.1 70B vía Groq:
 4. Reinicia el backend (`./levantar_app.sh --reinstall` o `uv run uvicorn
    app.main:app --port 49317` si corres manual).
 
+### Embeddings reales para el RAG (Ollama + BGE-M3)
+
+Por defecto el RAG usa `FakeEmbeddings` (hashing de n-gramas — sin
+dependencias, pero sin semántica real: no entiende sinónimos ni
+regionalismos). Para embeddings semánticos de verdad:
+
+1. Instala [Ollama](https://ollama.com/) (si no lo hiciste ya para el
+   resguardo del LLM) y corre `ollama pull bge-m3`.
+2. En `api/.env`, agrega:
+   ```bash
+   EMBEDDINGS_PROVIDER=ollama
+   ```
+   `EMBEDDINGS_BASE_URL`/`EMBEDDINGS_MODEL` se completan solos
+   (`http://localhost:11434/v1` / `bge-m3`).
+3. Reinicia el backend. **Si ya habías cargado documentos con `fake`**, los
+   vectores viejos quedan en otra dimensión — borra la base
+   (`./levantar_app.sh --clean`) y vuelve a cargar el conocimiento.
+
 Nunca commitees `api/.env` (ya está en `.gitignore`); la key real solo vive
 ahí, en tu máquina.
 

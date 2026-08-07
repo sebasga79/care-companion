@@ -33,6 +33,10 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, db_path: str) -> Iterator[None]:
         "LLM_FALLBACK_BASE_URL",
         "LLM_FALLBACK_API_KEY",
         "LLM_FALLBACK_MODEL",
+        "EMBEDDINGS_PROVIDER",
+        "EMBEDDINGS_BASE_URL",
+        "EMBEDDINGS_API_KEY",
+        "EMBEDDINGS_MODEL",
     ]:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DATABASE_PATH", db_path)
