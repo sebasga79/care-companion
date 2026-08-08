@@ -311,8 +311,8 @@ def main() -> int:
     # paciente al teléfono.
     import os
 
-    os.environ.setdefault("LLM_RATE_LIMIT_MAX_RETRIES", "6")
-    os.environ.setdefault("LLM_RATE_LIMIT_MAX_WAIT_SECONDS", "70")
+    os.environ.setdefault("LLM_RATE_LIMIT_MAX_RETRIES", "3")
+    os.environ.setdefault("LLM_RATE_LIMIT_MAX_WAIT_SECONDS", "20")
     settings = get_settings()
 
     app = create_app()

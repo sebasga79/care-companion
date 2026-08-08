@@ -86,6 +86,12 @@ logger = logging.getLogger("care_companion.orchestrator")
 # resguardo — justo el riesgo que la auditoría §8 marcó como abierto.
 AGENT_DEADLINE_MS = 5000
 AGENT_DEADLINE_WITH_FALLBACK_MS = 20000
+# Tope absoluto del presupuesto por intento. Sin él, calcular el margen
+# de rate limit como `reintentos x espera_maxima` daba 425 s por intento
+# (6 x 70 s): un `asyncio.wait_for` de siete minutos en el que un cuelgue
+# real quedaba invisible. El peor caso teorico no sirve como presupuesto
+# operativo — Groq pide tipicamente 5-17 s, no 70.
+MAX_AGENT_DEADLINE_MS = 120000
 
 # Cuántas llamadas ya cerradas en la app se adjuntan al contexto, además de
 # los cuatro hitos oficiales del dataset. Ver `_prior_followups`.
@@ -106,7 +112,7 @@ def default_agent_deadline_ms(
     parecía fallar clínicamente cuando en realidad estaba respetando
     correctamente la cuota del proveedor."""
     base = AGENT_DEADLINE_WITH_FALLBACK_MS if has_fallback else AGENT_DEADLINE_MS
-    return base + int(rate_limit_budget_seconds * 1000)
+    return min(base + int(rate_limit_budget_seconds * 1000), MAX_AGENT_DEADLINE_MS)
 
 _URGENT_SCREEN_QUESTION = (
     "Entiendo que se siente muy mal. Para saber si necesita atención inmediata: "
