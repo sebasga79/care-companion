@@ -7,8 +7,23 @@ services:
       # Puerto host inusual (49317) para no chocar con otros proyectos; el
       # contenedor sigue escuchando en 8000 internamente.
       - "49317:8000"
+    # Bug real encontrado en vivo (docs/auditoria-kit-oficial-2026-08-07.md
+    # §9.x): antes esta sección sólo cableaba LLM_PROVIDER/LLM_API_KEY/
+    # LLM_MODEL a mano desde variables del SHELL del host — `api/.env`, que
+    # es donde de verdad se edita la config (Groq real, resguardo Ollama,
+    # rate limiting), nunca se leía. El contenedor arrancaba con los
+    # defaults (`fake`) sin que nada lo avisara: la conversación se veía
+    # fluida porque FakeLLM responde instantáneo, así que "todo muy rápido"
+    # en vivo era la señal correcta de que Groq no se estaba usando.
+    # `env_file` carga TODO `api/.env` automáticamente — variables nuevas
+    # ya no requieren tocar este archivo.
+    env_file:
+      - ./api/.env
     environment:
       - APP_ENV=development
+      # Los tres siguientes SOBREESCRIBEN cualquier valor de api/.env: son
+      # rutas dentro del contenedor, no del host, y api/.env trae las
+      # rutas de desarrollo local (./data/...).
       - DATABASE_PATH=/app/data/care_companion.db
       - DATASET_DIR=/app/data/dataset
       - RAG_ALLOW_EMPTY_PDF_PASSWORD=${RAG_ALLOW_EMPTY_PDF_PASSWORD:-true}
@@ -19,12 +34,15 @@ services:
       - BOOTSTRAP_OFFICIAL_OCR=${BOOTSTRAP_OFFICIAL_OCR:-true}
       - API_HOST=0.0.0.0
       - API_PORT=8000
-      # `fake` permite un smoke test sin credenciales. Para la evaluación
-      # competitiva (G3), Compose acepta Groq/Llama mediante variables del
-      # shell: LLM_PROVIDER=groq LLM_API_KEY=... docker compose up --build.
-      - LLM_PROVIDER=${LLM_PROVIDER:-fake}
-      - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-fake-model-v1}
+      # El resguardo Ollama corre en el host (Ollama.app), no en un
+      # contenedor. Dentro del contenedor, "localhost" es el contenedor
+      # mismo — Ollama ahí es "connection refused" siempre. Verificado:
+      # localhost:11434 falla, host.docker.internal:11434 responde 200.
+      # Sin esto, el resguardo queda inalcanzable justo cuando más se
+      # necesita (Groq con rate limit).
+      - LLM_FALLBACK_BASE_URL=http://host.docker.internal:11434/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - care_companion_data:/app/data
 
