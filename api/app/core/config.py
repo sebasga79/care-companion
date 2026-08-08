@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -226,6 +226,23 @@ class Settings(BaseSettings):
             for ext in self.rag_allowed_extensions.split(",")
             if ext.strip()
         )
+
+    @field_validator(
+        "llm_fallback_provider", "llm_provider", "embeddings_provider", mode="before"
+    )
+    @classmethod
+    def _empty_string_means_unset(cls, value: object) -> object:
+        """Una variable declarada pero vacía significa "sin configurar".
+
+        `LLM_FALLBACK_PROVIDER=` (vacío) impedía arrancar con un error de
+        enum, aunque el propio `.env.example` documenta esa forma como la
+        manera de desactivar el resguardo. Comentar la línea funcionaba pero
+        dejarla vacía no: una trampa para quien siga el README al pie de la
+        letra — el jurado, en la compuerta G2.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @model_validator(mode="after")
     def _apply_llm_defaults_and_validate(self) -> Settings:

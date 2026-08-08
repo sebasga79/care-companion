@@ -181,6 +181,13 @@ SAFETY_SIGNALS: tuple[SafetySignal, ...] = (
         patterns=(
             r"\bpus\b",
             r"\bsupura\w*\b",
+            # Descripción coloquial del exudado: el paciente rara vez dice
+            # "secreción purulenta"; dice "sale un líquido amarillo".
+            # Encontrado por el benchmark en un caso `rojo` no detectado.
+            r"\bl[ií]quido\b[^.]{0,30}\b(?:sal(?:e|iendo)|bota|brota|escurre)\b",
+            r"\b(?:sal(?:e|iendo)|bota|brota|escurre)\b[^.]{0,30}\bl[ií]quido\b",
+            r"\b(?:amarill\w+|verdos\w+|purulent\w+)\b[^.]{0,30}\bherida\b",
+            r"\bherida\b[^.]{0,30}\b(?:amarill\w+|verdos\w+|purulent\w+)\b",
             r"\bsecrecion\w*\b",
             r"\bmal olor\b",
             r"\bhuele (?:mal|feo)\b",
@@ -272,6 +279,17 @@ _FEVER_VALUE_RE = re.compile(
     r"\b(?:fiebre|temperatura)(?:\s+(?:de|en))?\s+(?P<value>\d{2}(?:[.,]\d)?)\b",
     re.IGNORECASE,
 )
+# Un valor de temperatura anunciado sin la palabra "grados" y con el verbo
+# entre medio: "me tomaron la temperatura y creo que MARCÓ como 38".
+# Encontrado por el benchmark en un caso `rojo` del dataset que no escalaba:
+# el paciente reportaba 38 °C y secreción, y ninguna de las dos señales se
+# detectaba. Es habla real de un paciente confundido, no un caso de borde.
+_FEVER_VERB_VALUE_RE = re.compile(
+    r"\b(?:temperatura|fiebre|termometro)\b[^.]{0,40}?"
+    r"\b(?:marco|dio|estaba|tenia|salio|llego)\b(?:\s+(?:como|en|a|de))?\s+"
+    r"(?P<value>\d{2}(?:[.,]\d)?)\b",
+    re.IGNORECASE,
+)
 
 
 def _normalize(text: str) -> str:
@@ -348,6 +366,7 @@ def _detect_reported_temperature(normalized_text: str) -> float | None:
     matches = [
         *_TEMPERATURE_RE.finditer(normalized_text),
         *_FEVER_VALUE_RE.finditer(normalized_text),
+        *_FEVER_VERB_VALUE_RE.finditer(normalized_text),
     ]
     for match in matches:
         if _is_negated(normalized_text, match.start()) or _is_resolved_after(
@@ -477,7 +496,16 @@ def detect_safety_signals(patient_text: str, *, source_turn_id: str) -> list[Obs
         # de 38 °C se conserva una mención explícita de fiebre como FEVER,
         # pero no se crea HIGH_FEVER (el corpus oficial usa > 38 °C).
         if signal.code == "FEVER" and reported_temperature is not None:
-            if reported_temperature > FEVER_CELSIUS_THRESHOLD:
+            # `>=`, no `>`: 38,0 °C ES fiebre en cualquier definición
+            # clínica. El comparador estricto se conserva sólo para
+            # HIGH_FEVER (la regla de alarma RF-003, que sigue el "mayor a
+            # 38 °C" del corpus). Encontrado por el benchmark: un caso
+            # `rojo` reportaba "la temperatura marcó como 38" junto con
+            # secreción de la herida, y como el valor no superaba
+            # estrictamente el umbral, FEVER quedaba SIN CONFIRMAR — la
+            # regla RF-001 (fiebre + secreción) nunca podía dispararse y el
+            # caso no escalaba.
+            if reported_temperature >= FEVER_CELSIUS_THRESHOLD:
                 confirmed = True
                 denied = False
             elif reported_temperature < FEVER_CELSIUS_THRESHOLD:

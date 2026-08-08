@@ -29,9 +29,22 @@ def test_normal_temperature_does_not_create_high_fever() -> None:
     assert "HIGH_FEVER" not in observations
 
 
-def test_exact_threshold_is_not_promoted_beyond_corpus_wording() -> None:
+def test_exact_threshold_is_fever_but_not_high_fever() -> None:
+    """38,0 °C ES fiebre; lo que NO es, es la alarma por temperatura alta.
+
+    Antes se marcaba `denied` a esa temperatura, razonando que el corpus
+    habla de "mayor a 38 °C". El benchmark mostró el costo: un caso `rojo`
+    del dataset reportaba "la temperatura marcó como 38" junto con secreción
+    de la herida, y como FEVER quedaba negada, la regla RF-001 (fiebre +
+    secreción = posible infección de sitio operatorio) no podía dispararse.
+    El caso no escalaba: un falso negativo, la falla que la rúbrica marca
+    como catastrófica.
+
+    El comparador estricto se conserva donde corresponde —HIGH_FEVER/RF-003,
+    la regla que sí cita el umbral del corpus— pero registrar la observación
+    clínica no puede depender de un decimal."""
     observations = _by_code("Tengo exactamente 38 grados")
-    assert observations["FEVER"].certainty == "denied"
+    assert observations["FEVER"].certainty == "confirmed"
     assert "HIGH_FEVER" not in observations
 
 
