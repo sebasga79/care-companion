@@ -248,6 +248,19 @@ def summarize(results: list[dict[str, Any]], settings: Any, capa: str) -> dict[s
     }
 
 
+
+def _write_report(
+    out: Path, results: list[dict[str, Any]], settings: Any, capa: str, *, partial: bool
+) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    report = summarize(results, settings, capa)
+    report["partial"] = partial
+    out.write_text(
+        json.dumps({"summary": report, "cases": results}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=10, help="casos a correr (default: 10)")
@@ -330,6 +343,14 @@ def main() -> int:
             }
         )
         results.append(outcome)
+
+        # Guardado incremental: una corrida contra el nivel gratuito puede
+        # durar horas por las esperas de cuota. Perder todo por un fallo en
+        # el último caso sería absurdo, y además permite mirar el avance sin
+        # interrumpir el proceso.
+        if args.out:
+            _write_report(Path(args.out), results, settings, args.capa, partial=True)
+
         if args.pause:
             time.sleep(args.pause)
         expected = LABEL_SHOULD_ESCALATE.get(case["label"])
@@ -349,13 +370,8 @@ def main() -> int:
     print("\n" + json.dumps(report, indent=2, ensure_ascii=False))
 
     if args.out:
-        out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            json.dumps({"summary": report, "cases": results}, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        print(f"\nResultados en {out}")
+        _write_report(Path(args.out), results, settings, args.capa, partial=False)
+        print(f"\nResultados en {args.out}")
     return 0
 
 
