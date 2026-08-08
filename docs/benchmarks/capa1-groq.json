@@ -1,0 +1,125 @@
+{
+  "summary": {
+    "generated_at": "2026-08-08T17:13:09.120885+00:00",
+    "capa": "capa1_limpia",
+    "provider": "groq",
+    "model": "llama-3.1-8b-instant",
+    "fallback": null,
+    "embeddings": "fake",
+    "cases": 3,
+    "turns": 9,
+    "decision": {
+      "confusion": {
+        "rojo": {
+          "escalated": 0,
+          "not": 1
+        },
+        "amarillo": {
+          "escalated": 0,
+          "not": 1
+        },
+        "verde": {
+          "escalated": 0,
+          "not": 1
+        }
+      },
+      "false_negatives": 1,
+      "false_positives": 0,
+      "false_negative_cases": [
+        "caso_tray_pac_42_00017_14"
+      ],
+      "false_positive_cases": [],
+      "accuracy_scored": 0.5,
+      "sensitivity_red": 0.0,
+      "specificity_green": 1.0
+    },
+    "latency_ms": {
+      "p50": 975.0,
+      "p95": 3039.9,
+      "mean": 1345.2,
+      "max": 3039.9,
+      "samples": 9
+    },
+    "usage": {
+      "input_tokens_total": 19415,
+      "output_tokens_total": 2364,
+      "input_tokens_per_turn": 2157.2,
+      "output_tokens_per_turn": 262.7,
+      "tokens_per_call": 7259.7,
+      "llm_calls_per_turn": 1.44,
+      "rag_queries_per_call": 0.67
+    },
+    "partial": true
+  },
+  "cases": [
+    {
+      "session_id": "efd3dc32-7289-43fa-8a48-df6f08e8a92d",
+      "state": "interviewing",
+      "decision_level": "ROUTINE_FOLLOW_UP",
+      "escalated": false,
+      "turns_sent": 3,
+      "turns_available": 3,
+      "latencies_ms": [
+        935.8552920166403,
+        2569.2773750051856,
+        1011.5388749400154
+      ],
+      "case_id": "caso_tray_pac_42_00017_14",
+      "label": "rojo",
+      "day": 14,
+      "style": "confundido",
+      "usage": {
+        "input_tokens": 7345,
+        "output_tokens": 882,
+        "llm_calls": 5,
+        "rag_queries": 1
+      }
+    },
+    {
+      "session_id": "c6163951-2b21-4b19-a479-f69381f3cb8b",
+      "state": "interviewing",
+      "decision_level": "ROUTINE_FOLLOW_UP",
+      "escalated": false,
+      "turns_sent": 3,
+      "turns_available": 3,
+      "latencies_ms": [
+        646.8218750087544,
+        974.9518339522183,
+        1388.845167006366
+      ],
+      "case_id": "caso_tray_pac_42_00000_3",
+      "label": "amarillo",
+      "day": 3,
+      "style": "evasivo",
+      "usage": {
+        "input_tokens": 4425,
+        "output_tokens": 597,
+        "llm_calls": 3,
+        "rag_queries": 0
+      }
+    },
+    {
+      "session_id": "b71c2793-b6f9-42b1-833c-7a695467d244",
+      "state": "interviewing",
+      "decision_level": "ROUTINE_FOLLOW_UP",
+      "escalated": false,
+      "turns_sent": 3,
+      "turns_available": 3,
+      "latencies_ms": [
+        775.0646660570055,
+        765.0089579401538,
+        3039.857166004367
+      ],
+      "case_id": "caso_tray_pac_42_00000_1",
+      "label": "verde",
+      "day": 1,
+      "style": "minimizador_sintomas",
+      "usage": {
+        "input_tokens": 7645,
+        "output_tokens": 885,
+        "llm_calls": 5,
+        "rag_queries": 1
+      }
+    }
+  ]
+}

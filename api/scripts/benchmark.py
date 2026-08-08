@@ -32,6 +32,7 @@ determinista e instantáneo (útil para verificar el arnés); con `groq` u
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import statistics
 import sys
@@ -41,7 +42,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
 from app.core.config import get_settings
@@ -105,12 +105,64 @@ def _percentile(values: list[float], fraction: float) -> float | None:
     return ordered[index]
 
 
-def run_case(client: TestClient, patient_case_id: str, turns: list[str]) -> dict[str, Any]:
-    """Reproduce una conversación y devuelve el desenlace observado."""
-    created = client.post("/api/v1/sessions", json={"case_id": patient_case_id})
-    if created.status_code != 201:
-        return {"error": f"no se pudo crear sesión: HTTP {created.status_code}"}
-    session_id = created.json()["id"]
+class TokenBudget:
+    """Throttle por tokens/minuto: espera lo justo para que la ventana
+    deslizante vuelva a tener presupuesto.
+
+    Es la forma simple de respetar la cuota: en vez de chocar contra el 429 y
+    reaccionar, se lleva la cuenta de lo consumido en los últimos 60 s y se
+    espera antes de pedir más. Determinista y sin sorpresas."""
+
+    def __init__(self, tokens_per_minute: int, window_seconds: float = 60.0) -> None:
+        self._limit = tokens_per_minute
+        self._window = window_seconds
+        self._spent: list[tuple[float, int]] = []
+
+    def _prune(self, now: float) -> None:
+        self._spent = [(ts, n) for ts, n in self._spent if now - ts < self._window]
+
+    async def reserve(self, estimated_tokens: int) -> float:
+        """Espera hasta que quepan `estimated_tokens`. Devuelve lo esperado."""
+        waited = 0.0
+        while True:
+            now = time.monotonic()
+            self._prune(now)
+            used = sum(n for _, n in self._spent)
+            if used + estimated_tokens <= self._limit or not self._spent:
+                return waited
+            oldest = min(ts for ts, _ in self._spent)
+            sleep_for = max(0.5, self._window - (now - oldest) + 0.5)
+            await asyncio.sleep(sleep_for)
+            waited += sleep_for
+
+    def record(self, tokens: int) -> None:
+        self._spent.append((time.monotonic(), tokens))
+
+
+async def run_case(
+    app: Any, patient_case_id: str, turns: list[str], budget: TokenBudget, est_per_turn: int
+) -> dict[str, Any]:
+    """Reproduce una conversación llamando al orquestador DIRECTAMENTE.
+
+    Antes esto pasaba por `TestClient` + WebSocket, y ahí es donde el
+    benchmark se colgaba: una espera larga dentro del handler bloquea el
+    ciclo de eventos que el WebSocket de pruebas necesita para entregar los
+    mensajes. El orquestador es una corrutina normal — llamarla directo
+    elimina el problema de raíz y permite throttlear con precisión.
+
+    Se pierde la verificación del contrato de envelopes del WebSocket, que
+    ya cubren `tests/test_ws.py` y `tests/test_gates.py`.
+    """
+    from app.repositories.knowledge import get_current_knowledge_version
+
+    settings = app.state.settings
+    record = app.state.session_repo.create(
+        case_id=patient_case_id,
+        state="created",
+        knowledge_version=get_current_knowledge_version(settings.database_path),
+    )
+    session_id = record["id"]
+    orchestrator = app.state.call_cycle_orchestrator
 
     latencies: list[float] = []
     escalated = False
@@ -118,25 +170,26 @@ def run_case(client: TestClient, patient_case_id: str, turns: list[str]) -> dict
     state = "created"
     turns_sent = 0
 
-    with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
-        for seq, text in enumerate(turns, start=1):
-            started = time.perf_counter()
-            ws.send_json(
-                {"v": 1, "type": "client.turn_text", "seq": seq, "payload": {"text": text}}
-            )
-            state_env = ws.receive_json()
-            ws.receive_json()  # server.agent_response
-            decision_env = ws.receive_json()
-            latencies.append((time.perf_counter() - started) * 1000)
-            turns_sent += 1
+    for text in turns:
+        waited = await budget.reserve(est_per_turn)
+        started = time.perf_counter()
+        result = await orchestrator.handle_turn(session_id, text)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        latencies.append(elapsed_ms)
+        turns_sent += 1
 
-            state = state_env["payload"]["state"]
-            decision_level = decision_env["payload"]["level"]
-            escalated = escalated or bool(decision_env["payload"]["escalated"])
+        state = result.state.value
+        decision_level = result.decision_level.value
+        escalated = escalated or bool(result.escalated)
+        budget.record(est_per_turn)
+        if waited:
+            logger_note = f" (esperó {waited:.0f}s de cuota)"
+        else:
+            logger_note = ""
+        print(f"      turno {turns_sent}: {elapsed_ms:.0f} ms{logger_note}", flush=True)
 
-            if state in TERMINAL_STATES:
-                ws.receive_json()  # server.summary
-                break
+        if state in TERMINAL_STATES:
+            break
 
     return {
         "session_id": session_id,
@@ -149,13 +202,10 @@ def run_case(client: TestClient, patient_case_id: str, turns: list[str]) -> dict
     }
 
 
-def collect_usage(client: TestClient, session_id: str) -> dict[str, int]:
+def collect_usage(app: Any, session_id: str) -> dict[str, int]:
     """Uso real del turno leído de los eventos persistidos, no estimado."""
-    trace = client.get(f"/api/v1/audit/sessions/{session_id}/trace")
-    if trace.status_code != 200:
-        return {}
     tokens_in = tokens_out = llm_calls = rag_queries = 0
-    for event in trace.json().get("events", []):
+    for event in app.state.event_repo.list_for_session(session_id):
         payload = event.get("payload")
         data = json.loads(payload) if isinstance(payload, str) else (payload or {})
         if event["event_type"].startswith("agent.") and event["event_type"].endswith(
@@ -270,6 +320,18 @@ def main() -> int:
     parser.add_argument("--max-turns", type=int, default=8, help="tope de turnos por caso")
     parser.add_argument("--out", default=None, help="ruta del JSON de resultados")
     parser.add_argument(
+        "--tpm",
+        type=int,
+        default=6000,
+        help="presupuesto de tokens por minuto del proveedor (Groq free: 6000)",
+    )
+    parser.add_argument(
+        "--est-tokens",
+        type=int,
+        default=6500,
+        help="tokens estimados por turno (3 agentes); se reserva antes de cada turno",
+    )
+    parser.add_argument(
         "--pause",
         type=float,
         default=0.0,
@@ -316,7 +378,7 @@ def main() -> int:
     settings = get_settings()
 
     app = create_app()
-    client = TestClient(app)
+    budget = TokenBudget(args.tpm)
     print(
         f"provider={settings.llm_provider.value} model={settings.llm_model} "
         f"capa={args.capa} casos={len(selected)}\n",
@@ -329,19 +391,20 @@ def main() -> int:
         turns = case["turns"][: args.max_turns]
         if not turns:
             continue
-        outcome = run_case(client, patient_case_id, turns)
-        if "error" in outcome:
-            print(f"  [{position}/{len(selected)}] {case['case_id']}: {outcome['error']}")
-            continue
+        print(f"  [{position}/{len(selected)}] {case['label']} {case['case_id']}", flush=True)
+        outcome = asyncio.run(run_case(app, patient_case_id, turns, budget, args.est_tokens))
         outcome.update(
             {
                 "case_id": case["case_id"],
                 "label": case["label"],
                 "day": case["day"],
                 "style": case["style"],
-                "usage": collect_usage(client, outcome["session_id"]),
+                "usage": collect_usage(app, outcome["session_id"]),
             }
         )
+        actual = outcome["usage"].get("input_tokens", 0) + outcome["usage"].get("output_tokens", 0)
+        if actual and outcome["turns_sent"]:
+            budget.record(max(0, actual - args.est_tokens * outcome["turns_sent"]))
         results.append(outcome)
 
         # Guardado incremental: una corrida contra el nivel gratuito puede
@@ -360,8 +423,7 @@ def main() -> int:
         elif expected is False and outcome["escalated"]:
             mark = "falso positivo"
         print(
-            f"  [{position}/{len(selected)}] {case['label']:8s} {case['case_id'][:34]:36s} "
-            f"escalado={str(outcome['escalated']):5s} "
+            f"      -> escalado={str(outcome['escalated']):5s} "
             f"{outcome['decision_level'] or '-':28s} {mark}",
             flush=True,
         )
