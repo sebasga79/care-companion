@@ -104,7 +104,7 @@ compara contra `label_ground_truth`. Metodología completa en
 |---|---|
 | Falsos negativos | 1 de 4 rojos (sensibilidad 75 %) |
 | Falsos positivos | 0 de 6 verdes (especificidad 100 %) |
-| Latencia p50 / p95 | 1.093 ms / 3.267 ms |
+| Latencia p50 / p95 | 1.093 ms / 3.267 ms (≈1,1 s / ≈3,3 s) |
 | Tokens por turno | 2.493 entrada · 290 salida |
 | Invocaciones LLM / consultas RAG por turno | 1,58 · 1,5 |
 
