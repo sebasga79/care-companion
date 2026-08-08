@@ -23,7 +23,7 @@ from app.api.routes import audit, cases, health, knowledge, sessions, ws
 from app.core.config import EmbeddingsProvider, LLMProvider, Settings, get_settings
 from app.core.logging import configure_logging
 from app.core.middleware import CorrelationIdMiddleware
-from app.orchestrator.call_cycle import CallCycleOrchestrator
+from app.orchestrator.call_cycle import CallCycleOrchestrator, default_agent_deadline_ms
 from app.ports.challenge_case import ChallengeCasePort
 from app.ports.embeddings import EmbeddingsPort
 from app.ports.llm import LLMPort
@@ -96,6 +96,13 @@ def create_app() -> FastAPI:
         evidence_score_threshold=settings.rag_evidence_score_threshold,
         candidate_pool_size=settings.rag_candidate_pool_size,
         retrieval_top_k=settings.rag_retrieval_top_k,
+        # Con resguardo configurado, el presupuesto por intento debe cubrir
+        # primario + resguardo dentro del mismo `asyncio.wait_for` — ver
+        # `default_agent_deadline_ms`. Sin esto, el resguardo local nunca
+        # alcanza a responder antes del deadline y jamás se activa.
+        agent_deadline_ms=default_agent_deadline_ms(
+            has_fallback=settings.llm_fallback_provider is not None
+        ),
     )
 
     # CORS: el frontend corre en otro puerto (cross-origin) y el navegador

@@ -74,7 +74,22 @@ from app.services.rule_engine import evaluate_rules
 
 logger = logging.getLogger("care_companion.orchestrator")
 
+# Presupuesto por intento de agente. Es el `asyncio.wait_for` que envuelve
+# `LLMPort.generate` (app/agents/support.py), así que con `FallbackLLM`
+# cubre primario + resguardo dentro del MISMO intento.
+#
+# Por eso el default sube cuando hay resguardo configurado: medido en la
+# máquina de desarrollo, Groq responde en ~0,7 s pero Ollama local tarda
+# ~5,6 s. Con el antiguo valor fijo de 5.000 ms el resguardo **nunca podía
+# activarse**: el deadline lo mataba antes de que el modelo local
+# alcanzara a contestar. Un resguardo que no puede dispararse es no tener
+# resguardo — justo el riesgo que la auditoría §8 marcó como abierto.
 AGENT_DEADLINE_MS = 5000
+AGENT_DEADLINE_WITH_FALLBACK_MS = 20000
+
+
+def default_agent_deadline_ms(*, has_fallback: bool) -> int:
+    return AGENT_DEADLINE_WITH_FALLBACK_MS if has_fallback else AGENT_DEADLINE_MS
 
 _URGENT_SCREEN_QUESTION = (
     "Entiendo que se siente muy mal. Para saber si necesita atención inmediata: "
@@ -391,6 +406,7 @@ class CallCycleOrchestrator:
         evidence_score_threshold: float,
         candidate_pool_size: int = 200,
         retrieval_top_k: int = 5,
+        agent_deadline_ms: int = AGENT_DEADLINE_MS,
     ) -> None:
         self._database_path = database_path
         self._embeddings = embeddings
@@ -398,6 +414,7 @@ class CallCycleOrchestrator:
         self._evidence_score_threshold = evidence_score_threshold
         self._candidate_pool_size = candidate_pool_size
         self._retrieval_top_k = retrieval_top_k
+        self._agent_deadline_ms = agent_deadline_ms
 
         self._interview_agent = InterviewAgent(llm)
         self._triage_agent = TriageAgent(llm)
@@ -641,7 +658,7 @@ class CallCycleOrchestrator:
                 case_context=case_context,
                 prior_followups=prior_followups,
             ).model_dump(),
-            deadline_ms=AGENT_DEADLINE_MS,
+            deadline_ms=self._agent_deadline_ms,
         )
         interview_result = await self._interview_agent.run(interview_request)
         self._log_event(
@@ -915,7 +932,7 @@ class CallCycleOrchestrator:
                     case_context=case_context,
                     prior_followups=prior_followups,
                 ).model_dump(),
-                deadline_ms=AGENT_DEADLINE_MS,
+                deadline_ms=self._agent_deadline_ms,
             )
             triage_result = await self._triage_agent.run(triage_request)
             self._log_event(
@@ -1009,7 +1026,7 @@ class CallCycleOrchestrator:
                     # descartaba, así que el agente nunca preguntaba nada.
                     next_question=next_question,
                 ).model_dump(),
-                deadline_ms=AGENT_DEADLINE_MS,
+                deadline_ms=self._agent_deadline_ms,
             )
         )
         self._log_event(

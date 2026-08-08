@@ -83,6 +83,32 @@ def test_create_app_uses_fixture_case_adapter_by_default(clean_env: None) -> Non
     assert isinstance(app.state.case_port, FixtureCaseAdapter)
 
 
+def test_agent_deadline_grows_when_a_fallback_is_configured(
+    clean_env: None, monkeypatch
+) -> None:
+    """Regresión de un resguardo que no podía dispararse. El deadline por
+    intento envuelve `LLMPort.generate`, y con `FallbackLLM` eso cubre
+    primario + resguardo. Con el valor fijo de 5.000 ms y un modelo local
+    medido en ~5.600 ms, el resguardo se cancelaba antes de contestar:
+    estaba configurado pero era inalcanzable."""
+    from app.orchestrator.call_cycle import (
+        AGENT_DEADLINE_MS,
+        AGENT_DEADLINE_WITH_FALLBACK_MS,
+        default_agent_deadline_ms,
+    )
+
+    assert default_agent_deadline_ms(has_fallback=False) == AGENT_DEADLINE_MS
+    assert default_agent_deadline_ms(has_fallback=True) == AGENT_DEADLINE_WITH_FALLBACK_MS
+    # El resguardo local medido tarda ~5,6 s: el presupuesto tiene que
+    # dejarle margen real, no apenas alcanzarlo.
+    assert AGENT_DEADLINE_WITH_FALLBACK_MS >= 15000
+
+    monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "ollama")
+    app = create_app()
+    orchestrator = app.state.call_cycle_orchestrator
+    assert orchestrator._agent_deadline_ms == AGENT_DEADLINE_WITH_FALLBACK_MS  # noqa: SLF001
+
+
 def test_create_app_uses_dataset_case_adapter_when_dataset_present(
     clean_env: None, monkeypatch, tmp_path: Path
 ) -> None:
