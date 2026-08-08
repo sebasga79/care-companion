@@ -1644,10 +1644,29 @@ footer {
   font-size: 13px;
 }
 
-.advanced-fields {
+/* Cada campo agrupa su etiqueta y su control. Sin esto, `label` y `select`
+   eran hermanos sueltos dentro del grid y el navegador los repartía en
+   celdas arbitrarias: "Fase" aparecía al lado del selector de
+   "Procedimiento" y su propio selector caía suelto en la línea siguiente. */
+.upload-field {
   display: grid;
-  gap: var(--space-3);
-  padding: 12px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.upload-purpose {
+  margin: 0 0 var(--space-3);
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.upload-purpose strong {
+  color: var(--ink-strong);
+}
+
+.advanced-fields {
+  padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: white;
@@ -1661,7 +1680,26 @@ footer {
 }
 
 .advanced-fields[open] summary {
-  margin-bottom: 4px;
+  margin-bottom: 10px;
+}
+
+.advanced-fields-help {
+  margin: 0 0 12px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.advanced-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 720px) {
+  .advanced-fields-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .upload-zone .field-help {

@@ -381,45 +381,68 @@ export default function KnowledgePage() {
             </div>
           </div>
 
+          <p className="upload-purpose">
+            Sube aquí un documento clínico que el agente <strong>no conozca</strong>. Al
+            cargarlo queda disponible de inmediato para las llamadas; al eliminarlo, el
+            agente deja de usarlo. Es la prueba de conocimiento vivo.
+          </p>
+
           <form className="upload-zone" onSubmit={handleUpload}>
-            <label htmlFor="knowledge-file">Documento (.txt, .md o .pdf)</label>
-            <input
-              id="knowledge-file"
-              name="file"
-              type="file"
-              accept=".txt,.md,.pdf"
-              required
-            />
+            {/* Cada campo va en su propio contenedor con la etiqueta encima
+                del control. Antes los `label` y `select` eran hijos sueltos
+                del grid, así que "Fase" terminaba flotando al lado del
+                selector de "Procedimiento" y su propio selector caía en la
+                línea siguiente, desalineado. */}
+            <div className="upload-field">
+              <label htmlFor="knowledge-file">Documento (.txt, .md o .pdf)</label>
+              <input
+                id="knowledge-file"
+                name="file"
+                type="file"
+                accept=".txt,.md,.pdf"
+                required
+              />
+            </div>
 
             <details className="advanced-fields">
               <summary>Aplicabilidad clínica (opcional)</summary>
-              <label htmlFor="applicability-procedure">Procedimiento</label>
-              <select
-                id="applicability-procedure"
-                value={procedure}
-                onChange={(event) => setProcedure(event.target.value)}
-              >
-                {PROCEDURE_OPTIONS.map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
+              <p className="advanced-fields-help">
+                Acota a qué llamadas aplica. Si lo dejas sin especificar, el documento
+                sirve para cualquier procedimiento.
+              </p>
+              <div className="advanced-fields-grid">
+                <div className="upload-field">
+                  <label htmlFor="applicability-procedure">Procedimiento</label>
+                  <select
+                    id="applicability-procedure"
+                    value={procedure}
+                    onChange={(event) => setProcedure(event.target.value)}
+                  >
+                    {PROCEDURE_OPTIONS.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
 
-              <label htmlFor="applicability-phase">Fase</label>
-              <select
-                id="applicability-phase"
-                value={phase}
-                onChange={(event) => setPhase(event.target.value)}
-              >
-                <option value="">Todas las fases</option>
-                <option value="postoperative">Posoperatorio</option>
-                <option value="discharge">Alta</option>
-                <option value="followup">Seguimiento</option>
-              </select>
+                <div className="upload-field">
+                  <label htmlFor="applicability-phase">Fase</label>
+                  <select
+                    id="applicability-phase"
+                    value={phase}
+                    onChange={(event) => setPhase(event.target.value)}
+                  >
+                    <option value="">Todas las fases</option>
+                    <option value="postoperative">Posoperatorio</option>
+                    <option value="discharge">Alta</option>
+                    <option value="followup">Seguimiento</option>
+                  </select>
+                </div>
+              </div>
             </details>
 
             <span className="field-help">
-              El backend valida extensión, tamaño, firma real de bytes y checksum duplicado
-              antes de indexar — un rechazo no persiste ningún cambio.
+              Se valida extensión, tamaño, contenido real y duplicados antes de indexar.
+              Un rechazo no deja el documento a medias.
             </span>
 
             <button type="submit" className="btn btn-primary" disabled={uploading}>
