@@ -334,6 +334,25 @@ def _is_negated(normalized_text: str, match_start: int) -> bool:
     return False
 
 
+def _is_ni_adjacent_negated(normalized_text: str, match_start: int) -> bool:
+    """`True` si la palabra INMEDIATAMENTE anterior es "ni": continúa una
+    negación previa sobre una enumeración ("no vi nada raro ni mal olor").
+
+    Falso negativo real del benchmark con RAG real (docs/benchmarks/
+    capa1-groq.json, caso rojo `caso_tray_pac_42_00019_14`): el paciente
+    dijo "no le vi que saliera nada raro ni mal olor" — negación explícita
+    — y `WOUND_DISCHARGE` confirmó igual, porque "no" queda 7 palabras
+    antes del match y `_is_negated` sólo mira una ventana de 4.
+
+    Deliberadamente sólo la palabra INMEDIATA, no toda una ventana como
+    `_is_negated`: "ni" en otras posiciones suele ser un modismo que no
+    niega lo que sigue ("ni modo, me duele mucho" — el dolor sí está
+    presente). Ampliar el alcance habría cambiado un falso negativo por
+    otro distinto."""
+    preceding = normalized_text[:match_start].split()
+    return bool(preceding) and preceding[-1] == "ni"
+
+
 def _is_resolved_after(normalized_text: str, match_end: int) -> bool:
     """Reconoce aclaraciones cercanas que hacen histórico el síntoma."""
     return _RESOLUTION_AFTER_RE.search(normalized_text[match_end:]) is not None
@@ -507,6 +526,7 @@ def detect_safety_signals(patient_text: str, *, source_turn_id: str) -> list[Obs
                 intrinsic_negation = matched_text.startswith("no ")
                 if not intrinsic_negation and (
                     _is_negated(normalized, match.start())
+                    or _is_ni_adjacent_negated(normalized, match.start())
                     or _is_resolved_after(normalized, match.end())
                 ):
                     denied = True

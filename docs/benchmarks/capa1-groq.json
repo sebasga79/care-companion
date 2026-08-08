@@ -1,18 +1,18 @@
 {
   "summary": {
-    "generated_at": "2026-08-08T19:14:28.667647+00:00",
+    "generated_at": "2026-08-08T22:29:42.374241+00:00",
     "capa": "capa1_limpia",
     "provider": "groq",
     "model": "llama-3.1-8b-instant",
     "fallback": null,
-    "embeddings": "fake",
+    "embeddings": "ollama",
     "cases": 12,
-    "turns": 62,
+    "turns": 66,
     "decision": {
       "confusion": {
         "rojo": {
-          "escalated": 3,
-          "not": 1
+          "escalated": 2,
+          "not": 2
         },
         "amarillo": {
           "escalated": 0,
@@ -23,335 +23,340 @@
           "not": 4
         }
       },
-      "false_negatives": 1,
+      "false_negatives": 2,
       "false_positives": 0,
       "false_negative_cases": [
-        "caso_tray_pac_42_00017_7"
+        "caso_tray_pac_42_00017_7",
+        "caso_tray_pac_42_00019_14"
       ],
       "false_positive_cases": [],
-      "accuracy_scored": 0.875,
-      "sensitivity_red": 0.75,
+      "accuracy_scored": 0.75,
+      "sensitivity_red": 0.5,
       "specificity_green": 1.0
     },
     "latency_ms": {
-      "p50": 1093.1,
-      "p95": 3267.6,
-      "mean": 1938.8,
-      "max": 24488.4,
-      "samples": 62
+      "p50": 974.2,
+      "p95": 5830.1,
+      "mean": 1709.0,
+      "max": 9917.5,
+      "samples": 66
     },
     "usage": {
-      "input_tokens_total": 154567,
-      "output_tokens_total": 17972,
-      "input_tokens_per_turn": 2493.0,
-      "output_tokens_per_turn": 289.9,
-      "tokens_per_call": 14378.2,
-      "llm_calls_per_turn": 1.58,
-      "rag_queries_per_call": 1.5
+      "input_tokens_total": 131993,
+      "output_tokens_total": 16613,
+      "input_tokens_per_turn": 1999.9,
+      "output_tokens_per_turn": 251.7,
+      "tokens_per_call": 12383.8,
+      "llm_calls_per_turn": 1.33,
+      "rag_queries_per_call": 0.92
     },
     "partial": false
   },
   "cases": [
     {
-      "session_id": "6248e592-4f21-4034-9011-0beae9fbbe4f",
+      "session_id": "7987e72d-5023-4acb-80e2-545aa13eb157",
       "state": "escalated",
-      "decision_level": "MODEL_HIGH_RISK",
+      "decision_level": "HARD_RED_FLAG",
       "escalated": true,
-      "turns_sent": 2,
+      "turns_sent": 4,
       "turns_available": 6,
       "latencies_ms": [
-        680.3207909688354,
-        2127.3394169984385
+        549.3799169780686,
+        3815.9083749633282,
+        845.3412909293547,
+        3102.7668330352753
       ],
       "case_id": "caso_tray_pac_42_00017_14",
       "label": "rojo",
       "day": 14,
       "style": "confundido",
       "usage": {
-        "input_tokens": 4285,
-        "output_tokens": 410,
-        "llm_calls": 4,
-        "rag_queries": 1
+        "input_tokens": 9473,
+        "output_tokens": 1201,
+        "llm_calls": 8,
+        "rag_queries": 2
       }
     },
     {
-      "session_id": "bddb5d58-d09c-4298-a23d-c79c5c47d01c",
+      "session_id": "4908da48-a3a6-4238-9462-edf829bc46f3",
       "state": "interviewing",
       "decision_level": "ROUTINE_FOLLOW_UP",
       "escalated": false,
       "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        2894.955583033152,
-        843.8595000188798,
-        1045.3988329973072,
-        1853.1890410231426,
-        928.0883329920471,
-        1953.0743749346584
+        1199.1164999781176,
+        1915.684042032808,
+        1003.0278329504654,
+        1368.8923750305548,
+        897.9489170014858,
+        585.5679170927033
       ],
       "case_id": "caso_tray_pac_42_00000_3",
       "label": "amarillo",
       "day": 3,
       "style": "evasivo",
       "usage": {
-        "input_tokens": 12627,
-        "output_tokens": 2281,
-        "llm_calls": 8,
-        "rag_queries": 1
+        "input_tokens": 9282,
+        "output_tokens": 1466,
+        "llm_calls": 6,
+        "rag_queries": 0
       }
     },
     {
-      "session_id": "8c9247c8-94dd-432c-b569-02ffd33cca9b",
+      "session_id": "e0f0c8ae-8e39-4216-97d3-f138790a7400",
       "state": "interviewing",
       "decision_level": "ROUTINE_FOLLOW_UP",
       "escalated": false,
       "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        685.5830420972779,
-        815.7164170406759,
-        2962.164624943398,
-        2582.538624992594,
-        2581.1054169898853,
-        2582.0885420544073
+        937.7596250269562,
+        905.4466669913381,
+        948.8193329889327,
+        1100.8295000065118,
+        4854.968999978155,
+        1041.9931249925867
       ],
       "case_id": "caso_tray_pac_42_00000_1",
       "label": "verde",
       "day": 1,
       "style": "minimizador_sintomas",
       "usage": {
-        "input_tokens": 21628,
-        "output_tokens": 1906,
-        "llm_calls": 14,
-        "rag_queries": 4
+        "input_tokens": 12255,
+        "output_tokens": 1533,
+        "llm_calls": 8,
+        "rag_queries": 1
       }
     },
     {
-      "session_id": "ad44791c-740c-4265-a810-0486656fd66c",
+      "session_id": "54c79e4e-4b56-47ff-a7e1-f2cd7859c1e0",
       "state": "interviewing",
       "decision_level": "ROUTINE_FOLLOW_UP",
       "escalated": false,
       "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        836.0660419566557,
-        866.6594999376684,
-        801.293500000611,
-        2880.3087499691173,
-        888.9503750251606,
-        884.8345420556143
+        835.328874993138,
+        575.0184579519555,
+        1619.7582080494612,
+        4819.361667032354,
+        908.8822919875383,
+        4554.753250093199
       ],
       "case_id": "caso_tray_pac_42_00017_7",
       "label": "rojo",
       "day": 7,
       "style": "minimizador_sintomas",
       "usage": {
-        "input_tokens": 12414,
-        "output_tokens": 1207,
-        "llm_calls": 8,
-        "rag_queries": 1
+        "input_tokens": 13725,
+        "output_tokens": 1911,
+        "llm_calls": 10,
+        "rag_queries": 2
       }
     },
     {
-      "session_id": "1c1eef7f-86e7-45cb-87f1-16ed2f5c957a",
+      "session_id": "138ad05e-79f8-49f5-8fb1-3548aa23ac10",
       "state": "interviewing",
-      "decision_level": "MODEL_MODERATE_RISK",
+      "decision_level": "ROUTINE_FOLLOW_UP",
       "escalated": false,
       "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        937.3943340033293,
-        1208.8720409665257,
-        687.4060409609228,
-        2663.1492919987068,
-        3780.9387909946963,
-        24488.356916001067
+        728.9098330074921,
+        1091.7107909917831,
+        1409.8866250133142,
+        831.5152908908203,
+        977.1242089336738,
+        1868.5331250308082
       ],
       "case_id": "caso_tray_pac_42_00001_3",
       "label": "amarillo",
       "day": 3,
       "style": "evasivo",
       "usage": {
-        "input_tokens": 20114,
-        "output_tokens": 2086,
-        "llm_calls": 12,
-        "rag_queries": 3
+        "input_tokens": 9177,
+        "output_tokens": 1291,
+        "llm_calls": 6,
+        "rag_queries": 0
       }
     },
     {
-      "session_id": "59dc5dc9-0e7c-426e-8127-b3439d107535",
+      "session_id": "96970f56-2a9f-4b8f-97e2-23b2d415ac20",
       "state": "interviewing",
       "decision_level": "ROUTINE_FOLLOW_UP",
       "escalated": false,
       "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        765.5433339532465,
-        836.4569169934839,
-        935.7892089756206,
-        1186.3321249838918,
-        1345.9890419617295,
-        2333.9954579714686
+        1926.469499943778,
+        619.7960840072483,
+        1253.863124991767,
+        835.4767919518054,
+        2371.9399999827147,
+        974.1960419341922
       ],
       "case_id": "caso_tray_pac_42_00000_14",
       "label": "verde",
       "day": 14,
       "style": "ansioso",
       "usage": {
-        "input_tokens": 10598,
-        "output_tokens": 1539,
+        "input_tokens": 10232,
+        "output_tokens": 1427,
         "llm_calls": 6,
         "rag_queries": 0
       }
     },
     {
-      "session_id": "3594eb03-2824-444f-8ab0-1971ec44a689",
-      "state": "escalated",
-      "decision_level": "MODEL_HIGH_RISK",
-      "escalated": true,
-      "turns_sent": 4,
+      "session_id": "e5b407aa-355b-4641-8bbd-7c275b48d3a4",
+      "state": "interviewing",
+      "decision_level": "ROUTINE_FOLLOW_UP",
+      "escalated": false,
+      "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        563.4254169417545,
-        1195.2200829982758,
-        2488.8902920065448,
-        2780.2246250212193
+        579.025375074707,
+        1356.3613750739023,
+        991.8223340064287,
+        6033.223542035557,
+        1536.94949997589,
+        723.2058750232682
       ],
       "case_id": "caso_tray_pac_42_00019_14",
       "label": "rojo",
       "day": 14,
       "style": "confundido",
       "usage": {
-        "input_tokens": 7551,
-        "output_tokens": 1244,
-        "llm_calls": 6,
+        "input_tokens": 12575,
+        "output_tokens": 1319,
+        "llm_calls": 8,
         "rag_queries": 1
       }
     },
     {
-      "session_id": "6aefcc44-6f52-4276-9ff8-9aaf97ec9057",
+      "session_id": "4e132853-8ca9-418e-a8c4-15da66dc5769",
       "state": "interviewing",
       "decision_level": "ROUTINE_FOLLOW_UP",
       "escalated": false,
       "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        932.9821250867099,
-        914.6624159766361,
-        763.0050419829786,
-        2809.6403749659657,
-        703.8865829817951,
-        835.7018339447677
+        749.8644590377808,
+        831.8744999123737,
+        843.500499962829,
+        5830.143167055212,
+        961.0977499978617,
+        953.3072499325499
       ],
       "case_id": "caso_tray_pac_42_00001_7",
       "label": "amarillo",
       "day": 7,
       "style": "ansioso",
       "usage": {
-        "input_tokens": 13757,
-        "output_tokens": 1365,
+        "input_tokens": 12537,
+        "output_tokens": 1591,
         "llm_calls": 8,
         "rag_queries": 1
       }
     },
     {
-      "session_id": "4f103eb4-4c4e-4545-9782-1a6347d5a3a9",
+      "session_id": "27f6e28f-c3c8-4abb-8d2e-0cac8bdb89d8",
       "state": "interviewing",
       "decision_level": "ROUTINE_FOLLOW_UP",
       "escalated": false,
       "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        3267.646834021434,
-        959.785332903266,
-        3402.327832998708,
-        1626.1943749850616,
-        1841.8745000381023,
-        1093.1166670052335
+        1073.6069169361144,
+        1075.929458020255,
+        881.3255840213969,
+        823.7032090546563,
+        1099.5072909863666,
+        843.4936660341918
       ],
       "case_id": "caso_tray_pac_42_00000_7",
       "label": "verde",
       "day": 7,
       "style": "ansioso",
       "usage": {
-        "input_tokens": 14627,
-        "output_tokens": 1782,
-        "llm_calls": 8,
-        "rag_queries": 1
+        "input_tokens": 10807,
+        "output_tokens": 1019,
+        "llm_calls": 6,
+        "rag_queries": 0
       }
     },
     {
-      "session_id": "30ae8871-b327-4dfa-a418-d6ec8fdb7cce",
+      "session_id": "fb9e27a4-002a-4940-a9ab-59ac8e9c39fa",
       "state": "escalated",
       "decision_level": "HARD_RED_FLAG",
       "escalated": true,
       "turns_sent": 2,
       "turns_available": 6,
       "latencies_ms": [
-        2882.302417070605,
-        2099.4939169613644
+        5920.899500022642,
+        2885.5662080459297
       ],
       "case_id": "caso_tray_pac_42_00019_7",
       "label": "rojo",
       "day": 7,
       "style": "colaborativo",
       "usage": {
-        "input_tokens": 7234,
-        "output_tokens": 906,
+        "input_tokens": 7188,
+        "output_tokens": 1006,
         "llm_calls": 6,
         "rag_queries": 2
       }
     },
     {
-      "session_id": "89d72242-6e19-4be8-82e8-e03b71694a88",
+      "session_id": "8badb8d3-c70d-423c-8baf-f8b6e11f03c7",
       "state": "interviewing",
       "decision_level": "ROUTINE_FOLLOW_UP",
       "escalated": false,
       "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        644.3565000081435,
-        988.5525839636102,
-        1240.971416933462,
-        2359.71150000114,
-        1368.9884580671787,
-        832.675667013973
+        730.0979580031708,
+        716.1019580671564,
+        890.0071659591049,
+        3932.9398749396205,
+        905.7307500625029,
+        972.6691249525174
       ],
       "case_id": "caso_tray_pac_42_00003_3",
       "label": "amarillo",
       "day": 3,
       "style": "confundido",
       "usage": {
-        "input_tokens": 13583,
-        "output_tokens": 1356,
+        "input_tokens": 12792,
+        "output_tokens": 1233,
         "llm_calls": 8,
         "rag_queries": 1
       }
     },
     {
-      "session_id": "4ccc73f8-9f1d-4ad0-96b8-70ff4aefa8a6",
+      "session_id": "2ce74782-47c1-4f26-b9c4-d4d31f635b88",
       "state": "interviewing",
       "decision_level": "ROUTINE_FOLLOW_UP",
       "escalated": false,
       "turns_sent": 6,
       "turns_available": 6,
       "latencies_ms": [
-        613.6129589285702,
-        2890.2605830226094,
-        2679.5259579084814,
-        665.2692910283804,
-        876.6123750247061,
-        1020.573207992129
+        767.798834014684,
+        9917.520208051428,
+        801.9895419711247,
+        919.3427080754191,
+        1008.1828340189531,
+        1959.3182500684634
       ],
       "case_id": "caso_tray_pac_42_00001_1",
       "label": "verde",
       "day": 1,
       "style": "minimizador_sintomas",
       "usage": {
-        "input_tokens": 16149,
-        "output_tokens": 1890,
-        "llm_calls": 10,
-        "rag_queries": 2
+        "input_tokens": 11950,
+        "output_tokens": 1616,
+        "llm_calls": 8,
+        "rag_queries": 1
       }
     }
   ]

@@ -111,6 +111,33 @@ def test_actual_worsening_still_confirms_even_when_patient_is_worried() -> None:
     assert observations["PAIN_WORSENING"].certainty == "confirmed"
 
 
+def test_ni_adjacent_negation_denies_wound_discharge() -> None:
+    """Falso negativo real del benchmark con RAG real (caso rojo
+    `caso_tray_pac_42_00019_14`): "no le vi que saliera nada raro ni mal
+    olor" es una negación explícita, pero "no" queda 7 palabras antes del
+    match — fuera de la ventana de 4 de `_is_negated`."""
+    observations = _by_code(
+        "la vi como rojita, un poquito, alrededor, pero no le vi que saliera "
+        "nada raro ni mal olor, gracias a Dios"
+    )
+    wound = observations.get("WOUND_DISCHARGE")
+    assert wound is None or wound.certainty != "confirmed"
+
+
+def test_ni_as_idiom_does_not_suppress_a_real_report_further_away() -> None:
+    """El chequeo es deliberadamente sólo para "ni" INMEDIATO al match. Si
+    "ni" apareciera más lejos (p. ej. el modismo "ni modo"), no debe
+    suprimir un reporte real de dolor que sí está presente."""
+    observations = _by_code("ni modo, tengo un dolor insoportable")
+    assert observations["PAIN_WORSENING"].certainty == "confirmed"
+
+
+def test_real_wound_discharge_still_confirms_without_ni() -> None:
+    """Contrapeso: el fix no debe apagar el caso positivo real ya cubierto."""
+    observations = _by_code("me sale un liquido amarillo de la herida y tengo mal olor")
+    assert observations["WOUND_DISCHARGE"].certainty == "confirmed"
+
+
 def test_inability_to_eat_is_not_mislabeled_as_vomiting() -> None:
     observations = _by_code("Puedo tomar líquidos normalmente, pero no puedo comer")
     assert observations["ORAL_INTAKE_INTOLERANCE"].certainty == "confirmed"
