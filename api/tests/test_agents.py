@@ -15,7 +15,12 @@ import pytest
 from app.adapters.fake_llm import ScriptedFakeLLM
 from app.agents.interview import InterviewAgent, InterviewTurnInput
 from app.agents.response import ResponseAgent, ResponseTurnInput
-from app.agents.support import AgentInvocationError, extract_json_payload, invoke_structured
+from app.agents.support import (
+    AgentInvocationError,
+    extract_json_payload,
+    format_prior_followup,
+    invoke_structured,
+)
 from app.agents.triage import TriageAgent, TriageTurnInput
 from app.domain.models import AgentRequest
 from app.ports.llm import LLMMessage
@@ -580,3 +585,70 @@ async def test_response_agent_returns_error_when_llm_output_is_empty() -> None:
         )
     )
     assert result.status == "error"
+
+
+# --------------------------------------------------------------------- #
+# format_prior_followup — presupuesto de contexto (G4 / nivel gratuito)
+# --------------------------------------------------------------------- #
+
+
+def test_format_prior_followup_renders_readable_line_not_dict_repr() -> None:
+    """Regresión de un derroche de contexto medido en vivo: los tres agentes
+    volcaban el diccionario con `f"- {followup}"`, es decir el `repr` de
+    Python. Ocupaba el 43 % del prompt de Interview y el 60 % del de Triage,
+    contra 847 chars de la evidencia RAG (que sí estaba filtrada). Con el
+    nivel gratuito de Groq (6.000 TPM) eso agotaba la cuota por turno."""
+    line = format_prior_followup(
+        {
+            "source": "official_longitudinal_history",
+            "trajectory_id": "tray_pac_42_00000_1",
+            "days_since_procedure": 1,
+            "archetype": "recuperacion_normal",
+            "pain_nrs": 2,
+            "temperature_c": 37.5,
+            "mobility": "normal",
+            "wound": "eritema_leve",
+            "appetite": "muy_disminuido",
+            "sleep": "normal",
+        }
+    )
+
+    assert line.startswith("Día 1:")
+    assert "dolor 2/10" in line
+    assert "37.5 °C" in line
+    # Los guiones bajos del dataset se leen como texto, no como identificador.
+    assert "eritema leve" in line
+    # Ni sintaxis de diccionario ni claves internas que el modelo no necesita.
+    assert "{" not in line and "'" not in line
+    assert "trajectory_id" not in line and "source" not in line
+
+
+def test_format_prior_followup_flattens_nested_observations() -> None:
+    """Las llamadas ya cerradas adjuntan sus observaciones como lista de
+    dicts; sin tratarlas explícitamente caían al caso genérico y volvían a
+    imprimirse como `repr`, un nivel más adentro."""
+    line = format_prior_followup(
+        {
+            "source": "completed_call",
+            "days_since_procedure": 7,
+            "observations": [
+                {"code": "FEVER", "label": "fiebre", "certainty": "confirmed", "value": "38.5"},
+                {"code": "PAIN", "label": "dolor", "certainty": "denied", "value": None},
+            ],
+            "decision_level": "HARD_RED_FLAG",
+        }
+    )
+
+    assert "fiebre 38.5 (confirmed)" in line
+    assert "dolor (denied)" in line
+    assert "{" not in line and "'" not in line
+
+
+def test_format_prior_followup_keeps_unknown_clinical_keys() -> None:
+    """Sólo se omiten claves internas: nunca un dato clínico que el modelo
+    podría necesitar."""
+    line = format_prior_followup(
+        {"days_since_procedure": 3, "saturacion_o2": 92, "source": "completed_call"}
+    )
+    assert "saturacion o2 92" in line
+    assert "source" not in line

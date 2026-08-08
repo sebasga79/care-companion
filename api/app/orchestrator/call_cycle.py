@@ -87,6 +87,10 @@ logger = logging.getLogger("care_companion.orchestrator")
 AGENT_DEADLINE_MS = 5000
 AGENT_DEADLINE_WITH_FALLBACK_MS = 20000
 
+# Cuántas llamadas ya cerradas en la app se adjuntan al contexto, además de
+# los cuatro hitos oficiales del dataset. Ver `_prior_followups`.
+_MAX_PRIOR_COMPLETED_CALLS = 2
+
 
 def default_agent_deadline_ms(*, has_fallback: bool) -> int:
     return AGENT_DEADLINE_WITH_FALLBACK_MS if has_fallback else AGENT_DEADLINE_MS
@@ -532,7 +536,22 @@ class CallCycleOrchestrator:
                     "decision_level": decisions[-1]["level"] if decisions else None,
                 }
             )
-        return prior
+
+        # Los cuatro hitos oficiales (1/3/7/14) son la línea base clínica y
+        # siempre viajan completos. Las llamadas ya cerradas EN LA APP, en
+        # cambio, se acumulan sin techo: cada demo o prueba agrega una más y
+        # todas terminaban en el prompt de tres agentes. Medido tras unas
+        # pocas pruebas ya había ~17 entradas donde deberían ser 4.
+        #
+        # Se conservan sólo las más recientes: en un seguimiento
+        # postoperatorio lo que importa es la evolución cercana, y el
+        # historial oficial ya cubre el arco completo. Sin este techo, el
+        # consumo por turno crece con el uso hasta agotar la cuota del
+        # proveedor (6.000 TPM en el nivel gratuito de Groq).
+        official = [f for f in prior if f.get("source") == "official_longitudinal_history"]
+        completed = [f for f in prior if f.get("source") == "completed_call"]
+        completed.sort(key=lambda f: f.get("days_since_procedure") or 0)
+        return official + completed[-_MAX_PRIOR_COMPLETED_CALLS:]
 
     async def handle_turn(self, session_id: str, patient_text: str) -> TurnCycleResult:
         session = self._session_repo.get(session_id)

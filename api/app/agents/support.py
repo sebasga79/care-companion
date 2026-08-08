@@ -162,11 +162,27 @@ def format_prior_followup(followup: dict) -> str:
         if value:
             parts.append(f"{label} {str(value).replace('_', ' ')}")
 
-    # Claves no previstas (p. ej. las que agrega una sesión ya cerrada de la
-    # propia app) se conservan: se omiten sólo las internas, nunca datos
-    # clínicos que el modelo podría necesitar.
+    # Las llamadas ya cerradas en la app adjuntan sus observaciones como
+    # lista de diccionarios. Sin este caso, caían al `else` genérico de
+    # abajo y se imprimían con `repr` — el mismo problema que este
+    # formateador vino a resolver, un nivel más adentro.
+    observations = followup.get("observations")
+    if isinstance(observations, list) and observations:
+        rendered: list[str] = []
+        for obs in observations:
+            if not isinstance(obs, dict):
+                continue
+            name = obs.get("label") or obs.get("code") or "observación"
+            value = obs.get("value")
+            suffix = "" if value in (None, "") else f" {value}"
+            rendered.append(f"{name}{suffix} ({obs.get('certainty')})")
+        if rendered:
+            parts.append("reportó " + "; ".join(rendered))
+
+    # Claves no previstas se conservan: se omiten sólo las internas, nunca
+    # datos clínicos que el modelo podría necesitar.
     known = {"days_since_procedure", "pain_nrs", "temperature_c", "mobility",
-             "wound", "appetite", "sleep", "archetype"}
+             "wound", "appetite", "sleep", "archetype", "observations"}
     for key, value in followup.items():
         if key in known or key in _FOLLOWUP_INTERNAL_KEYS or value in (None, "", []):
             continue
