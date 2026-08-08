@@ -83,6 +83,51 @@ _RESOLUTION_AFTER_RE = re.compile(
     r"^(?:\W|\w+\W){0,4}(?:pero\s+)?(?:ya\s+no|se\s+me\s+quito|ya\s+se\s+fue|me\s+paso)\b"
 )
 
+# El paciente PREGUNTA o declara no saber, no reporta un síntoma.
+#
+# Falso positivo real visto en `/call`: ante "no sé, usted dígame porque no
+# me acuerdo cómo estaba… quiero que me diga si sigue igual o mejorado o
+# EMPEORADO", el detector confirmó `PAIN_WORSENING` y la llamada escaló a
+# urgencia. El paciente no había reportado empeoramiento: estaba pidiendo
+# que le recordaran su propia línea base, y la palabra aparecía dentro de
+# una enumeración de alternativas.
+#
+# La rúbrica pesa más el falso negativo, y por eso este módulo sesga hacia
+# confirmar; pero escalar porque alguien PRONUNCIÓ la palabra dentro de una
+# pregunta no es sesgo prudente, es no distinguir quién afirma qué. Esas
+# ocurrencias no se toman como reporte — si además hay una señal real en la
+# misma frase ("no sé qué hacer, estoy sangrando"), esa se detecta por su
+# propio patrón y sigue disparando.
+_QUERY_MARKER_WINDOW_WORDS = 12
+_QUERY_MARKERS: tuple[str, ...] = (
+    "digame",
+    "dime",
+    "digamelo",
+    "me dice",
+    "me diga",
+    "me digas",
+    "me puede decir",
+    "usted sabe",
+    "usted dice",
+    "no me acuerdo",
+    "no recuerdo",
+    "que me diga",
+    "que me digas",
+    "que me cuente",
+)
+# NO se incluye "quiero que me" a secas: suprimía "quiero que me
+# HOSPITALICEN ya", que es una petición de auxilio, no una pregunta. Los
+# marcadores deben nombrar el acto de *pedir información* (decir, contar),
+# nunca el de pedir atención.
+# "no sé" NO entra: es demasiado ambiguo. Suprimía la señal real en
+# "no sé qué hacer, estoy sangrando mucho" — un falso negativo, que es
+# justo lo que la rúbrica marca como falla catastrófica. Sólo se suprime
+# ante una petición explícita de información ("dígame", "no me acuerdo").
+# Enumeración de alternativas: "…si sigue igual o mejorado o empeorado".
+# Si junto al término aparece su contrario, es un menú de opciones, no un
+# reporte.
+_ALTERNATIVE_CONTRAST = ("mejor", "igual", "peor")
+
 
 @dataclass(frozen=True)
 class SafetySignal:
@@ -276,6 +321,23 @@ def _is_resolved_after(normalized_text: str, match_end: int) -> bool:
     return _RESOLUTION_AFTER_RE.search(normalized_text[match_end:]) is not None
 
 
+def _is_query_not_report(normalized_text: str, match_start: int, match_end: int) -> bool:
+    """`True` si el término aparece porque el paciente PREGUNTA o enumera
+    opciones, no porque reporte el síntoma. Ver `_QUERY_MARKERS`."""
+    preceding = normalized_text[:match_start]
+    window = " ".join(preceding.split()[-_QUERY_MARKER_WINDOW_WORDS:])
+    if any(marker in window for marker in _QUERY_MARKERS):
+        return True
+
+    # Enumeración de alternativas: el contrario aparece muy cerca, unido por
+    # "o" ("sigue igual o mejorado o empeorado").
+    tail = " ".join(preceding.split()[-6:])
+    if " o " in f" {tail} " and any(word in tail for word in _ALTERNATIVE_CONTRAST):
+        return True
+    following = " ".join(normalized_text[match_end:].split()[:6])
+    return " o " in f" {following} " and any(w in following for w in _ALTERNATIVE_CONTRAST)
+
+
 def _detect_reported_temperature(normalized_text: str) -> float | None:
     """Devuelve la temperatura más alta reportada de forma plausible.
 
@@ -385,8 +447,22 @@ def detect_safety_signals(patient_text: str, *, source_turn_id: str) -> list[Obs
         denied = False
         for pattern in signal.patterns:
             for match in re.finditer(pattern, normalized):
-                if _is_negated(normalized, match.start()) or _is_resolved_after(
-                    normalized, match.end()
+                # El paciente pregunta o enumera opciones: no es un reporte,
+                # ni confirmado ni negado — simplemente no dice nada sobre el
+                # síntoma. Marcarlo `denied` sería tan incorrecto como
+                # `confirmed` (spec.md §11.2: no inferir negación).
+                if _is_query_not_report(normalized, match.start(), match.end()):
+                    continue
+                # Hay patrones cuya propia frase es una negación: "no puedo
+                # respirar", "no puedo comer". Aplicarles el chequeo de
+                # negación previa los invertía — "no sé, no puedo respirar"
+                # quedaba como `denied`, un falso negativo en una señal de
+                # urgencia. La negación ya forma parte del síntoma.
+                matched_text = match.group(0)
+                intrinsic_negation = matched_text.startswith("no ")
+                if not intrinsic_negation and (
+                    _is_negated(normalized, match.start())
+                    or _is_resolved_after(normalized, match.end())
                 ):
                     denied = True
                 else:

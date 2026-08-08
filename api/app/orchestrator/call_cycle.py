@@ -104,10 +104,23 @@ _URGENT_SCREEN_QUESTION = (
 _VAGUE_WELLBEING_RE = re.compile(
     r"^(?:me siento\s+)?(?:mas o menos|regular|ahi voy|pues ahi|ni bien ni mal)[\s.!¡¿?]*$"
 )
+# El paciente remite su respuesta al historial que el agente ya tiene. No
+# es una respuesta ni una evasiva: es una petición legítima de información
+# que el sistema SÍ puede satisfacer (tiene los cuatro seguimientos).
+#
+# Se amplió tras una prueba en vivo: "no sé, usted dígame porque yo no me
+# acuerdo cómo estaba… quiero que me diga si sigue igual o mejorado o
+# empeorado" no coincidía con ninguna forma anterior, así que el turno se
+# trataba como respuesta cualquiera y la pregunta del paciente quedaba sin
+# contestar.
 _HISTORY_REFERENCE_RE = re.compile(
     r"\b(?:usted|ustedes)\s+(?:debe|deben|deberia|deberian)\s+saber\b|"
     r"\b(?:ya\s+)?(?:tiene|tienen)\s+(?:todos\s+)?(?:mis|los)\s+registros\b|"
-    r"\b(?:eso|esa informacion)\s+esta\s+en\s+(?:mis|los)\s+registros\b"
+    r"\b(?:eso|esa informacion)\s+esta\s+en\s+(?:mis|los)\s+registros\b|"
+    r"\b(?:usted\s+)?(?:digame|digamelo|dime|dimelo)\b|"
+    r"\bquiero que me (?:diga|digas|cuente)\b|"
+    r"\bno (?:me acuerdo|recuerdo)\b|"
+    r"\b(?:me|nos) puede decir (?:usted|si)\b"
 )
 
 # Componentes aislados que sí justifican revisión humana cuando el corpus no

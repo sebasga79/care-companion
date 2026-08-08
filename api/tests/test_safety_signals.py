@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.domain.observation import Observation
 from app.domain.safety_signals import (
     detect_safety_signals,
@@ -118,3 +120,49 @@ def test_deterministic_confirmation_cannot_be_downgraded_by_agent() -> None:
     merged = {obs.code: obs for obs in merge_with_safety_precedence([agent], [safety])}
     assert merged["FEVER"].certainty == "confirmed"
     assert merged["FEVER"].normalized_by.startswith("safety-signal-detector")
+
+
+# --------------------------------------------------------------------- #
+# El paciente PREGUNTA, no reporta (falso positivo real visto en /call)
+# --------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "pregunta",
+    [
+        # Caso exacto de la prueba en vivo: escaló a urgencia porque el
+        # paciente pronunció "empeorado" DENTRO de una pregunta.
+        "no sé Usted dígame porque yo no me acuerdo cómo estaba y cómo había "
+        "reportado la vez pasada entonces Quiero que me digas si sigue igual "
+        "o mejorado o empeorado",
+        "dígame usted si he mejorado o empeorado",
+        "no me acuerdo si el dolor empeoró",
+    ],
+)
+def test_question_about_a_symptom_is_not_a_report(pregunta: str) -> None:
+    confirmed = [
+        o.code for o in detect_safety_signals(pregunta, source_turn_id="t1")
+        if o.certainty == "confirmed"
+    ]
+    assert confirmed == [], f"una pregunta no puede escalar la llamada: {confirmed}"
+
+
+@pytest.mark.parametrize(
+    ("texto", "esperado"),
+    [
+        # Contrapeso: suprimir preguntas NO puede introducir falsos
+        # negativos, que la rúbrica marca como la falla catastrófica.
+        ("el dolor ha empeorado bastante desde ayer", "PAIN_WORSENING"),
+        ("no sé qué hacer, estoy sangrando mucho", "BLEEDING"),
+        # "no puedo respirar" contiene su propia negación: aplicarle el
+        # chequeo de negación previa la invertía ante un "no sé" delante.
+        ("no sé, no puedo respirar bien", "BREATHING_DIFFICULTY"),
+        ("no puedo respirar", "BREATHING_DIFFICULTY"),
+    ],
+)
+def test_real_report_still_fires_after_question_suppression(texto: str, esperado: str) -> None:
+    confirmed = [
+        o.code for o in detect_safety_signals(texto, source_turn_id="t1")
+        if o.certainty == "confirmed"
+    ]
+    assert esperado in confirmed, f"falso negativo en {texto!r}: {confirmed}"
