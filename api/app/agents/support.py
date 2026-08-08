@@ -120,4 +120,64 @@ async def invoke_structured(
     raise AgentInvocationError(last_reason, attempts=attempts, usage=usage)
 
 
-__all__ = ["AgentInvocationError", "extract_json_payload", "invoke_structured"]
+_FOLLOWUP_INTERNAL_KEYS = frozenset({"source", "trajectory_id", "case_id", "session_id"})
+
+
+def format_prior_followup(followup: dict) -> str:
+    """Proyección compacta de un seguimiento previo para un prompt.
+
+    Los tres agentes volcaban el diccionario completo con `f"- {followup}"`,
+    es decir el `repr` de Python: llaves, comillas, guiones bajos y claves
+    internas (`source`, `trajectory_id`) que el modelo no necesita. Medido
+    sobre un turno real: 2.700 caracteres en `InterviewAgent` y otros 2.686
+    duplicados en `TriageAgent` — el 43 % y el 60 % de sus prompts
+    respectivamente, contra 847 caracteres de la evidencia RAG (que sí
+    estaba filtrada por relevancia).
+
+    Eso importa más allá de la prolijidad: con el nivel gratuito de Groq
+    (6.000 tokens/minuto) el consumo por turno agotaba la cuota y la llamada
+    caía al modelo local, pasando de 0,6 s a 17,6 s por turno.
+
+    Un índice vectorial no aplica aquí: son cuatro registros estructurados
+    de UN paciente, no un corpus. Lo correcto es proyectarlos legibles y
+    cortos; el RAG sigue siendo el mecanismo para el corpus clínico.
+    """
+    day = followup.get("days_since_procedure")
+    head = f"Día {day}" if day is not None else "Seguimiento"
+
+    parts: list[str] = []
+    pain = followup.get("pain_nrs")
+    if pain is not None:
+        parts.append(f"dolor {pain}/10")
+    temperature = followup.get("temperature_c")
+    if temperature is not None:
+        parts.append(f"{temperature} °C")
+    for key, label in (
+        ("mobility", "movilidad"),
+        ("wound", "herida"),
+        ("appetite", "apetito"),
+        ("sleep", "sueño"),
+    ):
+        value = followup.get(key)
+        if value:
+            parts.append(f"{label} {str(value).replace('_', ' ')}")
+
+    # Claves no previstas (p. ej. las que agrega una sesión ya cerrada de la
+    # propia app) se conservan: se omiten sólo las internas, nunca datos
+    # clínicos que el modelo podría necesitar.
+    known = {"days_since_procedure", "pain_nrs", "temperature_c", "mobility",
+             "wound", "appetite", "sleep", "archetype"}
+    for key, value in followup.items():
+        if key in known or key in _FOLLOWUP_INTERNAL_KEYS or value in (None, "", []):
+            continue
+        parts.append(f"{key.replace('_', ' ')} {value}")
+
+    return f"{head}: {', '.join(parts)}" if parts else f"{head}: sin datos"
+
+
+__all__ = [
+    "AgentInvocationError",
+    "extract_json_payload",
+    "format_prior_followup",
+    "invoke_structured",
+]

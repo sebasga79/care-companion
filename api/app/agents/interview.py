@@ -22,7 +22,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from app.agents.support import AgentInvocationError, extract_json_payload, invoke_structured
+from app.agents.support import (
+    AgentInvocationError,
+    extract_json_payload,
+    format_prior_followup,
+    invoke_structured,
+)
 from app.domain.models import AgentRequest, AgentResult, UsageMetrics
 from app.domain.observation import Certainty, Observation
 from app.ports.llm import LLMMessage, LLMPort
@@ -279,7 +284,7 @@ def _build_user_prompt(turn_input: InterviewTurnInput) -> str:
     lines.append("\n## Seguimientos anteriores estructurados (no asumir vigencia hoy)")
     if turn_input.prior_followups:
         for followup in turn_input.prior_followups:
-            lines.append(f"- {followup}")
+            lines.append(f"- {format_prior_followup(followup)}")
     else:
         lines.append("(ninguno)")
 

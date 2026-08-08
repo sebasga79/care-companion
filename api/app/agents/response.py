@@ -21,7 +21,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.agents.support import AgentInvocationError, invoke_structured
+from app.agents.support import (
+    AgentInvocationError,
+    format_prior_followup,
+    invoke_structured,
+)
 from app.domain.decision import DecisionLevel
 from app.domain.models import AgentRequest, AgentResult, CitationRef, UsageMetrics
 from app.ports.llm import LLMMessage, LLMPort
@@ -246,7 +250,7 @@ def _build_user_prompt(intent: Intent, turn_input: ResponseTurnInput) -> str:
     lines.append("\n## Seguimientos anteriores (no asumir vigencia hoy)")
     if turn_input.prior_followups:
         for followup in turn_input.prior_followups:
-            lines.append(f"- {followup}")
+            lines.append(f"- {format_prior_followup(followup)}")
     else:
         lines.append("(ninguno)")
 
