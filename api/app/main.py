@@ -165,6 +165,8 @@ def _build_llm_adapter(settings: Settings) -> LLMPort:
         api_key=settings.llm_api_key,
         model=settings.llm_model,
         timeout_seconds=settings.llm_request_timeout_seconds,
+        rate_limit_max_retries=settings.llm_rate_limit_max_retries,
+        rate_limit_max_wait_seconds=settings.llm_rate_limit_max_wait_seconds,
     )
     if settings.llm_fallback_provider is None:
         return primary
@@ -186,6 +188,8 @@ def _build_single_adapter(
     api_key: str | None,
     model: str | None,
     timeout_seconds: float,
+    rate_limit_max_retries: int = 0,
+    rate_limit_max_wait_seconds: float = 10.0,
 ) -> LLMPort:
     if provider is LLMProvider.FAKE:
         return FakeLLM(model=model or "fake-model-v1")
@@ -199,6 +203,8 @@ def _build_single_adapter(
         model=model,
         provider_name=provider.value,
         timeout_seconds=timeout_seconds,
+        rate_limit_max_retries=rate_limit_max_retries,
+        rate_limit_max_wait_seconds=rate_limit_max_wait_seconds,
     )
 
 

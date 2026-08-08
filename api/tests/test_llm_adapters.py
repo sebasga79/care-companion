@@ -144,3 +144,95 @@ async def test_fallback_propagates_error_when_both_fail() -> None:
     fallback_llm = FallbackLLM(_adapter(always_fails), _adapter(always_fails))
     with pytest.raises(LLMProviderError):
         await fallback_llm.generate(messages=[LLMMessage(role="user", content="x")])
+
+
+# --------------------------------------------------------------------- #
+# 429: esperar lo que el proveedor pide, en vez de degradar al resguardo
+# --------------------------------------------------------------------- #
+
+
+async def test_rate_limit_is_not_retried_by_default() -> None:
+    """En una conversación en vivo, hacer esperar al paciente es peor que
+    responder con el resguardo: por defecto un 429 se propaga y
+    `FallbackLLM` toma el relevo."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, text="Rate limit reached. Please try again in 0.01s")
+
+    with pytest.raises(LLMProviderError, match="HTTP 429"):
+        await _adapter(handler).generate(messages=[LLMMessage(role="user", content="x")])
+    assert calls["n"] == 1, "sin reintentos configurados no debe reintentar"
+
+
+async def test_rate_limit_waits_and_retries_when_configured() -> None:
+    """Con reintentos autorizados (el benchmark), se respeta el tiempo que
+    indica el proveedor y se vuelve a intentar con el MISMO modelo. Sin
+    esto, medir contra Groq en el nivel gratuito medía en realidad el
+    resguardo local: 20 veces más lento y con otro modelo."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, text="Rate limit reached. Please try again in 0.01s")
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "ok"}}], "usage": {}}
+        )
+
+    adapter = OpenAICompatLLM(
+        base_url="https://api.example.test/openai/v1",
+        api_key="k",
+        model="m",
+        provider_name="groq",
+        rate_limit_max_retries=2,
+        rate_limit_max_wait_seconds=5,
+        transport=httpx.MockTransport(handler),
+    )
+    result = await adapter.generate(messages=[LLMMessage(role="user", content="x")])
+    assert result.text == "ok"
+    assert calls["n"] == 2
+
+
+async def test_rate_limit_does_not_wait_longer_than_allowed() -> None:
+    """Una espera desproporcionada (el proveedor pide minutos) no se
+    acepta: mejor fallar y dejar que el resguardo responda."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, text="Rate limit reached. Please try again in 600s")
+
+    adapter = OpenAICompatLLM(
+        base_url="https://api.example.test/openai/v1",
+        api_key="k",
+        model="m",
+        provider_name="groq",
+        rate_limit_max_retries=5,
+        rate_limit_max_wait_seconds=10,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(LLMProviderError, match="HTTP 429"):
+        await adapter.generate(messages=[LLMMessage(role="user", content="x")])
+
+
+async def test_retry_after_header_is_preferred_over_message_text() -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(
+                429, headers={"retry-after": "0.01"}, text="sin texto parseable"
+            )
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "ok"}}], "usage": {}}
+        )
+
+    adapter = OpenAICompatLLM(
+        base_url="https://api.example.test/openai/v1",
+        api_key="k",
+        model="m",
+        provider_name="groq",
+        rate_limit_max_retries=1,
+        transport=httpx.MockTransport(handler),
+    )
+    assert (await adapter.generate(messages=[LLMMessage(role="user", content="x")])).text == "ok"

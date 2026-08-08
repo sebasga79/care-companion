@@ -11,7 +11,9 @@ para ambos: lo único que cambia entre "Groq" y "Ollama" es `base_url`,
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 
 import httpx
 
@@ -29,6 +31,29 @@ class LLMProviderError(Exception):
     fingir una respuesta)."""
 
 
+
+# Groq responde 429 indicando exactamente cuánto esperar, en la cabecera
+# `retry-after` y también en el texto ("Please try again in 3.73s"). Antes
+# se ignoraba: el 429 se trataba como cualquier error y la llamada degradaba
+# al resguardo local, 20 veces más lento y con otro modelo. Esperar los
+# segundos que el propio proveedor pide es lo correcto — y para medir
+# (`scripts/benchmark.py`) es la diferencia entre medir el modelo declarado
+# o medir el resguardo.
+_RETRY_AFTER_TEXT_RE = re.compile(r"try again in\s+(?P<seconds>\d+(?:\.\d+)?)\s*s", re.I)
+
+
+def _parse_retry_after_seconds(response: httpx.Response) -> float | None:
+    """Segundos que el proveedor pide esperar, o `None` si no lo indica."""
+    header = response.headers.get("retry-after")
+    if header:
+        try:
+            return float(header)
+        except ValueError:
+            pass
+    match = _RETRY_AFTER_TEXT_RE.search(response.text or "")
+    return float(match.group("seconds")) if match else None
+
+
 class OpenAICompatLLM(LLMPort):
     def __init__(
         self,
@@ -38,6 +63,8 @@ class OpenAICompatLLM(LLMPort):
         model: str,
         provider_name: str,
         timeout_seconds: float = 20.0,
+        rate_limit_max_retries: int = 0,
+        rate_limit_max_wait_seconds: float = 10.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """`transport` solo se usa desde tests (`httpx.MockTransport`) para
@@ -48,6 +75,12 @@ class OpenAICompatLLM(LLMPort):
         self._model = model
         self._provider_name = provider_name
         self._timeout_seconds = timeout_seconds
+        # 0 por defecto: en una conversación en vivo, hacer esperar al
+        # paciente varios segundos es peor que responder con el modelo de
+        # resguardo. El benchmark sí los sube, porque ahí lo que importa
+        # es medir el modelo declarado y no el resguardo.
+        self._rate_limit_max_retries = rate_limit_max_retries
+        self._rate_limit_max_wait_seconds = rate_limit_max_wait_seconds
         self._transport = transport
 
     async def generate(
@@ -71,22 +104,41 @@ class OpenAICompatLLM(LLMPort):
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=self._timeout_seconds, transport=self._transport
-            ) as client:
-                response = await client.post(
-                    f"{self._base_url}/chat/completions", json=payload, headers=headers
-                )
-        except httpx.HTTPError as exc:
-            raise LLMProviderError(
-                f"{self._provider_name}: fallo de red/timeout llamando al modelo: {exc}"
-            ) from exc
+        attempt = 0
+        while True:
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout_seconds, transport=self._transport
+                ) as client:
+                    response = await client.post(
+                        f"{self._base_url}/chat/completions", json=payload, headers=headers
+                    )
+            except httpx.HTTPError as exc:
+                raise LLMProviderError(
+                    f"{self._provider_name}: fallo de red/timeout llamando al modelo: {exc}"
+                ) from exc
 
-        if response.status_code >= 400:
-            raise LLMProviderError(
-                f"{self._provider_name}: HTTP {response.status_code} — {response.text[:300]}"
-            )
+            # 429 es distinto de un error real: el proveedor dice "vuelve en
+            # N segundos". Si el llamador autorizó esperar (y la espera es
+            # razonable), se respeta en vez de degradar al resguardo.
+            if response.status_code == 429 and attempt < self._rate_limit_max_retries:
+                wait_seconds = _parse_retry_after_seconds(response)
+                if wait_seconds is not None and wait_seconds <= self._rate_limit_max_wait_seconds:
+                    attempt += 1
+                    logger.info(
+                        "llm_rate_limited_waiting provider=%s wait_s=%.2f attempt=%d",
+                        self._provider_name,
+                        wait_seconds,
+                        attempt,
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    continue
+
+            if response.status_code >= 400:
+                raise LLMProviderError(
+                    f"{self._provider_name}: HTTP {response.status_code} — {response.text[:300]}"
+                )
+            break
 
         try:
             data = response.json()

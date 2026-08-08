@@ -158,6 +158,14 @@ class Settings(BaseSettings):
     llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
     llm_model: str = Field(default="fake-model-v1", alias="LLM_MODEL")
     llm_request_timeout_seconds: float = Field(default=20.0, alias="LLM_REQUEST_TIMEOUT_SECONDS")
+    # Ante un 429 el proveedor indica cuántos segundos esperar. En una
+    # llamada en vivo, 0 reintentos es lo correcto: hacer esperar al
+    # paciente es peor que responder con el resguardo. El benchmark lo
+    # sube para medir el modelo declarado y no el resguardo.
+    llm_rate_limit_max_retries: int = Field(default=0, alias="LLM_RATE_LIMIT_MAX_RETRIES")
+    llm_rate_limit_max_wait_seconds: float = Field(
+        default=10.0, alias="LLM_RATE_LIMIT_MAX_WAIT_SECONDS"
+    )
 
     # Resguardo (docs/auditoria-kit-oficial-2026-08-07.md §3): si el
     # primario (Groq, nube) falla o no responde durante la sesión de

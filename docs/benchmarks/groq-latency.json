@@ -1,0 +1,19 @@
+{
+  "provider": "groq",
+  "model": "llama-3.1-8b-instant",
+  "samples": 5,
+  "latency_ms": {
+    "p50": 249.7,
+    "p95": 365.6,
+    "mean": 267.9,
+    "min": 227.1,
+    "max": 365.6
+  },
+  "tokens": {
+    "input_total": 267,
+    "output_total": 144,
+    "input_per_call": 53.4,
+    "output_per_call": 28.8
+  },
+  "note": "llamadas aisladas espaciadas 9s para no chocar el limite de 6.000 TPM del nivel gratuito"
+}

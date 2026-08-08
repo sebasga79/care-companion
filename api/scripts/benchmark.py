@@ -291,6 +291,17 @@ def main() -> int:
                 selected.append(by_label[label][cursor])
         cursor += 1
 
+    # Medir contra el modelo declarado exige ESPERAR el rate limit, no
+    # degradar al resguardo: si el 429 cae al modelo local, la latencia
+    # medida es la del resguardo (20x más lenta) y el modelo evaluado ya no
+    # es el que se declara para G3. Aquí sí se puede esperar — no hay un
+    # paciente al teléfono.
+    import os
+
+    os.environ.setdefault("LLM_RATE_LIMIT_MAX_RETRIES", "6")
+    os.environ.setdefault("LLM_RATE_LIMIT_MAX_WAIT_SECONDS", "70")
+    settings = get_settings()
+
     app = create_app()
     client = TestClient(app)
     print(
