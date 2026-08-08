@@ -92,10 +92,29 @@ que el propio kit sugiere para español. No dependen de red externa.
 ## 4. Métricas
 
 Latencia P50/P95 se calcula desde eventos instrumentados (`/api/v1/metrics`,
-visible en `/audit`). Tokens y costo se reportan **honestamente como
-`pendiente`** hasta conectar el modelo obligatorio en T0 (COST-001) — no se
-inventan cifras. El benchmark oficial P50/P95 (PERF-002) se corre con el
-formato que defina la ficha.
+visible en `/audit`), y también desde el arnés automatizado
+([`api/scripts/benchmark.py`](../api/scripts/benchmark.py)), que reproduce
+turnos reales del dataset oficial contra Groq (`llama-3.1-8b-instant`) y
+compara contra `label_ground_truth`. Metodología completa en
+[`docs/benchmarks/README.md`](benchmarks/README.md).
+
+**Corrida `capa1-groq.json` (12 casos, 62 turnos, 2026-08-08):**
+
+| Métrica | Valor |
+|---|---|
+| Falsos negativos | 1 de 4 rojos (sensibilidad 75 %) |
+| Falsos positivos | 0 de 6 verdes (especificidad 100 %) |
+| Latencia p50 / p95 | 1.093 ms / 3.267 ms |
+| Tokens por turno | 2.493 entrada · 290 salida |
+| Invocaciones LLM / consultas RAG por turno | 1,58 · 1,5 |
+
+El falso negativo restante y su justificación están documentados en
+`docs/benchmarks/README.md` — es un caso de minimización verbal sostenida
+sin dato objetivo inequívoco, dejado como limitación conocida en vez de un
+fix de riesgo a dos días del plazo. El benchmark mismo encontró y corrigió
+un falso positivo real durante su desarrollo (`PAIN_WORSENING` disparado
+por temor hipotético, no por síntoma reportado) — ver commit
+`app/domain/safety_signals.py::_is_hypothetical_worry`.
 
 ## 5. Seguridad clínica (garantías)
 
@@ -110,10 +129,11 @@ formato que defina la ficha.
 ## 6. Límites y trabajo pendiente (honesto)
 
 - **Voz:** funciona con Web Speech del navegador (Chrome; STT puede enrutar a
-  Google). No validada aún con micrófono real en esta sesión. El STT/TTS o la
-  voz realtime del modelo obligatorio se integran en T0 por el mismo puerto.
-- **Modelo:** hoy corre `FakeLLM` determinista. El modelo obligatorio (AI-001)
-  y el dataset Delta Share (DATA-001) se conectan en T0.
+  Google), validada con micrófono real, con half-duplex para evitar que el
+  TTS del agente se autoescuche.
+- **Modelo:** Groq (`llama-3.1-8b-instant`) primario, Ollama local
+  (`llama3.2:3b`) de resguardo si Groq falla o excede la cuota. Dataset
+  oficial (160 casos, 4 xlsx) y corpus RAG oficial (107 PDFs) integrados.
 - **No es un producto clínico:** prototipo, sin EHR, sin diagnóstico ni
   prescripción, solo datos sintéticos.
 - **Clean-install ≤15 min:** el stack Docker está listo; falta cronometrarlo

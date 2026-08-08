@@ -90,3 +90,55 @@ vivo del jurado.
 
 Ver los archivos `*.json` de este directorio y la sección de hallazgos en
 [`docs/final-report.md`](../final-report.md).
+
+### `capa1-groq.json` — corrida completa, 2026-08-08
+
+12 casos (4 rojo / 4 amarillo / 4 verde), 62 turnos, contra Groq real
+(`llama-3.1-8b-instant`), conversación completa (hasta 8 turnos por caso).
+
+| Métrica | Valor |
+|---|---|
+| Falsos negativos | 1 de 4 rojos evaluados (sensibilidad 75 %) |
+| Falsos positivos | 0 de 6 verdes evaluados (especificidad 100 %) |
+| Latencia p50 / p95 | 1.093 ms / 3.267 ms |
+| Tokens por turno | 2.493 entrada · 290 salida |
+| Invocaciones LLM / consultas RAG por turno | 1,58 · 1,5 |
+
+**El máximo de latencia (24,5 s) no es tiempo de servicio**: coincide con
+una espera de cuota de 18 s que el adapter respetó dentro del mismo turno
+(`llm_rate_limited_waiting wait_s=18.00`). El benchmark mide el turno de
+punta a punta a propósito — es el tiempo real que tarda en responder bajo
+el nivel gratuito — pero al reportar p50/p95 al jurado conviene aclarar que
+la cola de la distribución refleja cuota compartida, no el modelo.
+
+**Cómo se llegó a estos números** (documentado porque cada paso encontró un
+bug real, no solo una configuración):
+
+1. Cuatro intentos anteriores de correr esto contra Groq se colgaron. La
+   causa no era la cuota: las conversaciones se ejecutaban por `TestClient`
+   + WebSocket, y una espera larga dentro del handler bloquea el ciclo de
+   eventos que ese WebSocket necesita para entregar mensajes. Se corrigió
+   llamando al orquestador directo (`run_case` en `scripts/benchmark.py`) y
+   respetando la cuota con `TokenBudget`, una ventana deslizante que
+   *reserva* presupuesto antes de cada turno en vez de reaccionar al 429.
+2. Con `--max-turns 3` en un intento previo, un caso `rojo` dio falso
+   negativo porque el síntoma decisivo (secreción de la herida) estaba en
+   el turno 4 — nunca se lo dimos al agente. Subido a 8 turnos (conversación
+   completa).
+3. La corrida encontró un falso positivo real: un caso `verde` (dolor 2/10)
+   escaló por `PAIN_WORSENING` a partir de "estoy preocupado de que **pueda**
+   empeorar" — temor a futuro, no un reporte de empeoramiento. Corregido en
+   `app/domain/safety_signals.py` (`_is_hypothetical_worry`), con test de
+   regresión. El mismo fix resolvió además uno de los dos falsos negativos
+   que había en la corrida anterior — el detector determinista ya no
+   interfería con la síntesis de señales blandas que el LLM sí hacía bien.
+
+**Falso negativo restante** (`caso_tray_pac_42_00017_7`, sin resolver): el
+paciente minimiza verbalmente todo el reporte ("tranquila, nada del otro
+mundo", "yo creo que es normal") sin dar un dato objetivo inequívoco —
+temperatura vaga ("37 y algo"), herida "un poquito rojita" sin secreción.
+Es un caso diseñado para poner a prueba si el sistema detecta un patrón de
+minimización, no un síntoma aislado. Queda documentado como limitación
+conocida: intentar una heurística de "tono minimizador" a dos días del
+plazo tiene más riesgo de introducir un falso positivo nuevo que beneficio
+de cerrar este único caso.
