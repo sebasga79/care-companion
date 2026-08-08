@@ -50,8 +50,21 @@ _DEFAULT_BASE_URLS: dict[LLMProvider, str] = {
     LLMProvider.OLLAMA: "http://localhost:11434/v1",
 }
 _DEFAULT_MODELS: dict[LLMProvider, str] = {
-    # Nombre de modelo tal como lo expone la API de Groq para Llama 3.1 70B.
-    LLMProvider.GROQ: "llama-3.1-70b-versatile",
+    # G3 exige un modelo de la lista cerrada del reto, que nombra "Llama 3.1
+    # 70B (vía Groq)". **Groq deprecó ese modelo**: hoy su catálogo sólo
+    # ofrece `llama-3.1-8b-instant` (Llama 3.1, 8B) y
+    # `llama-3.3-70b-versatile` (70B pero versión 3.3). Ninguno coincide
+    # exactamente con lo que dice la lista.
+    #
+    # Decisión del propietario (8 ago), documentada en el informe final:
+    # `llama-3.1-8b-instant` — es genuinamente **Llama 3.1 vía Groq**, misma
+    # familia y misma versión que nombra la lista; lo único que cambia es el
+    # tamaño, y sólo porque el proveedor retiró el 70B de esa versión.
+    # Se prefiere sobre `llama-3.3-70b-versatile` porque cambiar de versión
+    # mayor (3.1 -> 3.3) se aleja más de la lista que cambiar de tamaño
+    # dentro de la misma versión, y G3 descalifica —no penaliza— usar un
+    # modelo fuera de la lista.
+    LLMProvider.GROQ: "llama-3.1-8b-instant",
     # Decisión (auditoría §3): Phi-3.5 Mini como resguardo local por defecto;
     # Llama 3.2 3B es la alternativa si se prefiere (LLM_FALLBACK_MODEL=llama3.2).
     LLMProvider.OLLAMA: "phi3.5",

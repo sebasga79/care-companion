@@ -55,7 +55,10 @@ No se necesitan credenciales para correr el prototipo: usa el proveedor LLM
 ### Probar con el modelo real (Groq)
 
 Por defecto todo corre con `fake` (determinista, sin red). Para hablar de
-verdad con Llama 3.1 70B vía Groq:
+verdad con **Llama 3.1 (`llama-3.1-8b-instant`) vía Groq** — el modelo
+declarado para la compuerta G3, ver
+[`docs/final-report.md` §2.1](docs/final-report.md) para por qué esa
+variante y no el 70B:
 
 1. Crea una API key gratis en <https://console.groq.com/keys>.
 2. `cp api/.env.example api/.env` y edita dos líneas:

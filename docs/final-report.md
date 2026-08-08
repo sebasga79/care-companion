@@ -34,6 +34,46 @@ Decisiones principales y alternativas descartadas:
 Decisión de proceso: **ADR-001** — construcción anticipada por decisión del
 propietario, con puertos estrictos como mitigación de rework en T0.
 
+## 2.1 Modelo de lenguaje declarado (compuerta G3)
+
+**Modelo usado: `llama-3.1-8b-instant` — Llama 3.1 servido por Groq.**
+Configurado en [`api/app/core/config.py`](../api/app/core/config.py)
+(`LLMProvider.GROQ`), verificable en `LLM_PROVIDER`/`LLM_MODEL` y en el
+campo `provider`/`model` que cada llamada persiste en `events`.
+
+**Por qué este y no otro.** La lista cerrada de
+[`docs/stack-tecnico.md`](https://github.com/TechSphere2026/ParticipantArtifacts/blob/main/docs/stack-tecnico.md)
+nombra *"Llama 3.1 70B (vía Groq)"*. Al conectarlo encontramos que **Groq
+retiró ese modelo de su catálogo**: hoy ofrece `llama-3.1-8b-instant`
+(Llama 3.1, 8B) y `llama-3.3-70b-versatile` (70B, pero versión 3.3).
+Ninguno reproduce exactamente el nombre de la lista, así que había que
+elegir de qué lado desviarse:
+
+| Candidato | Familia | Versión | Tamaño | Desviación respecto a la lista |
+|---|---|---|---|---|
+| `llama-3.1-8b-instant` | Llama | **3.1** ✅ | 8B ✗ | Sólo el tamaño |
+| `llama-3.3-70b-versatile` | Llama | 3.3 ✗ | **70B** ✅ | Versión mayor distinta |
+
+Elegimos conservar **familia y versión** (`3.1`) y ceder en el tamaño:
+cambiar de versión mayor se aleja más de lo que la lista autoriza, y G3
+**descalifica** —no penaliza— usar un modelo fuera de ella. La causa del
+desvío es del proveedor, no una preferencia nuestra: el modelo exacto ya no
+se puede invocar.
+
+**Alternativas evaluadas y descartadas.** Los otros dos modelos de la lista
+son locales (Llama 3.2 1B/3B y Phi-3.5 Mini vía Ollama) y sí existen tal
+cual, sin ambigüedad. Se midieron en la máquina de desarrollo:
+**~5,6 s por invocación**, ~11 s por turno conversacional con tres agentes.
+Es inviable para una conversación de voz, criterio que la rúbrica evalúa
+explícitamente (15 pts). Quedan implementados y configurables como
+**resguardo** (`LLM_FALLBACK_PROVIDER=ollama`): si Groq falla o no hay red
+durante la sesión de evaluación, la llamada continúa con un modelo local de
+la lista en vez de caerse. Gemini 1.5 Flash se descartó por requerir un
+segundo adapter con SDK propio sin ganancia sobre Groq.
+
+**Embeddings (no restringidos por G3):** BGE-M3 local vía Ollama, el modelo
+que el propio kit sugiere para español. No dependen de red externa.
+
 ## 3. Qué está implementado y verificado
 
 | Área | Estado | Evidencia |
