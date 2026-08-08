@@ -92,6 +92,25 @@ def test_hospitalicen_is_detected_as_explicit_urgent_request() -> None:
     assert observations["EMERGENCY_CONCERN"].certainty == "confirmed"
 
 
+def test_hypothetical_fear_of_worsening_does_not_confirm_pain_worsening() -> None:
+    """Falso positivo real del benchmark contra Groq (caso `verde`, dolor
+    2/10): "preocupado de que PUEDA empeorar" es un temor a futuro, no un
+    reporte de que el dolor ya está empeorando."""
+    observations = _by_code(
+        "el dolor está bastante bajo, como un 2 en la escala, apenas siento "
+        "una puntadita leve y casi no me molesta, pero estoy muy preocupado "
+        "de que pueda empeorar, ¿está bien?"
+    )
+    assert "PAIN_WORSENING" not in observations
+
+
+def test_actual_worsening_still_confirms_even_when_patient_is_worried() -> None:
+    """El filtro exige AMBOS marcadores (miedo + modal). Sólo miedo, sin
+    modal, sigue siendo un reporte real y debe confirmar."""
+    observations = _by_code("me preocupa mucho, el dolor ha empeorado desde ayer")
+    assert observations["PAIN_WORSENING"].certainty == "confirmed"
+
+
 def test_inability_to_eat_is_not_mislabeled_as_vomiting() -> None:
     observations = _by_code("Puedo tomar líquidos normalmente, pero no puedo comer")
     assert observations["ORAL_INTAKE_INTOLERANCE"].certainty == "confirmed"

@@ -356,6 +356,30 @@ def _is_query_not_report(normalized_text: str, match_start: int, match_end: int)
     return " o " in f" {following} " and any(w in following for w in _ALTERNATIVE_CONTRAST)
 
 
+# Falso positivo real visto en el benchmark contra Groq (caso `verde`, dolor
+# reportado 2/10): "estoy muy preocupado de que PUEDA EMPEORAR" confirmó
+# PAIN_WORSENING y escaló una llamada benigna. El paciente no reportaba
+# empeoramiento — temía uno hipotético a futuro. La distinción lingüística
+# es el modo: "pueda/podría empeorar" (subjuntivo, potencial) vs "está
+# empeorando" / "empeoró" (indicativo, reporte de lo que ya ocurre).
+# Requiere AMBOS marcadores cerca — sólo miedo ("tengo miedo, ha empeorado")
+# sigue confirmando; sólo modal sin miedo no debería darse en la práctica.
+_HYPOTHETICAL_WORRY_WINDOW_WORDS = 8
+_HYPOTHETICAL_WORRY_FEAR_MARKERS = ("preocup", "miedo", "temo", "asusta", "angustia")
+_HYPOTHETICAL_WORRY_MODAL_MARKERS = ("pueda", "podria", "pudiera", "vaya a", "fuera a")
+
+
+def _is_hypothetical_worry(normalized_text: str, match_start: int) -> bool:
+    """`True` si el término aparece dentro de un temor a futuro ("preocupado
+    de que pueda empeorar"), no de un reporte de que el síntoma ya está
+    ocurriendo."""
+    preceding = normalized_text[:match_start]
+    window = " ".join(preceding.split()[-_HYPOTHETICAL_WORRY_WINDOW_WORDS:])
+    has_fear = any(marker in window for marker in _HYPOTHETICAL_WORRY_FEAR_MARKERS)
+    has_modal = any(marker in window for marker in _HYPOTHETICAL_WORRY_MODAL_MARKERS)
+    return has_fear and has_modal
+
+
 def _detect_reported_temperature(normalized_text: str) -> float | None:
     """Devuelve la temperatura más alta reportada de forma plausible.
 
@@ -471,6 +495,8 @@ def detect_safety_signals(patient_text: str, *, source_turn_id: str) -> list[Obs
                 # síntoma. Marcarlo `denied` sería tan incorrecto como
                 # `confirmed` (spec.md §11.2: no inferir negación).
                 if _is_query_not_report(normalized, match.start(), match.end()):
+                    continue
+                if _is_hypothetical_worry(normalized, match.start()):
                     continue
                 # Hay patrones cuya propia frase es una negación: "no puedo
                 # respirar", "no puedo comer". Aplicarles el chequeo de
