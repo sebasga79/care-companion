@@ -49,7 +49,7 @@ def test_groq_applies_known_defaults_with_only_api_key_set(
     este assert es el que impide que el nombre se cambie sin pasar por esa
     decisión."""
     monkeypatch.setenv("LLM_PROVIDER", "groq")
-    monkeypatch.setenv("LLM_API_KEY", "gsk_real_key")
+    monkeypatch.setenv("LLM_API_KEY", "gsk_" + "a" * 52)
     settings = get_settings()
     assert settings.llm_provider == LLMProvider.GROQ
     assert settings.llm_base_url == "https://api.groq.com/openai/v1"
@@ -92,7 +92,7 @@ def test_fallback_disabled_by_default(clean_env: None) -> None:
 
 def test_fallback_ollama_applies_defaults(clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "groq")
-    monkeypatch.setenv("LLM_API_KEY", "gsk_real_key")
+    monkeypatch.setenv("LLM_API_KEY", "gsk_" + "a" * 52)
     monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "ollama")
     settings = get_settings()
     assert settings.llm_fallback_base_url == "http://localhost:11434/v1"
@@ -143,3 +143,37 @@ def test_embeddings_provider_allowlist_rejects_unknown_value(
     monkeypatch.setenv("EMBEDDINGS_PROVIDER", "openai-direct-sdk")
     with pytest.raises(ValidationError):
         get_settings()
+
+
+@pytest.mark.parametrize(
+    "bogus_key",
+    [
+        "gsk_...",            # placeholder pegado desde documentación
+        "gsk_tu_api_key_real",
+        "gsk_xxx",
+        "changeme",
+        "corta",
+    ],
+)
+def test_groq_rejects_placeholder_or_truncated_api_key(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch, bogus_key: str
+) -> None:
+    """Regresión de un fallo real: un `.env` quedó con DOS líneas
+    `LLM_API_KEY` — la válida y debajo un `gsk_...` literal que la
+    sobrescribía. El arranque no se quejaba y el error aparecía recién en la
+    primera llamada como un 401 enterrado en logs, mientras el sistema
+    degradaba en silencio al modelo local. G2 contempla explícitamente el
+    caso de "credenciales o accesos rotos": mejor fallar al arrancar con un
+    mensaje accionable."""
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("LLM_API_KEY", bogus_key)
+    with pytest.raises(ValidationError, match="LLM_API_KEY"):
+        get_settings()
+
+
+def test_groq_accepts_a_realistic_api_key(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("LLM_API_KEY", "gsk_" + "a" * 52)
+    assert get_settings().llm_provider == LLMProvider.GROQ

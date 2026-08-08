@@ -71,9 +71,38 @@ _DEFAULT_MODELS: dict[LLMProvider, str] = {
 }
 _PLACEHOLDER_VALUES = {"", "changeme"}
 
+# Longitud mínima plausible de una credencial real. Una API key de Groq
+# ronda los 56 caracteres; cualquier cosa notablemente más corta es un
+# recorte o un marcador de posición pegado desde documentación
+# ("gsk_...", "gsk_tu_api_key_real", "gsk_xxx").
+#
+# Existe por un caso real: un `.env` quedó con DOS líneas `LLM_API_KEY`, la
+# válida y debajo un `gsk_...` literal que la sobrescribía. El arranque
+# pasaba sin quejarse y el fallo aparecía recién en la primera llamada como
+# un `HTTP 401` enterrado en logs, con el sistema degradando en silencio al
+# modelo local. Es exactamente el modo de falla que la compuerta G2
+# contempla ("si lo que falla son credenciales o accesos rotos") y que le
+# costaría al jurado una sesión entera de diagnóstico.
+_MIN_PLAUSIBLE_API_KEY_LENGTH = 20
+
 
 def _is_placeholder(value: str | None) -> bool:
     return not value or value.strip().lower() in _PLACEHOLDER_VALUES
+
+
+def _looks_like_placeholder_api_key(value: str | None) -> bool:
+    """Detecta credenciales evidentemente no reales, para fallar al arranque
+    con un mensaje accionable en vez de con un 401 en la primera llamada."""
+    if _is_placeholder(value):
+        return True
+    candidate = (value or "").strip()
+    if len(candidate) < _MIN_PLAUSIBLE_API_KEY_LENGTH:
+        return True
+    lowered = candidate.lower()
+    return any(
+        marker in lowered
+        for marker in ("tu_api_key", "your_api_key", "xxx", "...", "<", "reemplaza")
+    )
 
 
 class EmbeddingsProvider(str, Enum):
@@ -279,8 +308,10 @@ def _require_real_values(
         missing.append(f"{env_prefix}_BASE_URL")
     if _is_placeholder(model):
         missing.append(f"{env_prefix}_MODEL")
-    if provider is LLMProvider.GROQ and _is_placeholder(api_key):
+    if provider is LLMProvider.GROQ and _looks_like_placeholder_api_key(api_key):
         # Ollama local no exige credencial; Groq sí (es un servicio de nube).
+        # Se rechazan también las credenciales evidentemente truncadas o
+        # marcadores de posición — ver `_looks_like_placeholder_api_key`.
         missing.append(f"{env_prefix}_API_KEY")
     if missing:
         raise ValueError(
