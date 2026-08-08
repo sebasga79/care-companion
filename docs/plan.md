@@ -265,14 +265,180 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 | CON-001 Observation schema | P0 | 30m | original, normalized, certainty, source turn | validation tests |
 | CON-002 InterviewAgent | P0 | 60m | open question, extraction, missing info, clarification | scenario eval |
 | CON-003 Colombian ambiguity handling | P1 | 45m | glosario/context clarification, no assumptions | ambiguous E2E |
-| SAFE-001 Rule engine | P0 | 60m | versioned red flags, inputs, precedence | 100% critical branches |
+| SAFE-001 Rule engine | P0 | 60m | versioned red flags, raw-text safety detector, inputs, precedence | critical branches + lexical negation/adversarial tests |
 | SAFE-002 TriageAgent | P0 | 60m | structured risk + evidence + missing info | schema/eval |
 | SAFE-003 Decision reducer | P0 | 45m | combine rules/model; prohibit downgrade | adversarial unit tests |
-| SAFE-004 Escalation record | P0 | 35m | idempotent simulated alert | duplicate test |
+| SAFE-004 Escalation record | P0 | 35m | handoff interno automático, idempotente y persistente | duplicate + E2E test |
 | RES-001 ResponseAgent | P0 | 60m | concise Spanish, evidence-only, handoff/abstain | groundedness eval |
 | SUM-002 Structured summary | P0 | 45m | reported/denied/not assessed/decision/citations | golden snapshot |
 | ORC-002 Complete transitions | P0 | 60m | clarification, escalate, fail-safe, close | state coverage |
 | E2E-002 Clinical scenarios | P0 | 75m | routine, urgent, ambiguous, contradiction, no evidence | results table |
+
+> **Ejecución correctiva SAFE-001/RES-001/E2E-002 (7 ago): Done.** Una prueba de voz
+> descubrió un falso negativo crítico: el adapter `fake` no interpretaba “dolor
+> persistente”, “volver a ser hospitalizado”, “40 grados” ni “me voy a morir”, y su
+> respuesta de rutina afirmaba que todo estaba dentro de lo esperado. Se implementó
+> `safety-signal-detector-v1` directamente sobre el texto crudo, antes de cualquier rama
+> de aclaración del LLM; sus confirmaciones tienen precedencia y alimentan `rules-v2`.
+> `HIGH_FEVER` separa una temperatura numérica >38 °C de una mención de fiebre sin valor,
+> evitando convertir cualquier mención aislada en alerta dura. El handoff crítico es
+> ahora determinista (`safe-handoff-v1`), detiene el checklist, pide valoración urgente y
+> aclara que el prototipo no contacta a un equipo real. Evidencia: 7 unit tests nuevos de
+> detección/negación/precedencia, reglas versionadas y regresión WebSocket con la frase
+> real; el saludo sigue sin escalar. `make verify`: 330 recolectados, 327 passed, 3
+> skipped; ruff limpio.
+
+> **Ejecución correctiva CON-002/SAFE-004/RES-001/SUM-002 (7 ago): Done.** La
+> revisión del contrato oficial confirmó que el agente realiza la llamada y decide cuándo
+> alertar; la UI no es una consola para que un humano envíe cada turno. `POST /sessions`
+> inicia ahora la entrevista con una apertura persistida que explica propósito,
+> procedimiento y día posoperatorio. El `patient_id` estable enlaza hasta tres seguimientos
+> cerrados anteriores, usando solo observaciones/decisiones realmente persistidas; la
+> `reference_trajectory` del dataset permanece fuera de todos los prompts. Los objetivos
+> cubren estado general, dolor, ingesta, fiebre, herida, movilidad y sueño. El orquestador
+> valida la próxima pregunta después de fusionar todas las observaciones del turno y el RAG
+> consulta el reporte actual, no la pregunta siguiente. Saludos puros no crean hallazgos;
+> ResponseAgent prohíbe la muletilla fija “Gracias por contarme”. SAFE-004 ya era automático
+> en backend; la UI elimina el botón ficticio “Simular alerta” y refleja el handoff
+> persistido. El resumen incorpora el procedimiento. Evidencia: 334 tests recolectados,
+> 331 passed/3 skipped; ruff, lint, TypeScript y build de producción verdes.
+
+> **Ejecución correctiva CON-002/SAFE-004/ORC-002/UX-004 (7 ago): Done.** El
+> detector separa ahora `PAIN_SEVERE` (requiere caracterización) de
+> `PAIN_WORSENING` (alerta determinista). Ante “me duele mucho” el agente pregunta, en
+> orden adaptativo, lugar exacto, intensidad 0–10 y evolución; la negación de dolor omite
+> esas preguntas. Un empeoramiento explícito crea el handoff y abre un subflujo
+> determinista en estado `escalated`: confirma teléfono principal, solicita un teléfono
+> alternativo de emergencia, incorpora ambos al reporte/auditoría y cierra la sesión
+> automáticamente. Al completar un seguimiento rutinario también pronuncia un cierre y
+> persiste `closed_at` sin depender del botón Finalizar. Se retiró de la experiencia visible
+> el copy “prototipo/no contacta”; el flujo del concurso confirma el envío al equipo de
+> atención representado por el registro persistente. `/knowledge` se conserva —renombrado
+> “Base clínica”— porque la consola learn/retrieve/forget es requisito y compuerta G5 del
+> kit oficial. Evidencia: 336 tests recolectados, 333 passed/3 skipped; ruff, ESLint,
+> TypeScript y build Next.js verdes.
+
+> **Regresión CON-002 — dolor simple y respuesta elíptica de herida (7 ago): Done.**
+> La conversación real “un poco mejor pero tengo dolor” debe preguntar ubicación antes del
+> checklist general, incluso sin `PAIN_SEVERE`. La respuesta “está roja e inflamada” a una
+> pregunta sobre la herida se reconoce por contexto semántico y avanza a movilidad, sin
+> repetir el mismo enunciado. El conjunto de objetivos enviado al adapter usa ahora las
+> mismas equivalencias del orquestador, por lo que negar dolor no reintroduce sus tres
+> detalles en turnos posteriores. `levantar_app.sh` usa recarga automática de Uvicorn para
+> impedir que el frontend actualizado converse con una API antigua durante la prueba manual.
+> Evidencia: dos regresiones WebSocket nuevas; 338 tests recolectados, 335 passed/3 skipped;
+> ruff, ESLint, TypeScript, build Next.js y `bash -n levantar_app.sh` verdes.
+
+> **CON-003 microtriaje de malestar inespecífico + REL-001 (7 ago): Done.** La frase
+> aislada “muy mal” ya no se normaliza como `EMERGENCY_CONCERN` ni afirma que el paciente
+> pidió atención urgente. Dispara un único tamizaje breve: síntoma concreto, respiración,
+> desmayo/confusión, sangrado abundante, dolor insoportable, temperatura medida y vómito
+> persistente. Cualquier señal inequívoca conserva escalamiento inmediato y no degradable;
+> si no aparece, continúa la entrevista adaptativa. Para G2, el README declara Docker Compose
+> como ruta recomendada para el jurado y `./levantar_app.sh` como alternativa local; Compose permite
+> inyectar Groq/Llama por entorno en vez de forzar `fake`. Evidencia: regresión WebSocket
+> “muy mal → aclaración → no puedo respirar → HARD_RED_FLAG”, tests unitarios de frontera y
+> validación de `docker compose config`; 343 recolectados, 340 passed/3 skipped. El tamizaje
+> tiene cobertura determinista propia para desmayo, pérdida de conciencia y confusión
+> (`RF-008`), además de las reglas preexistentes. La prueba real de la ruta G2 descubrió y
+> corrigió `pnpm` sin versión fija, contexto web de 747 MB por falta de `.dockerignore` y
+> `uv sync` sin el README requerido por Hatchling. Build final de ambas imágenes verde;
+> `docker compose up -d`, `/health`, `/call` y turno WebSocket “muy mal” verificados.
+
+> **REL-001 launcher idempotente (7 ago): Done.** `./levantar_app.sh` pasa a ser el único
+> comando que necesita el evaluador. En una instalación nueva construye Docker; si existen
+> imágenes reutiliza esas imágenes; si existen contenedores detenidos ejecuta `compose start`;
+> si API y web ya están sanas no modifica procesos ni dependencias. Espera `/health` y
+> `/call`, abre el navegador y sale dejando los servicios en segundo plano. Opciones:
+> `--rebuild`, `--stop`, `--logs`, `--no-open`, `--clean` y `--local`. Evidencia real:
+> stop→start mostró “sin reinstalar”, segundo start detectó la instancia activa y ambos
+> servicios quedaron `Up` en 49317/49318 con la base persistida.
+
+> **DATA-001 bootstrap Docker del kit oficial (7 ago): Done.** Se eliminó la brecha
+> entre el arranque local —que veía `api/data/dataset`— y Docker —cuyo volumen nacía
+> vacío y hacía caer silenciosamente el selector a tres fixtures. El entrypoint de la
+> API descarga y valida automáticamente los 4 XLSX y 107 PDF públicos en el primer
+> arranque, carga el corpus mediante el pipeline real de ingestión y escribe un marcador
+> versionado solo al terminar. Dataset, base e índice viven juntos en
+> `care_companion_data`; stop/start y siguientes ejecuciones no repiten red ni cómputo.
+> El launcher espera hasta 15 minutos durante esa preparación, muestra progreso y respeta
+> `--rebuild` aun con una instancia sana. Evidencia: sintaxis shell, Compose config, suite,
+> build y arranque contra el volumen persistente. El límite predeterminado del port subió
+> de 20 a 200 porque la vista no pagina: el selector expone los 160 casos y el corpus oficial
+> queda consultable desde `/knowledge`. Bootstrap medido en ~166 s con capas Docker ya
+> disponibles; queda pendiente la medición formal desde un clon completamente limpio para G2.
+
+> **DATA-001 PDF rechazados (7 ago): Nota.** Se comprobó que tres rechazos son PDF cifrados
+> heredados de sus fuentes (AES/RC4) y uno es un escaneo sin capa de texto. Aunque una contraseña
+> vacía abre técnicamente los tres cifrados, el README oficial indica que los documentos
+> conservan los derechos de sus autores y editores. No se eliminarán restricciones ni se hará
+> fuerza bruta sin autorización del titular; el corpus indexado queda en 103 documentos y la
+> causa de cada exclusión es auditable en §9.14.
+
+> **SEC-002 revisión de privacidad/HIPAA (7 ago): Done para el alcance del reto.** La
+> documentación oficial declara datos sintéticos y no contiene un requisito explícito de
+> HIPAA/HIPPA, BAA, EHR o producción hospitalaria. El producto no se etiqueta como “HIPAA
+> compliant”: mantiene minimización, separación de sesiones, cero secretos/PHI/IP no autorizados
+> y logs sin audio/PII por defecto. Una eventual operación con pacientes reales exige revisión
+> legal, acuerdo con proveedores y controles de producción; permanece en `PROD-011`.
+
+> **DATA-001 extracción completa del corpus (7 ago): Done.** Ante la ausencia de instrucciones
+> o respuesta del organizador, se comprobó que los tres PDF cifrados del kit abren con contraseña
+> de usuario vacía y se incorporó esa ruta de forma determinista, sin fuerza bruta. El cuarto PDF
+> es un escaneo de una página: Docker instala Poppler/Tesseract con español, genera un `.txt` OCR
+> cacheado y lo ingesta con `applicability=appendicitis`. Validación real: 107 documentos listos,
+> 9.296 chunks y 160 casos; la protección se limita al corpus oficial del bootstrap mediante el
+> marcador v2 y el PDF original nunca se modifica.
+
+> **DATA-002 entidad longitudinal y selección por paciente (7 ago): Done.** Los 160 registros
+> paciente×día dejaron de presentarse como opciones duplicadas: `DatasetCaseAdapter` expone
+> 40 entidades seleccionables y conserva los 160 episodios por ID para trazabilidad. Cada
+> entidad incluye fecha de cirugía y cuatro hitos semiestructurados (1/3/7/14); Interview,
+> Triage y Response reciben esa evolución como seguimientos anteriores de la nueva llamada.
+> La UI reemplaza el `<select>` por tarjetas buscables con nombre, cirugía y fecha. La llamada
+> produce `CallSummary` v1.2 y materializa en SQLite un `followup_record` idempotente con dolor,
+> fiebre, movilidad, herida, apetito/ingesta, sueño, decisión y alerta. Redis se descartó: el
+> volumen es pequeño, Pydantic resuelve la proyección semiestructurada y SQLite ya proporciona
+> persistencia, transacciones y auditoría sin otro servicio Docker.
+
+> **CON-004 cierre de auditoría conversacional (7 ago): Done.** Las
+> respuestas vagas se aclaran antes de atribuir síntomas y las referencias del paciente a sus
+> registros reutilizan explícitamente la línea base del día 14. Dolor y temperatura se guardan
+> como números; movilidad, herida, ingesta y sueño usan categorías compatibles con el dataset.
+> El motor combina dolor ≥7, fiebre y deterioro de herida o ingesta, sin convertir dolor alto
+> aislado en urgencia. Base clínica protege el corpus oficial y ofrece un recorrido guiado de
+> carga/recuperación/olvido para documentos del evaluador; Auditoría muestra paciente,
+> procedimiento y el `followup_record` final. Verificación: 361 recolectados, 358 passed,
+> 3 skipped; frontend lint y build verdes.
+
+> **UX-006 jerarquía visual de las tres vistas: In review — NO cerrado.** Se marcó `Done`
+> junto con CON-004 por error: la funcionalidad quedó, la **jerarquía** revisada en el video
+> del propietario (7 ago, 21:19) no. Los hallazgos se auditaron uno por uno contra la UI real;
+> el estado honesto es la tabla de abajo. No se vuelve a marcar `Done` hasta que la columna
+> "Estado" no tenga ningún `Pendiente`/`Parcial`.
+>
+> | # | Hallazgo del video | Estado | Evidencia / qué falta |
+> |---|---|---|---|
+> | H-01 | Colapsar el selector de pacientes al iniciar la llamada | Done | `web/src/app/call/page.tsx` — al activarse la llamada la cuadrícula desaparece y queda la ficha compacta |
+> | H-02 | Conversación, voz y riesgo en la primera pantalla | Done (8 ago) | La ficha de contexto ya **no se renderiza sin paciente elegido** (antes ocupaba una franja con placeholders "Selecciona una tarjeta"/"—"); el CTA *Iniciar llamada* vive dentro de esa ficha, así que al elegir paciente queda inmediatamente visible sin desplazarse; la franja de evolución dejó de ir encima de la conversación |
+> | H-03 | Evolución histórica compacta (dolor/temp/herida/apetito) | Done (8 ago) | `apetito` añadido; la evolución se movió al rail lateral como `<details>` (abierto sin llamada, plegado durante la llamada) en cuadrícula 2×2 — sigue visible como prueba de memoria longitudinal sin empujar la conversación |
+> | H-04 | Auditoría: seleccionar la última llamada terminada | Done | `web/src/app/audit/page.tsx` |
+> | H-05 | Etiquetas humanas (`closed`/`interviewing`/`HARD_RED_FLAG`) | Done | `web/src/app/audit/page.tsx` |
+> | H-06 | Paciente y procedimiento en la tabla de sesiones | Done | `web/src/app/audit/page.tsx` |
+> | H-07 | Simplificar tarjetas de tokens y costo | Done (8 ago) | El estado (`Medido`/`Pendiente`) pasó de prefijo de texto a etiqueta propia y el detalle denso separado por `·` se descompone en lista de líneas. **Las cifras no se eliminaron a propósito**: tokens in/out, invocaciones LLM/turno y consultas RAG/llamada son obligatorias por rúbrica §5 — el problema era la presentación, no su existencia |
+> | H-08 | Botón explícito "Ver detalle" en Auditoría | Done (8 ago) | Columna de acciones con botón `Ver detalle`/`Viendo`; la fila completa sigue siendo clickeable (`stopPropagation` en el botón) |
+> | H-09 | Reducir el espacio vacío de la tarjeta de versión (Base clínica) | **Parcial** | Se quitó el estiramiento de columnas en `globals.css`; la tarjeta sigue con demasiado peso visual — pendiente de rediseño, no sólo de CSS |
+> | H-10 | Revisión integral de jerarquía en las tres vistas | **Parcial** | `/call` y `/audit` reordenadas (H-02/H-03/H-07/H-08). `/knowledge` sigue sin revisión de jerarquía (sólo H-09 parcial) |
+>
+> Reglas para cerrar UX-006: (a) `docs/design.md` documenta la jerarquía aprobada **antes** de
+> volver a tocar CSS; (b) cada fila arriba queda `Done` con evidencia verificable; (c) el
+> propietario confirma contra el video original
+> (`~/Desktop/Grabación de pantalla 2026-08-07 a la(s) 9.19.29 p.m..mov`).
+>
+> **Avance 8 ago:** H-02, H-03, H-07 y H-08 cerrados; quedan H-09 y H-10 (`/knowledge`).
+> Verificación: `pnpm build` + `pnpm lint` verdes, `ruff` limpio, 358 passed / 3 skipped.
+> **Sin confirmación visual del propietario todavía** — los cambios se validaron por
+> compilación y lectura del código, no viendo la UI corriendo; la regla (c) sigue abierta.
 
 **Exit gate C2**
 
@@ -304,6 +470,19 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 | VOI-016 Text fallback | P1 | 30m | continuar demo si falla TTS/mic | browser test |
 | VOI-017 Audio cleanup | P2 | 30m | eco/noise settings si medidamente útiles | before/after |
 
+> **Ejecución correctiva VOI-016 (7 ago): Done, escucha física pendiente.** En una alerta
+> dura, la respuesta final se renderizaba en la transcripción pero no se pronunciaba. El
+> backend envía por contrato `server.state` antes de `server.agent_response`; al recibir
+> `summarizing`, `/call` ejecutaba `voice.stop()`, que no solo cerraba el micrófono sino que
+> también cancelaba `speechSynthesis` y desactivaba el modo voz antes de que llegara el
+> mensaje. `useVoiceSession` expone ahora `stopListening()` separado del apagado total:
+> los estados terminales detienen únicamente STT, preservan el modo voz hasta encolar la
+> última locución y luego lo desactivan. El botón de micrófono queda bloqueado porque la
+> sesión ya no acepta turnos. Evidencia automatizable: `pnpm lint`,
+> `pnpm exec tsc --noEmit`, `pnpm build` y `make verify` verdes. Pendiente: repetir el caso
+> con parlantes reales en Chrome, ya que Web Speech API no ofrece una señal comprobable de
+> audio efectivamente emitido por el sistema operativo.
+
 ### Epic UI/UX
 
 | Ticket | P | Est. | Tareas | Aceptación / evidencia |
@@ -311,9 +490,9 @@ Esta fase respeta el propósito del concurso de iniciar con el mismo starter/dat
 | UX-001 Call layout | P0 | 60m | visual contract, responsive desktop | screenshot diff |
 | UX-002 Voice states | P0 | 45m | ready/listen/think/speak/interrupted/error | state story/test |
 | UX-003 Evidence panel | P0 | 45m | 2 fuentes, ubicación y trace navigation | interaction test |
-| UX-004 Risk/supervision | P0 | 45m | nivel, señales, paso y acción simulada | accessibility test |
+| UX-004 Risk/supervision | P0 | 45m | nivel, señales y handoff automático persistido | accessibility test |
 | UX-005 Audit timeline | P1 | 75m | agentes, reglas, citas, timings, usage | demo |
-| UX-006 Knowledge polish | P1 | 45m | learn/forget visible y honesto | demo |
+| UX-006 Jerarquía de las 3 vistas | P1 | 45m | learn/forget visible y honesto + jerarquía revisada contra el video | demo · **In review**, checklist H-01…H-10 arriba |
 | UX-007 Empty/error/loading states | P1 | 45m | no falsos éxitos, recovery copy | state matrix |
 | UX-008 Accessibility | P0 | 60m | keyboard, focus, contrast, labels, reduced motion | automated + manual |
 | UX-009 Authorized imagery | P1 | 20m | activo propio/licenciado o placeholder correcto | license record |
@@ -600,4 +779,3 @@ Durante la ejecución:
 - [ ] repo + diagram + report + video;
 - [ ] MIT root;
 - [ ] submit + receipt + hashes.
-

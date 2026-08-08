@@ -12,12 +12,20 @@ resumen, todo viene de repositorios)."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, date, datetime
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.domain.clinical_values import (
+    normalize_appetite,
+    normalize_mobility,
+    normalize_sleep,
+    normalize_wound,
+    parse_pain_nrs,
+    parse_temperature_c,
+)
 from app.domain.decision import DecisionLevel
 from app.domain.escalation import EscalationRecord
 from app.domain.models import CitationRef, UsageMetrics
@@ -35,11 +43,37 @@ class HandoffSummary(BaseModel):
     reason: str | None = None
 
 
+class FollowupField(BaseModel):
+    """Dato recogido en la nueva llamada con certeza y texto fuente."""
+
+    value: Any = None
+    certainty: str
+    original_text: str
+    source_turn_id: str | None = None
+
+
+class FollowupRecord(BaseModel):
+    """Proyección longitudinal compatible con los campos del dataset."""
+
+    patient_id: str | None = None
+    recorded_at: datetime
+    dolor_nrs: FollowupField | None = None
+    fiebre_c: FollowupField | None = None
+    movilidad: FollowupField | None = None
+    herida: FollowupField | None = None
+    apetito: FollowupField | None = None
+    sueno: FollowupField | None = None
+    decision_level: DecisionLevel = DecisionLevel.ROUTINE_FOLLOW_UP
+    alerta_equipo_medico: bool = False
+
+
 class CallSummary(BaseModel):
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.2"] = "1.2"
     session_id: UUID
     case_id: str
+    patient_id: str | None = None
     procedure: str | None = None
+    surgery_date: date | None = None
     started_at: datetime
     ended_at: datetime | None = None
 
@@ -52,6 +86,7 @@ class CallSummary(BaseModel):
     citations: list[CitationRef] = Field(default_factory=list)
     handoff: HandoffSummary = Field(default_factory=HandoffSummary)
     follow_up_items: list[str] = Field(default_factory=list)
+    followup_record: FollowupRecord | None = None
 
     usage: UsageMetrics = Field(default_factory=UsageMetrics)
     knowledge_version: int
@@ -80,6 +115,34 @@ def _decision_to_risk(decision_record: dict[str, Any]) -> RiskSummary:
     )
 
 
+def _followup_field(
+    observations: list[Observation],
+    *codes: str,
+    normalizer: Any = None,
+) -> FollowupField | None:
+    matching = [
+        item
+        for item in observations
+        if item.code in codes and item.certainty in {"confirmed", "denied"}
+    ]
+    if not matching:
+        return None
+    observation = matching[-1]
+    value = observation.value
+    if normalizer is not None:
+        value = normalizer(value, observation.original_text)
+        if value is None and observation.certainty == "confirmed":
+            return None
+    elif value is None and observation.certainty == "confirmed":
+        value = observation.original_text
+    return FollowupField(
+        value=value,
+        certainty=observation.certainty,
+        original_text=observation.original_text,
+        source_turn_id=observation.source_turn_id,
+    )
+
+
 def build_call_summary(
     *,
     session: dict[str, Any],
@@ -87,7 +150,9 @@ def build_call_summary(
     decisions: list[dict[str, Any]],
     citations: list[CitationRef],
     escalations: list[EscalationRecord],
+    patient_id: str | None = None,
     procedure: str | None = None,
+    surgery_date: date | None = None,
     usage: UsageMetrics | None = None,
     ended_at: datetime | None = None,
 ) -> CallSummary:
@@ -150,10 +215,53 @@ def build_call_summary(
     else:
         handoff = HandoffSummary()
 
+    followup_record = FollowupRecord(
+        patient_id=patient_id,
+        recorded_at=ended_at or datetime.now(UTC),
+        dolor_nrs=_followup_field(
+            observations,
+            "PAIN_SEVERITY",
+            "PAIN",
+            normalizer=lambda value, text: parse_pain_nrs(value, text),
+        ),
+        fiebre_c=_followup_field(
+            observations,
+            "FEVER",
+            normalizer=lambda value, text: parse_temperature_c(value, text),
+        ),
+        movilidad=_followup_field(
+            observations,
+            "MOBILITY",
+            normalizer=lambda _value, text: normalize_mobility(text),
+        ),
+        herida=_followup_field(
+            observations,
+            "WOUND_APPEARANCE",
+            "WOUND_DISCHARGE",
+            "WOUND_INFLAMMATION",
+            normalizer=lambda _value, text: normalize_wound(text),
+        ),
+        apetito=_followup_field(
+            observations,
+            "INTAKE",
+            "ORAL_INTAKE_INTOLERANCE",
+            normalizer=lambda _value, text: normalize_appetite(text),
+        ),
+        sueno=_followup_field(
+            observations,
+            "SLEEP",
+            normalizer=lambda _value, text: normalize_sleep(text),
+        ),
+        decision_level=risk.level,
+        alerta_equipo_medico=risk.should_escalate,
+    )
+
     return CallSummary(
         session_id=UUID(session["id"]),
         case_id=session["case_id"],
+        patient_id=patient_id,
         procedure=procedure,
+        surgery_date=surgery_date,
         started_at=started_at,
         ended_at=ended_at,
         patient_reported=patient_reported,
@@ -164,6 +272,7 @@ def build_call_summary(
         citations=list(citations),
         handoff=handoff,
         follow_up_items=follow_up_items,
+        followup_record=followup_record,
         usage=usage if usage is not None else UsageMetrics(),
         knowledge_version=session["knowledge_version"],
     )

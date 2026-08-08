@@ -12,8 +12,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import get_audit_repo, get_settings_dep
+from app.api.deps import get_audit_repo, get_case_port, get_settings_dep
 from app.core.config import Settings
+from app.ports.challenge_case import ChallengeCasePort
 from app.repositories.audit import AuditRepository
 
 router = APIRouter(tags=["audit"])
@@ -22,8 +23,15 @@ router = APIRouter(tags=["audit"])
 @router.get("/audit/sessions")
 async def list_audit_sessions(
     audit_repo: AuditRepository = Depends(get_audit_repo),
+    case_port: ChallengeCasePort = Depends(get_case_port),
 ) -> dict[str, Any]:
-    return {"sessions": audit_repo.list_sessions()}
+    rows = audit_repo.list_sessions()
+    for row in rows:
+        case = await case_port.get_case(row["case_id"])
+        row["patient_display_name"] = case.patient_display_name if case else None
+        row["procedure"] = case.procedure if case else None
+        row["surgery_date"] = case.surgery_date.isoformat() if case and case.surgery_date else None
+    return {"sessions": rows}
 
 
 @router.get("/audit/sessions/{session_id}/trace")
@@ -78,18 +86,14 @@ def _tokens_metric(usage: dict[str, Any], measured: bool) -> dict[str, Any]:
         }
     turns = max(usage["turn_count"], 1)
     calls = max(usage["session_count"], 1)
+    total = usage["input_tokens_total"] + usage["output_tokens_total"]
     return {
         "status": "medido",
-        "value": (
-            f"in={usage['input_tokens_total']} out={usage['output_tokens_total']} tokens "
-            f"totales"
-        ),
+        "value": f"{total:,} tokens",
         "detail": (
-            f"por turno: in={usage['input_tokens_total'] / turns:.0f} "
-            f"out={usage['output_tokens_total'] / turns:.0f}, "
-            f"{usage['llm_calls_total'] / turns:.1f} invocaciones LLM/turno, "
-            f"{usage['rag_queries_total'] / calls:.1f} consultas RAG/llamada "
-            f"(n={usage['sample_size']} invocaciones, {usage['session_count']} llamadas)"
+            f"{usage['input_tokens_total']:,} entrada · {usage['output_tokens_total']:,} salida · "
+            f"{usage['llm_calls_total'] / turns:.1f} llamadas LLM/turno · "
+            f"{usage['rag_queries_total'] / calls:.1f} consultas RAG/llamada"
         ),
     }
 
@@ -110,12 +114,8 @@ def _cost_metric(usage: dict[str, Any], measured: bool, settings: Settings) -> d
     if price_in is None or price_out is None:
         return {
             "status": "pendiente",
-            "value": "—",
-            "detail": (
-                f"Tokens medidos (in={usage['input_tokens_total']} "
-                f"out={usage['output_tokens_total']}) pero sin precio configurado — fijar "
-                "LLM_COST_PER_MILLION_INPUT_TOKENS/LLM_COST_PER_MILLION_OUTPUT_TOKENS"
-            ),
+            "value": "No configurado",
+            "detail": ("Hay tokens medidos; faltan las tarifas de entrada y salida del modelo."),
         }
     calls = max(usage["session_count"], 1)
     total_cost = (

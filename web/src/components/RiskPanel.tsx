@@ -10,20 +10,15 @@ const RISK_LABELS: Record<RiskLevel, { icon: string; label: string }> = {
 
 type RiskPanelProps = {
   riskLevel: RiskLevel | null;
-  alerted: boolean;
-  onEscalate: () => void;
-  onReset: () => void;
+  handoffCreated: boolean;
 };
 
 /**
- * Risk/supervision panel + the escalation CTA. The button is always
- * enabled (design.md §5.2 requires it be demonstrable end-to-end even
- * before real sessions exist), but the copy never claims a risk level
- * that hasn't actually been computed by a Triage Agent — when
- * `riskLevel` is null this renders an honest "sin evaluación" state
- * instead of a fabricated one.
+ * Panel de supervisión de solo lectura. El backend crea el handoff al
+ * decidir riesgo; esta vista refleja ese resultado y nunca ofrece una
+ * simulación manual que pueda divergir del registro auditable.
  */
-export function RiskPanel({ riskLevel, alerted, onEscalate, onReset }: RiskPanelProps) {
+export function RiskPanel({ riskLevel, handoffCreated }: RiskPanelProps) {
   return (
     <section className="card card-pad" aria-labelledby="risk-heading">
       <div className="section-heading">
@@ -31,7 +26,7 @@ export function RiskPanel({ riskLevel, alerted, onEscalate, onReset }: RiskPanel
           <p className="eyebrow">Acompañamiento</p>
           <h2 id="risk-heading">Supervisión en tiempo real</h2>
         </div>
-        <span className="chip chip-caution">Revisión disponible</span>
+        <span className="chip chip-caution">Monitoreo automático</span>
       </div>
 
       {riskLevel ? (
@@ -56,37 +51,18 @@ export function RiskPanel({ riskLevel, alerted, onEscalate, onReset }: RiskPanel
         </div>
       )}
 
-      <div className="escalation-card" data-alerted={alerted}>
-        <p style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 800, color: alerted ? "var(--lime-deep)" : "var(--coral-deep)" }}>
-          {alerted ? "Handoff simulado registrado" : "Revisión humana"}
+      <div className="escalation-card" data-alerted={handoffCreated}>
+        <p style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 800, color: handoffCreated ? "var(--lime-deep)" : "var(--coral-deep)" }}>
+          {handoffCreated ? "Handoff automático registrado" : "Handoff automático activo"}
         </p>
         <p>
-          {alerted
-            ? "El equipo recibiría este contexto en un despliegue real. Esta es una demostración auditable del flujo de escalamiento."
-            : "Usa este control para simular el flujo de escalamiento a un miembro del equipo, incluso sin una llamada activa."}
+          {handoffCreated
+            ? "El reporte fue enviado al equipo de atención prioritaria. La confirmación de contacto continúa dentro de la llamada."
+            : "No requiere acción manual: si se detecta un riesgo, el sistema detiene el cuestionario y crea el registro de revisión humana."}
         </p>
-
-        <button type="button" className="btn btn-escalate" onClick={onEscalate} disabled={alerted}>
-          <span aria-hidden="true">{alerted ? "✓" : "+"}</span>
-          {alerted ? "Alerta registrada (simulada)" : "Simular alerta al equipo"}
-        </button>
-
         <p className="escalation-note">
-          {alerted
-            ? "No se ejecutó ninguna acción hospitalaria real: ninguna llamada, mensaje ni escritura en un EHR."
-            : "Al confirmar, no se ejecuta ninguna acción hospitalaria real."}
+          El handoff conserva los hallazgos, la decisión y los teléfonos confirmados durante la conversación.
         </p>
-
-        {alerted ? (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            style={{ width: "100%", marginTop: 8, minHeight: 36 }}
-            onClick={onReset}
-          >
-            Reiniciar vista previa
-          </button>
-        ) : null}
       </div>
     </section>
   );

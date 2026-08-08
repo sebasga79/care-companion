@@ -8,6 +8,7 @@ anticipada asumió Delta Share; el reto real entrega 4 `.xlsx` + PDFs)."""
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Protocol
 
 from pydantic import BaseModel, Field
@@ -15,11 +16,34 @@ from pydantic import BaseModel, Field
 
 class CaseFilters(BaseModel):
     procedure: str | None = None
-    limit: int = 20
+    # El kit oficial contiene 160 casos. La vista del concurso no implementa
+    # paginación, por lo que el default debe alcanzarlos a todos; 20 ocultaba
+    # silenciosamente 140 casos aunque el adapter real estuviera activo.
+    limit: int = 200
+
+
+class HistoricalFollowup(BaseModel):
+    """Hito longitudinal conocido antes de la nueva llamada.
+
+    Conserva el vocabulario de `trayectorias_postop_silver.xlsx` para que
+    la evolución sea auditable sin convertirla en texto libre ni perder el
+    día al que pertenece cada dato.
+    """
+
+    trajectory_id: str
+    day: int
+    archetype: str
+    pain_nrs: int
+    temperature_c: float
+    mobility: str
+    wound: str
+    appetite: str
+    sleep: str
 
 
 class CaseSummary(BaseModel):
     case_id: str
+    patient_id: str | None = None
     patient_display_name: str
     procedure: str
     # `procedure_category` es el identificador corto/en inglés (p. ej.
@@ -31,6 +55,9 @@ class CaseSummary(BaseModel):
     procedure_category: str
     phase: str
     days_since_procedure: int
+    surgery_date: date | None = None
+    followup_days: list[int] = Field(default_factory=list)
+    historical_followups: list[HistoricalFollowup] = Field(default_factory=list)
 
 
 class ReferenceTrajectory(BaseModel):
@@ -54,6 +81,10 @@ class ReferenceTrajectory(BaseModel):
 
 class ChallengeCase(BaseModel):
     case_id: str
+    # Identificador sintético estable que permite enlazar los seguimientos
+    # de días 1/3/7/14 del mismo paciente sin exponer la trayectoria clínica
+    # ground truth al agente.
+    patient_id: str
     patient_display_name: str
     procedure: str
     procedure_category: str
@@ -70,6 +101,8 @@ class ChallengeCase(BaseModel):
     comorbidities: list[str] = Field(default_factory=list)
     city: str | None = None
     department: str | None = None
+    surgery_date: date | None = None
+    historical_followups: list[HistoricalFollowup] = Field(default_factory=list)
     reference_trajectory: ReferenceTrajectory | None = None
 
 

@@ -70,6 +70,4 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
             except Exception:
                 # Fail-open intencional: telemetría no clínica. Se deja
                 # constancia en el log; nunca se oculta en silencio.
-                logger.exception(
-                    "failed_to_persist_http_event correlation_id=%s", correlation_id
-                )
+                logger.exception("failed_to_persist_http_event correlation_id=%s", correlation_id)

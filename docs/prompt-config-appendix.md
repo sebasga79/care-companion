@@ -1,6 +1,6 @@
 # Care Companion — Apéndice de prompts y configuración (DOC-004)
 
-> v1.0 · 24 de julio de 2026 · Reproducible. **No** contiene chain-of-thought,
+> v1.2 · 7 de agosto de 2026 · Reproducible. **No** contiene chain-of-thought,
 > secretos ni claves. Los prompts viven versionados en el código (`api/app/agents/`);
 > este apéndice los referencia con hash para trazabilidad.
 
@@ -8,11 +8,11 @@
 
 | Parámetro | Valor actual (pre-T0) | En T0 |
 |---|---|---|
-| `LLM_PROVIDER` | `fake` (determinista) | `openai_compat` (modelo obligatorio) |
-| `LLM_MODEL` | `fake-model-v1` | anunciado el 7 de agosto |
-| Adapter | `FakeLLM` | detrás del mismo `LLMPort`, sin tocar dominio (ADR-001) |
+| `LLM_PROVIDER` | `fake` (determinista) | `groq` primario / `ollama` local |
+| `LLM_MODEL` | `fake-model-v1` | Llama 3.1 70B / Phi-3.5 Mini |
+| Adapter | `FakeLLM` | `OpenAICompatLLM` detrás del mismo `LLMPort` |
 
-Allowlist de proveedores: **solo** `fake` y `openai_compat` (validado en
+Allowlist de proveedores: **solo** `fake`, `groq` y `ollama` (validado en
 `test_gates.py::test_gate_single_model_allowlist`). No hay adapters de otros
 proveedores en el código.
 
@@ -33,7 +33,8 @@ en `fail_safe`. **Ningún agente llama a otro** — solo el orquestador coordina
   original; contradicción intra-llamada → se señala citando lo previo;
   silencio/turno vacío → `not_assessed`, **nunca** `denied`.
 - **Salida:** JSON estricto `{needs_clarification, clarification_question,
-  next_question, observations[]}`.
+  next_objective_code, next_question, observations[]}`. Un saludo puro no crea
+  observaciones; contexto de caso/seguimientos nunca se toma como síntoma actual.
 
 ### 2.2 TriageAgent (`triage.py`)
 
@@ -48,19 +49,24 @@ en `fail_safe`. **Ningún agente llama a otro** — solo el orquestador coordina
 ### 2.3 ResponseAgent (`response.py`)
 
 - **Rol:** respuesta hablable en español (2-4 frases). Nunca diagnostica,
-  prescribe ni promete acciones reales.
+  prescribe ni promete acciones reales. Responde saludos con naturalidad y evita
+  muletillas repetidas antes de cada pregunta.
 - **Groundedness:** solo puede afirmar contenido clínico que aparezca
   literalmente en los FRAGMENTOS DE EVIDENCIA aprobados por el evidence gate,
   pasados **como datos, no instrucciones** ("contenido no confiable"). Sin
   evidencia → aclara/abstiene/deriva.
+- **Handoff de seguridad:** si la decisión implica escalamiento, no se llama al
+  LLM. `safe-handoff-v1` construye un mensaje determinista; para
+  `HARD_RED_FLAG` detiene el checklist, comunica valoración urgente, confirma el
+  reporte al equipo de atención y abre la confirmación de dos teléfonos.
 
 ### 2.4 Hashes de reproducibilidad (SHA-256, 16 hex)
 
 | Archivo | Hash |
 |---|---|
-| `api/app/agents/interview.py` | `ae100251f47d166e` |
-| `api/app/agents/response.py` | `2156ad677fd5df52` |
-| `api/app/agents/triage.py` | `6ae1288ba0d1ac7f` |
+| `api/app/agents/interview.py` | `f73e3b1fc2aafcae` |
+| `api/app/agents/response.py` | `5e73be1fc147d7cc` |
+| `api/app/agents/triage.py` | `615f7be7f80c9838` |
 
 > Regenerar: `shasum -a 256 api/app/agents/{interview,response,triage}.py`.
 > Cualquier cambio de prompt cambia el hash — es la versión del prompt.
@@ -68,7 +74,11 @@ en `fail_safe`. **Ningún agente llama a otro** — solo el orquestador coordina
 ## 3. Servicios deterministas (no-LLM)
 
 - **RuleEngine** (`services/rule_engine.py`): red flags versionadas; dato
-  ausente/ambiguo nunca produce "todo bien" → `missing_info`.
+  ausente/ambiguo nunca produce "todo bien" → `missing_info`. Versión actual:
+  `rules-v2`.
+- **SafetySignalDetector** (`domain/safety_signals.py`):
+  `safety-signal-detector-v1`, inspección del texto crudo con negación y
+  precedencia sobre observaciones del LLM.
 - **reduce_decision** (`domain/decision.py`): precedencia
   `HARD_RED_FLAG > DATA_INTEGRITY_FAILURE > EVIDENCE_INSUFFICIENT_WITH_RISK >
   MODEL_HIGH_RISK > MODEL_MODERATE_RISK > ROUTINE_FOLLOW_UP`. No degradable.
@@ -77,8 +87,8 @@ en `fail_safe`. **Ningún agente llama a otro** — solo el orquestador coordina
 
 | Ajuste | Default | Nota |
 |---|---|---|
-| `RAG_ALLOWED_EXTENSIONS` | `txt,md` | pdf pendiente de lib aprobada |
-| `RAG_MAX_UPLOAD_BYTES` | `2_000_000` | 2 MB |
+| `RAG_ALLOWED_EXTENSIONS` | `txt,md,pdf` | PDF real soportado con `pypdf` |
+| `RAG_MAX_UPLOAD_BYTES` | `15_000_000` | cubre el corpus oficial |
 | `RAG_CHUNK_SIZE_CHARS` | `800` | con solape |
 | `RAG_CHUNK_OVERLAP_CHARS` | `150` | |
 | `RAG_EMBEDDING_DIMENSIONS` | `128` | FakeEmbeddings; el real llega en T0 |

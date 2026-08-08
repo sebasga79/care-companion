@@ -118,9 +118,7 @@ def _split_sections(text: str) -> list[_Section]:
     return sections
 
 
-def _sliding_windows(
-    text: str, chunk_size: int, overlap: int
-) -> list[tuple[str, int, int]]:
+def _sliding_windows(text: str, chunk_size: int, overlap: int) -> list[tuple[str, int, int]]:
     if not text:
         return []
     windows: list[tuple[str, int, int]] = []

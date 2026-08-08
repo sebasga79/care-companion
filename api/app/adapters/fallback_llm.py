@@ -29,13 +29,7 @@ class FallbackLLM(LLMPort):
         response_schema: dict | None = None,
     ) -> LLMResult:
         try:
-            return await self._primary.generate(
-                messages=messages, response_schema=response_schema
-            )
+            return await self._primary.generate(messages=messages, response_schema=response_schema)
         except LLMProviderError:
-            logger.warning(
-                "llm_primary_failed_falling_back_to_secondary", exc_info=True
-            )
-            return await self._fallback.generate(
-                messages=messages, response_schema=response_schema
-            )
+            logger.warning("llm_primary_failed_falling_back_to_secondary", exc_info=True)
+            return await self._fallback.generate(messages=messages, response_schema=response_schema)

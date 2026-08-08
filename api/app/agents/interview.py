@@ -32,10 +32,16 @@ from app.ports.llm import LLMMessage, LLMPort
 # `CallCycleOrchestrator` considera "cubierto" en cuanto exista una
 # observación con ese código y certainty != not_assessed.
 INTERVIEW_OBJECTIVES: tuple[tuple[str, str], ...] = (
-    ("GENERAL_STATE", "ánimo y actividad general"),
+    ("PAIN", "dolor actual y si ha cambiado"),
+    ("PAIN_LOCATION", "lugar exacto del dolor"),
+    ("PAIN_SEVERITY", "intensidad del dolor de 0 a 10"),
+    ("PAIN_EVOLUTION", "evolución del dolor: mejora, sigue igual o empeora"),
+    ("GENERAL_STATE", "estado general y ánimo"),
+    ("INTAKE", "tolerancia a líquidos y alimentos"),
     ("FEVER", "fiebre o sensación de calor corporal"),
     ("WOUND_APPEARANCE", "aspecto de la herida (color, secreción, olor)"),
-    ("INTAKE", "tolerancia a líquidos y alimentos"),
+    ("MOBILITY", "movilidad y actividad"),
+    ("SLEEP", "descanso y sueño"),
 )
 
 # Ejemplos de expresiones ambiguas (conocimiento de diseño derivado de
@@ -85,10 +91,25 @@ _SYSTEM_PROMPT = (
     "mixta.\n"
     "3. El silencio, la falta de respuesta o un turno vacío NUNCA se "
     "registra como certainty='denied'; usa 'not_assessed'.\n"
-    "4. Responde EXCLUSIVAMENTE con un objeto JSON válido con esta forma: "
+    "4. Un saludo o una fórmula social sin información clínica NO cubre un "
+    "objetivo y NO crea observaciones. Responde al saludo con naturalidad y "
+    "continúa con el primer objetivo pendiente.\n"
+    "5. Extrae TODA la información explícita del último turno, aunque no "
+    "corresponda a la pregunta anterior. Elige como siguiente objetivo uno "
+    "que siga pendiente después de esas observaciones; no repitas algo que "
+    "el paciente acaba de responder. Si reporta dolor sin localizarlo ni "
+    "caracterizarlo, prioriza preguntar lugar exacto, intensidad de 0 a 10 "
+    "y evolución antes de volver al checklist general.\n"
+    "6. Usa los seguimientos anteriores para reconocer la evolución, evitar "
+    "que el paciente repita antecedentes ya registrados y priorizar cambios "
+    "o pendientes. Si el paciente dice que ya tienes sus registros, NO marques "
+    "esa objeción como respuesta confirmada: reconoce la línea base disponible, "
+    "explica qué cambió y pregunta solo por lo que sucede hoy. Nunca presentes "
+    "los antecedentes como síntomas actuales ni contestes por el paciente.\n"
+    "7. Responde EXCLUSIVAMENTE con un objeto JSON válido con esta forma: "
     '{"needs_clarification": bool, "clarification_question": str|null, '
-    '"next_question": str|null, "observations": '
-    '[{"code": str, "label": str, "value": bool|str|null, '
+    '"next_objective_code": str|null, "next_question": str|null, "observations": '
+    '[{"code": str, "label": str, "value": bool|number|str|null, '
     '"certainty": "confirmed"|"uncertain"|"denied"|"not_assessed", '
     '"original_text": str, "normalized_text": str|null}]}. '
     "Sin texto adicional fuera del JSON."
@@ -98,7 +119,7 @@ _SYSTEM_PROMPT = (
 class _ObservationDraft(BaseModel):
     code: str
     label: str
-    value: bool | str | None = None
+    value: bool | int | float | str | None = None
     certainty: Certainty
     original_text: str = ""
     normalized_text: str | None = None
@@ -107,15 +128,14 @@ class _ObservationDraft(BaseModel):
 class InterviewLLMOutput(BaseModel):
     needs_clarification: bool = False
     clarification_question: str | None = None
+    next_objective_code: str | None = None
     next_question: str | None = None
     observations: list[_ObservationDraft] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _clarification_requires_question(self) -> InterviewLLMOutput:
         if self.needs_clarification and not (self.clarification_question or "").strip():
-            raise ValueError(
-                "needs_clarification=true requiere clarification_question no vacía"
-            )
+            raise ValueError("needs_clarification=true requiere clarification_question no vacía")
         return self
 
 
@@ -131,6 +151,8 @@ class InterviewTurnInput(BaseModel):
     remaining_objectives: list[dict] = Field(default_factory=list)
     last_patient_utterance: str = ""
     last_patient_turn_id: str | None = None
+    case_context: dict = Field(default_factory=dict)
+    prior_followups: list[dict] = Field(default_factory=list)
 
 
 Speaker = Literal["patient", "agent", "system"]
@@ -178,9 +200,7 @@ class InterviewAgent:
                 original_text=draft.original_text,
                 normalized_text=draft.normalized_text,
                 source_turn_id=(
-                    None
-                    if draft.certainty == "not_assessed"
-                    else turn_input.last_patient_turn_id
+                    None if draft.certainty == "not_assessed" else turn_input.last_patient_turn_id
                 ),
                 normalized_by="interview-agent-v1",
             ).model_dump(mode="json")
@@ -192,6 +212,7 @@ class InterviewAgent:
             output={
                 "needs_clarification": parsed.needs_clarification,
                 "clarification_question": parsed.clarification_question,
+                "next_objective_code": parsed.next_objective_code,
                 "next_question": parsed.next_question,
                 "observations": observations,
             },
@@ -200,7 +221,21 @@ class InterviewAgent:
 
 
 def _build_user_prompt(turn_input: InterviewTurnInput) -> str:
-    lines = ["## Objetivos pendientes del checklist"]
+    lines = ["## Contexto conocido del caso (no es respuesta del paciente)"]
+    if turn_input.case_context:
+        for key, value in turn_input.case_context.items():
+            lines.append(f"- {key}: {value}")
+    else:
+        lines.append("(sin contexto de caso)")
+
+    lines.append("\n## Seguimientos anteriores estructurados (no asumir vigencia hoy)")
+    if turn_input.prior_followups:
+        for followup in turn_input.prior_followups:
+            lines.append(f"- {followup}")
+    else:
+        lines.append("(ninguno)")
+
+    lines.append("\n## Objetivos pendientes del checklist")
     if turn_input.remaining_objectives:
         for objective in turn_input.remaining_objectives:
             lines.append(f"- {objective['code']}: {objective['label']}")

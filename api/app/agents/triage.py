@@ -30,7 +30,10 @@ _SYSTEM_PROMPT = (
     "salida NUNCA puede declarar una alerta dura (eso lo controla "
     "exclusivamente el motor de reglas, no tú) — tu nivel de riesgo debe "
     "ser exactamente uno de: ROUTINE_FOLLOW_UP, MODEL_MODERATE_RISK, "
-    "MODEL_HIGH_RISK. No diagnostiques, no prescribas. Responde "
+    "MODEL_HIGH_RISK. El contexto del caso y los seguimientos anteriores "
+    "sirven para adaptar la evaluación, pero nunca son síntomas actuales: "
+    "las observaciones de esta llamada tienen precedencia. No diagnostiques, "
+    "no prescribas. Responde "
     "EXCLUSIVAMENTE con un objeto JSON con esta forma: "
     '{"model_level": "ROUTINE_FOLLOW_UP"|"MODEL_MODERATE_RISK"|"MODEL_HIGH_RISK", '
     '"rationale": str, "missing_information": [str], '
@@ -63,6 +66,8 @@ class TriageTurnInput(BaseModel):
     observations: list[dict] = Field(default_factory=list)
     rule_engine_missing_info: list[str] = Field(default_factory=list)
     evidence_summaries: list[str] = Field(default_factory=list)
+    case_context: dict = Field(default_factory=dict)
+    prior_followups: list[dict] = Field(default_factory=list)
 
 
 class TriageAgent:
@@ -114,7 +119,16 @@ class TriageAgent:
 
 
 def _build_user_prompt(turn_input: TriageTurnInput) -> str:
-    lines = ["## Observaciones normalizadas"]
+    lines = ["## Contexto conocido del caso (no es un síntoma actual)"]
+    lines.append(str(turn_input.case_context) if turn_input.case_context else "(sin contexto)")
+    lines.append("\n## Seguimientos anteriores (no asumir vigencia hoy)")
+    if turn_input.prior_followups:
+        for followup in turn_input.prior_followups:
+            lines.append(f"- {followup}")
+    else:
+        lines.append("(ninguno)")
+
+    lines.append("\n## Observaciones normalizadas de esta llamada")
     if turn_input.observations:
         for obs in turn_input.observations:
             lines.append(

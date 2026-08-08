@@ -5,7 +5,8 @@ descargado por `fetch_dataset.py`) al RAG vía el mismo
 pipeline, mismas validaciones, misma transacción con canaria (RAG-002/
 RAG-008), solo que en lote y sin pasar por HTTP.
 
-Cada documento se etiqueta con `applicability={"procedure": <categoría>}`
+Cada documento se etiqueta con `applicability={"procedure": <categoría>,
+"source": "official_corpus"}`
 según la carpeta de origen (mapeo confirmado inspeccionando
 `perfiles_clinicos_pacientes_silver_contest.xlsx` — ver
 docs/auditoria-kit-oficial-2026-08-07.md §9.2) para que
@@ -49,6 +50,12 @@ FOLDER_TO_PROCEDURE_CATEGORY = {
     "cholecystitis": "cholecystitis",
     "colorectal cancer": "colorectal_cancer",
     "total joint replacement": "total_joint_replacement",
+}
+
+# Salida derivada y auditable del único PDF escaneado del kit. Se ingesta como
+# texto, conservando el PDF original intacto en `textos/`.
+OCR_TO_PROCEDURE_CATEGORY = {
+    "appendicitis-literature-review-ocr.txt": "appendicitis",
 }
 
 
@@ -108,7 +115,7 @@ async def load_corpus(dataset_dir: Path, settings: Settings) -> None:
                 result = await ingestion.learn(
                     raw_filename=pdf_path.name,
                     content=pdf_path.read_bytes(),
-                    applicability={"procedure": category},
+                    applicability={"procedure": category, "source": "official_corpus"},
                 )
                 ok += 1
                 print(f"  ok: {pdf_path.name} ({result.chunk_count} chunks)")
@@ -132,6 +139,31 @@ async def load_corpus(dataset_dir: Path, settings: Settings) -> None:
                 # el resto en vez de abortar todo por un documento.
                 failed += 1
                 print(f"  FALLÓ (canary): {pdf_path.name} — {exc}")
+
+    ocr_dir = dataset_dir / "ocr"
+    for filename, category in OCR_TO_PROCEDURE_CATEGORY.items():
+        txt_path = ocr_dir / filename
+        if not txt_path.is_file():
+            print(f"  ! OCR no encontrado: {txt_path}")
+            continue
+        try:
+            result = await ingestion.learn(
+                raw_filename=txt_path.name,
+                content=txt_path.read_bytes(),
+                applicability={"procedure": category, "source": "official_corpus"},
+            )
+            ok += 1
+            print(f"  ok OCR: {txt_path.name} ({result.chunk_count} chunks)")
+        except UploadRejected as exc:
+            if exc.code == "duplicate_checksum":
+                skipped += 1
+                print(f"  skip OCR (ya cargado): {txt_path.name}")
+            else:
+                failed += 1
+                print(f"  FALLÓ OCR ({exc.code}): {txt_path.name} — {exc.reason}")
+        except KnowledgeCanaryError as exc:
+            failed += 1
+            print(f"  FALLÓ OCR (canary): {txt_path.name} — {exc}")
 
     print(f"\nListo — ok={ok} skip={skipped} fallidos={failed}")
 

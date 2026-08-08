@@ -46,29 +46,69 @@ def _write_full_dataset(
     _write_xlsx(
         dataset_dir / TRAYECTORIAS_FILE,
         [
-            "trayectoria_id", "paciente_id", "dia_postop", "arquetipo_trayectoria",
-            "dolor_nrs", "fiebre_c", "movilidad", "herida", "apetito", "sueno",
+            "trayectoria_id",
+            "paciente_id",
+            "dia_postop",
+            "arquetipo_trayectoria",
+            "dolor_nrs",
+            "fiebre_c",
+            "movilidad",
+            "herida",
+            "apetito",
+            "sueno",
         ],
         trayectorias
         if trayectorias is not None
         else [
             (
-                "tray_pac_1_00000_1", "pac_1_00000", 1, "recuperacion_normal",
-                2, 37.5, "normal", "normal", "normal", "normal",
+                "tray_pac_1_00000_1",
+                "pac_1_00000",
+                1,
+                "recuperacion_normal",
+                2,
+                37.5,
+                "normal",
+                "normal",
+                "normal",
+                "normal",
             ),
             (
-                "tray_pac_1_00000_3", "pac_1_00000", 3, "recuperacion_normal",
-                1, 36.9, "normal", "normal", "normal", "normal",
+                "tray_pac_1_00000_3",
+                "pac_1_00000",
+                3,
+                "recuperacion_normal",
+                1,
+                36.9,
+                "normal",
+                "normal",
+                "normal",
+                "normal",
             ),
         ],
     )
     _write_xlsx(
         dataset_dir / PERFILES_CLINICOS_FILE,
-        ["paciente_id", "modulo_synthea", "procedimiento", "edad", "genero", "comorbilidades"],
+        [
+            "paciente_id",
+            "modulo_synthea",
+            "procedimiento",
+            "fecha_cirugia",
+            "edad",
+            "genero",
+            "comorbilidades",
+        ],
         perfiles_clinicos
         if perfiles_clinicos is not None
         else [
-            ("pac_1_00000", "appendicitis", "Apendicectomía", 34, "F", '["hipertension"]'),
+            (
+                "pac_1_00000",
+                "appendicitis",
+                "Apendicectomía",
+                "2026-06-14",
+                34,
+                "F",
+                '["hipertension"]',
+            ),
         ],
     )
     _write_xlsx(
@@ -95,13 +135,22 @@ def test_adapter_raises_when_files_missing(tmp_path: Path) -> None:
         DatasetCaseAdapter(tmp_path / "does-not-exist")
 
 
-async def test_adapter_builds_case_id_from_trayectoria_id(tmp_path: Path) -> None:
+def test_default_case_limit_exposes_complete_official_dataset() -> None:
+    assert CaseFilters().limit >= 160
+
+
+async def test_adapter_lists_one_longitudinal_entity_per_patient(tmp_path: Path) -> None:
     dataset_dir = _write_full_dataset(tmp_path)
     adapter = DatasetCaseAdapter(dataset_dir)
 
     cases = await adapter.list_cases(CaseFilters())
     case_ids = {c.case_id for c in cases}
-    assert case_ids == {"caso_tray_pac_1_00000_1", "caso_tray_pac_1_00000_3"}
+    assert case_ids == {"paciente_pac_1_00000"}
+    assert cases[0].followup_days == [1, 3]
+
+    # Los episodios originales siguen resolviendo por ID para trazabilidad.
+    assert await adapter.get_case("caso_tray_pac_1_00000_1") is not None
+    assert await adapter.get_case("caso_tray_pac_1_00000_3") is not None
 
 
 async def test_adapter_joins_clinical_and_demographic_profiles(tmp_path: Path) -> None:
@@ -110,6 +159,7 @@ async def test_adapter_joins_clinical_and_demographic_profiles(tmp_path: Path) -
 
     case = await adapter.get_case("caso_tray_pac_1_00000_1")
     assert case is not None
+    assert case.patient_id == "pac_1_00000"
     assert case.patient_display_name == "María Fernanda Rodríguez"
     assert case.procedure == "Apendicectomía"
     assert case.procedure_category == "appendicitis"
@@ -120,6 +170,13 @@ async def test_adapter_joins_clinical_and_demographic_profiles(tmp_path: Path) -
     assert case.department == "Antioquia"
     assert case.days_since_procedure == 1
     assert case.phase == "post_discharge_day_1"
+
+    patient = await adapter.get_case("paciente_pac_1_00000")
+    assert patient is not None
+    assert patient.surgery_date is not None
+    assert patient.surgery_date.isoformat() == "2026-06-14"
+    assert [item.day for item in patient.historical_followups] == [1, 3]
+    assert [item.pain_nrs for item in patient.historical_followups] == [2, 1]
 
 
 async def test_adapter_exposes_reference_trajectory_never_fed_to_agents(tmp_path: Path) -> None:
@@ -146,8 +203,16 @@ async def test_adapter_skips_trajectory_rows_without_matching_profile(tmp_path: 
         tmp_path,
         trayectorias=[
             (
-                "tray_huerfana_1", "pac_sin_perfil", 1, "recuperacion_normal",
-                2, 37.0, "normal", "normal", "normal", "normal",
+                "tray_huerfana_1",
+                "pac_sin_perfil",
+                1,
+                "recuperacion_normal",
+                2,
+                37.0,
+                "normal",
+                "normal",
+                "normal",
+                "normal",
             ),
         ],
     )
@@ -161,17 +226,49 @@ async def test_list_cases_filters_by_procedure_category(tmp_path: Path) -> None:
         tmp_path,
         trayectorias=[
             (
-                "tray_pac_1_00000_1", "pac_1_00000", 1, "recuperacion_normal",
-                2, 37.5, "normal", "normal", "normal", "normal",
+                "tray_pac_1_00000_1",
+                "pac_1_00000",
+                1,
+                "recuperacion_normal",
+                2,
+                37.5,
+                "normal",
+                "normal",
+                "normal",
+                "normal",
             ),
             (
-                "tray_pac_2_00000_1", "pac_2_00000", 1, "recuperacion_normal",
-                1, 36.8, "normal", "normal", "normal", "normal",
+                "tray_pac_2_00000_1",
+                "pac_2_00000",
+                1,
+                "recuperacion_normal",
+                1,
+                36.8,
+                "normal",
+                "normal",
+                "normal",
+                "normal",
             ),
         ],
         perfiles_clinicos=[
-            ("pac_1_00000", "appendicitis", "Apendicectomía", 34, "F", "[]"),
-            ("pac_2_00000", "cholecystitis", "Colecistectomía", 30, "F", "[]"),
+            (
+                "pac_1_00000",
+                "appendicitis",
+                "Apendicectomía",
+                None,
+                34,
+                "F",
+                "[]",
+            ),
+            (
+                "pac_2_00000",
+                "cholecystitis",
+                "Colecistectomía",
+                None,
+                30,
+                "F",
+                "[]",
+            ),
         ],
         perfiles_demograficos=[
             ("pac_1_00000", "Paciente Uno", "Medellín", "Antioquia"),
@@ -202,7 +299,15 @@ async def test_invalid_comorbilidades_json_defaults_to_empty_list(tmp_path: Path
     dataset_dir = _write_full_dataset(
         tmp_path,
         perfiles_clinicos=[
-            ("pac_1_00000", "appendicitis", "Apendicectomía", 34, "F", "esto no es json"),
+            (
+                "pac_1_00000",
+                "appendicitis",
+                "Apendicectomía",
+                None,
+                34,
+                "F",
+                "esto no es json",
+            ),
         ],
     )
     adapter = DatasetCaseAdapter(dataset_dir)

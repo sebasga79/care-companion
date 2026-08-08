@@ -141,9 +141,7 @@ def _build_case_port(settings: Settings) -> ChallengeCasePort:
     try:
         return DatasetCaseAdapter(settings.dataset_dir)
     except DatasetFilesMissingError as exc:
-        logger.warning(
-            "dataset_case_adapter_unavailable_using_fixtures reason=%s", exc
-        )
+        logger.warning("dataset_case_adapter_unavailable_using_fixtures reason=%s", exc)
         return FixtureCaseAdapter()
 
 

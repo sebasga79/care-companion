@@ -56,9 +56,7 @@ def test_model_cannot_downgrade_hard_red_flag(model_level: DecisionLevel) -> Non
 
 def test_model_cannot_downgrade_data_integrity_failure_even_with_routine_model() -> None:
     result = reduce_decision(
-        DecisionInputs(
-            data_integrity_failure=True, model_level=DecisionLevel.ROUTINE_FOLLOW_UP
-        )
+        DecisionInputs(data_integrity_failure=True, model_level=DecisionLevel.ROUTINE_FOLLOW_UP)
     )
     assert result.level == DecisionLevel.DATA_INTEGRITY_FAILURE
     assert result.should_escalate is True

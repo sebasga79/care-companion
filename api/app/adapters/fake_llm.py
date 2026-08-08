@@ -39,7 +39,6 @@ _RESPONSE_ABSTAIN_MARKER = "NO tienes evidencia verificada"
 _RESPONSE_HANDOFF_MARKER = "Esta llamada se está escalando"
 
 _OBJECTIVE_RE = re.compile(r"^- (?P<code>[A-Z_]+): (?P<label>.+)$", re.MULTILINE)
-_HISTORY_TURN_RE = re.compile(r"^- \[(?:patient|agent|system)\]", re.MULTILINE)
 _LAST_UTTERANCE_RE = re.compile(
     r"## Último turno del cuidador/paciente a interpretar\n(?P<text>.+)", re.DOTALL
 )
@@ -48,11 +47,14 @@ _NEXT_QUESTION_RE = re.compile(
     r"(?P<question>.+?)(?:\n##|\Z)",
     re.DOTALL,
 )
+_CURRENT_CONTEXT_RE = re.compile(
+    r"## Contexto del turno actual\n(?P<text>.+?)(?:\n##|\Z)", re.DOTALL
+)
 
 _DEFAULT_OBJECTIVE_CODE = "GENERAL_STATE"
 
 # Códigos que alimentan reglas clínicas deterministas
-# (`app/services/rule_engine.py` RULESET_V1). Este adapter NUNCA declara
+# (`app/services/rule_engine.py` RULESET_V2). Este adapter NUNCA declara
 # `confirmed`/`uncertain` sobre ellos: no entiende el lenguaje del
 # cuidador, así que afirmar "fiebre incierta" porque alguien dijo "aló
 # buenas tardes" es inventar una señal clínica.
@@ -65,7 +67,76 @@ _DEFAULT_OBJECTIVE_CODE = "GENERAL_STATE"
 # falso positivo así de burdo (saludar y que el sistema alerte a una
 # persona) es exactamente lo que la rúbrica evalúa en "situaciones donde
 # escalar claramente NO es lo correcto".
-_RULE_CLINICAL_CODES = frozenset({"FEVER", "PAIN_WORSENING", "WOUND_DISCHARGE"})
+_RULE_CLINICAL_CODES = frozenset({"FEVER", "WOUND_APPEARANCE"})
+_FORM_RESPONSE_CODES = frozenset({"PAIN_LOCATION", "PAIN_SEVERITY", "PAIN_EVOLUTION"})
+
+_GREETING_ONLY_RE = re.compile(
+    r"^(?:(?:alo|hola|buenas|buenos dias|buenas tardes|buenas noches|que tal)"
+    r"[\s,.;:¡!¿?]*)+$"
+)
+
+
+def _normalized(text: str) -> str:
+    import unicodedata
+
+    decomposed = unicodedata.normalize("NFD", text.lower())
+    return "".join(char for char in decomposed if unicodedata.category(char) != "Mn").strip()
+
+
+def _semantic_objective(text: str) -> str | None:
+    normalized = _normalized(text)
+    signals: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("FEVER", ("fiebre", "calentura", "grados", "temperatura")),
+        ("PAIN", ("dolor", "duele", "adolor")),
+        ("INTAKE", ("comer", "comida", "alimento", "tomar", "liquido", "bebida")),
+        (
+            "WOUND_APPEARANCE",
+            (
+                "herida",
+                "secrecion",
+                "pus",
+                "sangr",
+                "olor",
+                # Respuestas elípticas frecuentes a "¿cómo se ve la herida?":
+                # el paciente no tiene por qué repetir el sustantivo de la
+                # pregunta. Sin estas formas, "está roja e inflamada" no
+                # cubría el objetivo y el agente preguntaba lo mismo en bucle.
+                "roja",
+                "rojo",
+                "enrojec",
+                "inflamada",
+                "hinchada",
+            ),
+        ),
+        ("MOBILITY", ("caminar", "mover", "movilidad", "actividad")),
+        ("SLEEP", ("dormir", "duermo", "sueno", "descans")),
+        (
+            "GENERAL_STATE",
+            (
+                "me siento",
+                "animo",
+                "estoy bien",
+                "estoy mal",
+                "debil",
+                "cansad",
+                "maread",
+            ),
+        ),
+    )
+    for code, needles in signals:
+        if any(needle in normalized for needle in needles):
+            return code
+    return None
+
+
+def _is_explicit_denial(code: str, text: str) -> bool:
+    normalized = _normalized(text)
+    patterns: dict[str, tuple[str, ...]] = {
+        "PAIN": ("no tengo dolor", "no siento dolor", "no me duele", "sin dolor"),
+        "FEVER": ("no tengo fiebre", "no he tenido fiebre", "sin fiebre"),
+        "WOUND_APPEARANCE": ("sin secrecion", "no tiene secrecion", "no sangra"),
+    }
+    return any(phrase in normalized for phrase in patterns.get(code, ()))
 
 
 def _fake_interview_response(full_text: str) -> str:
@@ -82,34 +153,55 @@ def _fake_interview_response(full_text: str) -> str:
     objectives = [
         (m.group("code"), m.group("label").strip()) for m in _OBJECTIVE_RE.finditer(full_text)
     ]
-    turn_count = len(_HISTORY_TURN_RE.findall(full_text))
-
-    if objectives:
-        code, label = objectives[turn_count % len(objectives)]
-    else:
-        code, label = _DEFAULT_OBJECTIVE_CODE, "cómo se siente en general"
-
     utterance_match = _LAST_UTTERANCE_RE.search(full_text)
     original_text = utterance_match.group("text").strip() if utterance_match else ""
     if not original_text or original_text.startswith("(sin respuesta"):
         original_text = ""
 
-    certainty = "not_assessed" if code in _RULE_CLINICAL_CODES else "uncertain"
+    greeting_only = bool(original_text and _GREETING_ONLY_RE.fullmatch(_normalized(original_text)))
+    semantic_code = None if greeting_only else _semantic_objective(original_text)
+    objective_labels = dict(objectives)
+
+    if semantic_code and semantic_code in objective_labels:
+        code = semantic_code
+        label = objective_labels[code]
+        certainty = "denied" if _is_explicit_denial(code, original_text) else "confirmed"
+    elif objectives:
+        code, label = objectives[0]
+        if code in _RULE_CLINICAL_CODES:
+            certainty = "not_assessed"
+        elif code in _FORM_RESPONSE_CODES:
+            certainty = "confirmed"
+        else:
+            certainty = "uncertain"
+    else:
+        code, label = _DEFAULT_OBJECTIVE_CODE, "cómo se siente en general"
+        certainty = "not_assessed"
+
+    covered_now = (
+        code if original_text and not greeting_only and certainty != "not_assessed" else None
+    )
+    next_candidates = [
+        (item_code, item_label) for item_code, item_label in objectives if item_code != covered_now
+    ]
+    next_code, next_label = next_candidates[0] if next_candidates else (None, None)
+
     payload = {
         "needs_clarification": False,
         "clarification_question": None,
-        "next_question": f"¿Me puede contar sobre {label}?",
+        "next_objective_code": next_code,
+        "next_question": f"¿Me puede contar sobre {next_label}?" if next_label else None,
         "observations": [
             {
                 "code": code,
                 "label": label,
-                "value": None,
+                "value": original_text if code in _FORM_RESPONSE_CODES else None,
                 "certainty": certainty,
                 "original_text": original_text,
                 "normalized_text": None,
             }
         ]
-        if original_text
+        if original_text and not greeting_only
         else [],
     }
     return json.dumps(payload, ensure_ascii=False)
@@ -146,17 +238,36 @@ def _fake_response_text(full_text: str) -> str:
     # repetía literalmente la misma frase en cada turno — visible en pruebas
     # en vivo como un bucle de "Gracias por contarme…" que no avanzaba.
     next_question = _extract_next_question(full_text)
+    context_match = _CURRENT_CONTEXT_RE.search(full_text)
+    current_text = context_match.group("text").strip() if context_match else ""
+    normalized = _normalized(current_text)
 
-    if _RESPONSE_ABSTAIN_MARKER in full_text:
-        base = (
-            "No tengo información verificada sobre eso en este momento, así que "
-            "prefiero no responder directamente; lo voy a dejar registrado."
-        )
+    if current_text and _GREETING_ONLY_RE.fullmatch(normalized):
+        return f"Buenas tardes. {next_question}".strip() if next_question else "Buenas tardes."
+
+    asks_for_guidance = any(
+        marker in normalized
+        for marker in ("es normal", "que debo", "que hago", "puedo tomar", "puedo hacer")
+    )
+    if _RESPONSE_ABSTAIN_MARKER in full_text and asks_for_guidance:
+        base = "No tengo una orientación verificada para responder eso; lo dejaré registrado."
     else:
-        base = (
-            "Gracias por contarme. Con lo que conversamos hasta ahora, todo se ve "
-            "dentro de lo esperado para esta etapa de la recuperación."
-        )
+        # ResponseAgent recibe el contexto actual, no todo el historial. La
+        # variación se decide por lo que acaba de decir el paciente para no
+        # anteponer la misma muletilla a cada pregunta.
+        if any(marker in normalized for marker in ("sin fiebre", "no tengo", "no siento")):
+            base = "De acuerdo."
+        elif any(marker in normalized for marker in ("liquido", "comiendo", "alimento")):
+            base = "Bien."
+        elif any(
+            marker in normalized
+            for marker in ("herida", "roja", "enrojec", "inflamada", "secrecion", "olor")
+        ):
+            base = "Lo tengo presente."
+        elif any(marker in normalized for marker in ("dolor", "duele")):
+            base = "Entiendo."
+        else:
+            base = "De acuerdo."
     return f"{base} {next_question}".strip() if next_question else base
 
 
@@ -258,9 +369,7 @@ class ScriptedFakeLLM(LLMPort):
                 break
         if text is None:
             if self._default is None:
-                last_user = next(
-                    (m.content for m in reversed(messages) if m.role == "user"), ""
-                )
+                last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
                 raise ValueError(
                     "ScriptedFakeLLM: ningún guion coincide y no hay `default` — "
                     f"último mensaje de usuario: {last_user[:200]!r}"

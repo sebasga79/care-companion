@@ -157,10 +157,25 @@ export type VoiceState =
 export interface CaseSummary {
   id: string;
   label: string;
+  patientId: string | null;
   procedure: string;
   patientAlias: string;
   phase: string;
   daysSinceProcedure: number;
+  surgeryDate: string | null;
+  followupDays: number[];
+  historicalFollowups: HistoricalFollowup[];
+}
+
+export interface HistoricalFollowup {
+  day: number;
+  archetype: string;
+  painNrs: number;
+  temperatureC: number;
+  mobility: string;
+  wound: string;
+  appetite: string;
+  sleep: string;
 }
 
 export interface ChallengeCase extends CaseSummary {
@@ -174,15 +189,29 @@ export interface Session {
   knowledgeVersion: number;
   startedAt: string;
   endedAt: string | null;
+  openingMessage: string | null;
 }
 
 /* Raw backend shapes (snake_case) — mapped to the clean types above. */
 interface RawCase {
   case_id: string;
+  patient_id?: string | null;
   patient_display_name: string;
   procedure: string;
   phase: string;
   days_since_procedure: number;
+  surgery_date?: string | null;
+  followup_days?: number[];
+  historical_followups?: {
+    day: number;
+    archetype: string;
+    pain_nrs: number;
+    temperature_c: number;
+    mobility: string;
+    wound: string;
+    appetite: string;
+    sleep: string;
+  }[];
 }
 
 interface RawSession {
@@ -192,16 +221,30 @@ interface RawSession {
   knowledge_version: number;
   created_at: string;
   closed_at: string | null;
+  opening_message?: string | null;
 }
 
 function mapCase(raw: RawCase): CaseSummary {
   return {
     id: raw.case_id,
-    label: `${raw.patient_display_name} · ${raw.phase}`,
+    label: raw.patient_display_name,
+    patientId: raw.patient_id ?? null,
     procedure: raw.procedure,
     patientAlias: raw.patient_display_name,
     phase: raw.phase,
     daysSinceProcedure: raw.days_since_procedure,
+    surgeryDate: raw.surgery_date ?? null,
+    followupDays: raw.followup_days ?? [],
+    historicalFollowups: (raw.historical_followups ?? []).map((item) => ({
+      day: item.day,
+      archetype: item.archetype,
+      painNrs: item.pain_nrs,
+      temperatureC: item.temperature_c,
+      mobility: item.mobility,
+      wound: item.wound,
+      appetite: item.appetite,
+      sleep: item.sleep,
+    })),
   };
 }
 
@@ -213,6 +256,7 @@ function mapSession(raw: RawSession): Session {
     knowledgeVersion: raw.knowledge_version,
     startedAt: raw.created_at,
     endedAt: raw.closed_at,
+    openingMessage: raw.opening_message ?? null,
   };
 }
 
@@ -357,6 +401,31 @@ export interface TraceEscalation {
   createdAt: string;
 }
 
+export interface TraceContact {
+  code: "CONTACT_PRIMARY" | "CONTACT_EMERGENCY";
+  label: string;
+  value: string;
+  createdAt: string;
+}
+
+export interface FollowupClinicalField {
+  value: unknown;
+  certainty: string;
+  originalText: string;
+}
+
+export interface FollowupRecord {
+  recordedAt: string;
+  painNrs: FollowupClinicalField | null;
+  temperatureC: FollowupClinicalField | null;
+  mobility: FollowupClinicalField | null;
+  wound: FollowupClinicalField | null;
+  appetite: FollowupClinicalField | null;
+  sleep: FollowupClinicalField | null;
+  decisionLevel: DecisionLevel;
+  medicalTeamAlert: boolean;
+}
+
 export interface SessionTrace {
   sessionId: string;
   state: SessionStatus;
@@ -364,6 +433,8 @@ export interface SessionTrace {
   events: TraceEvent[];
   decisions: TraceDecision[];
   escalations: TraceEscalation[];
+  contacts: TraceContact[];
+  followupRecord: FollowupRecord | null;
 }
 
 export interface AuditFilters {
@@ -387,6 +458,9 @@ export interface AuditSessionRow {
   riskLevel: RiskLevel | null;
   citationCount: number;
   escalated: boolean;
+  patientDisplayName: string | null;
+  procedure: string | null;
+  surgeryDate: string | null;
 }
 
 /* -------------------------------------------------------------------- */
@@ -536,6 +610,25 @@ export const api = {
         triggerCodes: e.trigger_codes,
         createdAt: e.created_at,
       })),
+      contacts: raw.contacts.map((contact) => ({
+        code: contact.code,
+        label: contact.label,
+        value: contact.value,
+        createdAt: contact.created_at,
+      })),
+      followupRecord: raw.followup_record
+        ? {
+            recordedAt: raw.followup_record.recorded_at,
+            painNrs: mapFollowupField(raw.followup_record.dolor_nrs),
+            temperatureC: mapFollowupField(raw.followup_record.fiebre_c),
+            mobility: mapFollowupField(raw.followup_record.movilidad),
+            wound: mapFollowupField(raw.followup_record.herida),
+            appetite: mapFollowupField(raw.followup_record.apetito),
+            sleep: mapFollowupField(raw.followup_record.sueno),
+            decisionLevel: raw.followup_record.decision_level,
+            medicalTeamAlert: raw.followup_record.alerta_equipo_medico,
+          }
+        : null,
     };
   },
 };
@@ -564,6 +657,34 @@ interface RawTrace {
     trigger_codes: string;
     created_at: string;
   }[];
+  contacts: {
+    code: "CONTACT_PRIMARY" | "CONTACT_EMERGENCY";
+    label: string;
+    value: string;
+    created_at: string;
+  }[];
+  followup_record: {
+    recorded_at: string;
+    dolor_nrs: RawFollowupField | null;
+    fiebre_c: RawFollowupField | null;
+    movilidad: RawFollowupField | null;
+    herida: RawFollowupField | null;
+    apetito: RawFollowupField | null;
+    sueno: RawFollowupField | null;
+    decision_level: DecisionLevel;
+    alerta_equipo_medico: boolean;
+  } | null;
+}
+
+interface RawFollowupField {
+  value: unknown;
+  certainty: string;
+  original_text: string;
+}
+
+function mapFollowupField(field: RawFollowupField | null): FollowupClinicalField | null {
+  if (!field) return null;
+  return { value: field.value, certainty: field.certainty, originalText: field.original_text };
 }
 
 interface RawAuditRow {
@@ -576,6 +697,9 @@ interface RawAuditRow {
   decision_level: DecisionLevel | null;
   citation_count: number;
   escalated: boolean;
+  patient_display_name: string | null;
+  procedure: string | null;
+  surgery_date: string | null;
 }
 
 function mapAuditRow(raw: RawAuditRow): AuditSessionRow {
@@ -590,5 +714,8 @@ function mapAuditRow(raw: RawAuditRow): AuditSessionRow {
     riskLevel: raw.decision_level ? decisionToRisk(raw.decision_level) : null,
     citationCount: raw.citation_count,
     escalated: raw.escalated,
+    patientDisplayName: raw.patient_display_name,
+    procedure: raw.procedure,
+    surgeryDate: raw.surgery_date,
   };
 }

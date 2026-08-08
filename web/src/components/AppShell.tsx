@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 
 const NAV_ITEMS = [
   { href: "/call", label: "Llamada" },
-  { href: "/knowledge", label: "Conocimiento" },
+  { href: "/knowledge", label: "Base clínica" },
   { href: "/audit", label: "Auditoría" },
 ] as const;
 
@@ -61,7 +61,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span>Care Companion</span>
         </Link>
 
-        <span className="prototype-badge">Prototipo clínico</span>
+        <span className="prototype-badge">Seguimiento inteligente</span>
 
         <nav className="primary-nav" aria-label="Navegación principal">
           {NAV_ITEMS.map((item) => {
@@ -93,10 +93,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <summary>Ayuda técnica</summary>
             <div className="help-panel" role="note">
               <p style={{ margin: 0 }}>
-                Prototipo del reto Care Companion. Consulta{" "}
+                Consulta{" "}
                 <code>docs/architecture.md</code> y <code>docs/design.md</code> para
-                el contrato técnico completo. Ningún dato mostrado corresponde a un
-                paciente real.
+                el contrato técnico completo y la trazabilidad del sistema.
               </p>
             </div>
           </details>
@@ -108,8 +107,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </main>
 
       <footer>
-        <span>Care Companion · prototipo de concurso</span>
-        <span>Producto conceptual · sin integración ni acciones clínicas reales</span>
+        <span>Care Companion · seguimiento postoperatorio inteligente</span>
+        <span>Conversación, evidencia y supervisión humana</span>
       </footer>
     </div>
   );

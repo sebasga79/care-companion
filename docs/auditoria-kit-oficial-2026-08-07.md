@@ -620,3 +620,461 @@ nada sobre fiebre/dolor/herida), así que con `LLM_PROVIDER=fake` la entrevista 
 preguntando por el objetivo clínico pendiente y la llamada no termina sola — se cierra con
 "Finalizar llamada". Es el comportamiento honesto para un adapter sin modelo; con Groq
 real el checklist se cubre normalmente.
+
+## 9.6 Sexta pasada — falso negativo crítico ante 40 °C, dolor y temor por la vida
+
+Una prueba manual mostró el fallo clínico más grave encontrado hasta ahora. El paciente
+reportó, en turnos sucesivos, dolor abdominal intenso y persistente, dolor al ingerir
+alimentos o líquidos, necesidad percibida de hospitalización, 40 °C de fiebre y “me voy a
+morir”. El agente repitió que todo estaba dentro de lo esperado y volvió a preguntar por
+fiebre. No era solo una mala redacción: el motor determinista recibía únicamente las
+`Observation` extraídas por el LLM. Con `LLM_PROVIDER=fake`, el adapter no interpreta
+síntomas y entregaba `not_assessed`; por tanto las reglas nunca veían el texto literal.
+
+La corrección añade defensa en profundidad sin convertir el fake en un pseudo-modelo:
+
+1. `safety-signal-detector-v1` analiza siempre el texto crudo antes de aceptar una rama de
+   aclaración del LLM. Reconoce temperatura numérica, dolor intenso/persistente,
+   dificultad respiratoria, sangrado, cambios de herida, intolerancia oral y solicitudes
+   explícitas de urgencia. Conserva texto y turno fuente, maneja negaciones y conectores,
+   y una confirmación determinista no puede ser rebajada por el agente.
+2. El ruleset sube a `rules-v2`. La temperatura numérica >38 °C produce `HIGH_FEVER` y
+   `HARD_RED_FLAG`; una mención de “fiebre” sin valor permanece separada para evitar una
+   ampliación clínica indiscriminada. El comparador estricto (`>`, no `>=`) se contrastó
+   con el corpus oficial ya cargado: guías de apendicectomía, colecistectomía, cirugía
+   intestinal y reemplazo articular usan “mayor/superior a 38 °C”. Dolor que empeora,
+   dificultad respiratoria, sangrado y solicitud explícita de urgencia también tienen
+   reglas auditables.
+3. Los handoffs dejan de generarse con LLM: `safe-handoff-v1` produce un mensaje
+   determinista según el nivel de decisión. Ante alerta dura detiene el cuestionario,
+   explica las señales generales, pide valoración médica urgente y aclara que el
+   prototipo no contacta por sí solo a un equipo real. El texto rutinario hardcodeado del
+   `FakeLLM` ya no afirma normalidad; solo registra y continúa la pregunta.
+
+La regresión WebSocket comienza con “buenas tardes” (no escala) y luego reproduce el
+primer reporte de dolor de la conversación real. En ese mismo turno la sesión pasa a
+`summarizing`, la decisión es `HARD_RED_FLAG`, se crea un único escalamiento y la respuesta
+no contiene la frase de falsa tranquilidad. Pruebas unitarias adicionales cubren 40 °C,
+36,5 °C, negación explícita, síntoma resuelto, conector adversativo, frases exactas de
+dolor/hospitalización/temor por la vida y precedencia frente a una negación del LLM.
+
+`make verify` desde la raíz: **330 tests recolectados, 327 passed, 3 skipped; ruff limpio**.
+
+## 9.7 Séptima pasada — el handoff crítico se escribía, pero no se pronunciaba
+
+Después de corregir el falso negativo de §9.6, la conversación manual ya produjo el
+mensaje urgente correcto, pero únicamente en la transcripción: el TTS no pronunció la
+última respuesta. La causa fue una carrera determinista entre el contrato WebSocket y el
+ciclo de vida de voz del frontend, no un fallo del sintetizador.
+
+Por cada turno, el backend envía los envelopes en este orden: `server.state`,
+`server.agent_response`, `server.decision` y, si corresponde, `server.summary`. El handoff
+deja la sesión en `summarizing`, por lo que `/call` recibía primero un estado terminal y
+ejecutaba `voice.stop()`. Ese método combinaba tres responsabilidades: detener STT,
+cancelar `speechSynthesis` y reanudar/desactivar el modo de voz. Cuando llegaba el envelope
+de respuesta unos milisegundos después, React añadía el texto a la transcripción, pero
+`voiceModeRef` ya era `false` y no llamaba a `speak()`.
+
+Corregido en `useVoiceSession` separando `stopListening()` de `stop()`. Un estado terminal
+ahora destruye únicamente el reconocimiento y evita nuevos turnos, pero conserva el modo
+de salida el tiempo suficiente para encolar la respuesta final. Después de llamar a
+`speak()` se desactiva el modo voz para cualquier mensaje posterior; `server.summary` no
+cancela la locución. El control del micrófono también queda deshabilitado en estados
+terminales. La protección half-duplex contra eco se conserva: no se vuelve a abrir STT al
+terminar el TTS porque la referencia de reconocimiento ya fue eliminada.
+
+Verificación ejecutada: `pnpm lint`, `pnpm exec tsc --noEmit`, `pnpm build` y `make verify`
+(330 recolectados, 327 passed, 3 skipped) verdes. Queda como comprobación humana escuchar
+el caso en Chrome con parlantes reales; Web Speech API no expone una señal automatizable
+que pruebe que el sistema operativo emitió sonido.
+
+## 9.8 Octava pasada — de formulario asistido a llamada agéntica
+
+Una nueva prueba manual dejó cinco problemas de producto: el agente respondía “Gracias por
+contarme” ante un saludo, nunca explicaba por qué llamaba, ignoraba procedimiento e historial,
+repetía la misma muletilla/pregunta y la UI presentaba controles de operador (“Escribe lo que
+dice el paciente” y “Simular alerta al equipo”). El motor sí persistía un escalamiento cuando
+la decisión lo requería, pero la interfaz sugería incorrectamente que dependía de un clic.
+
+### Decisión de alcance contrastada con el kit oficial
+
+La [página oficial del reto](https://www.sourcemeridian.com/tech-sphere-challenge) describe
+un agente que realiza la llamada, conversa, se adapta y decide cuándo generar una alerta. El
+[README de ParticipantArtifacts](https://github.com/TechSphere2026/ParticipantArtifacts)
+exige iniciar una llamada de voz desde el navegador, hablar por micrófono y escuchar al agente;
+no exige telefonía real, EHR ni integración hospitalaria. La rúbrica evalúa apertura,
+conducción, adaptación fuera de guion, registro/persistencia de la alerta y resumen final.
+Conclusión: seleccionar un caso e iniciar la llamada es una concesión legítima del demo; enviar
+cada turno o disparar manualmente la alerta no lo es.
+
+“Alertar a un humano” se implementa hasta el límite autorizado y verificable del reto: el
+backend crea automáticamente un `EscalationRecord` idempotente y persistente, detiene el
+cuestionario, lo refleja en resumen/auditoría y comunica al paciente el siguiente paso. No se
+finge haber llamado o enviado mensajes a un hospital: esa última milla necesita un canal real,
+credenciales y autorización institucional que el reto no entrega ni requiere.
+
+### Cambios implementados
+
+1. **Apertura automática y contextual.** `POST /sessions` persiste el primer turno del agente,
+   avanza la FSM a `interviewing` y devuelve `opening_message`. La apertura saluda, explica el
+   propósito, nombra el procedimiento y el tiempo desde la cirugía y pregunta cómo se siente
+   hoy. `/call` la muestra y la pronuncia por TTS al abrir el WebSocket; activa escucha sin un
+   segundo clic.
+2. **Memoria clínica acotada.** `ChallengeCase.patient_id` enlaza seguimientos del mismo
+   paciente. Los agentes reciben hasta tres llamadas anteriores cerradas, derivadas solo de
+   observaciones y decisiones persistidas. La trayectoria de referencia (`dolor_nrs`, fiebre,
+   herida, etc.) sigue excluida por construcción: el kit la define como verdad oculta que el
+   agente solo puede descubrir conversando.
+3. **Interpretación antes de secuenciar.** El checklist ahora cubre las siete dimensiones del
+   dataset (estado general, dolor, ingesta, fiebre, herida, movilidad y sueño). Un saludo puro
+   no crea observaciones. Se extrae toda información explícita aunque llegue fuera del orden;
+   después de fusionar extracción LLM + detector determinista, el orquestador valida que la
+   próxima pregunta siga pendiente. La consulta RAG usa el texto actual del paciente, no la
+   pregunta siguiente.
+4. **Conversación menos mecánica.** ResponseAgent responde saludos como saludos y prohíbe la
+   muletilla fija “Gracias por contarme”. El adapter `fake` reconoce formas sociales y señales
+   comunes suficientes para que la demo local no avance por conteo de turnos ni invente que un
+   objetivo quedó cubierto.
+5. **Handoff automático visible.** Se eliminó “Simular alerta al equipo”. El panel muestra
+   monitoreo automático y solo marca handoff cuando el envelope de decisión confirma el
+   escalamiento persistido por backend. El compositor textual se oculta en navegadores con
+   voz y queda exclusivamente como fallback técnico si SpeechRecognition no existe.
+6. **Resumen completo.** `CallSummary.procedure`, que existía en el schema pero siempre quedaba
+   `null`, ahora se llena desde el caso para cumplir el contenido mínimo de la rúbrica.
+
+Pruebas añadidas/actualizadas: apertura y primer turno persistido, memoria de seguimiento
+previo, exclusión de `reference_trajectory`, saludo natural sin muletilla, handoff automático
+en el resumen, cobertura completa del checklist, semántica exacta de 38 °C y `patient_id` del
+dataset. Verificación: **334 tests recolectados, 331 passed, 3 skipped**; ruff, ESLint,
+TypeScript y build Next.js de producción verdes.
+
+## 9.9 Novena pasada — caracterización del dolor, contacto y cierre automático
+
+La prueba manual posterior a §9.8 mostró que la nueva red de seguridad era demasiado
+agresiva para una frase aislada: “sigo muy inflamado y me duele mucho” se normalizaba como
+`PAIN_WORSENING`, activaba `HARD_RED_FLAG` y detenía la entrevista sin preguntar dónde dolía,
+qué intensidad tenía ni si estaba mejorando. Además, el handoff terminaba la sesión antes de
+confirmar cómo localizar al paciente y el copy visible explicaba repetidamente que era un
+prototipo, debilitando la demostración del producto.
+
+### Separación entre dolor por caracterizar y dolor que empeora
+
+`safety-signal-detector-v1` distingue ahora dos conceptos:
+
+- `PAIN_SEVERE`: “me duele mucho”, dolor fuerte/intenso/persistente. No dispara por sí solo
+  una alerta dura; prioriza tres objetivos conversacionales: ubicación exacta, intensidad de
+  0 a 10 y evolución.
+- `PAIN_WORSENING`: “cada vez peor”, “empeoró”, “no cede”, “insoportable”. Conserva la regla
+  determinista no degradable `RF-002` y activa el handoff.
+
+Si el paciente niega dolor, los tres detalles se consideran no aplicables y no se preguntan.
+El adapter `fake` reconoce negaciones explícitas para no convertir “no tengo dolor/fiebre” en
+una confirmación accidental.
+
+### Handoff completo y fin autónomo de la llamada
+
+Una decisión de escalamiento deja ahora la sesión en `escalated` como estado conversacional
+acotado. El mensaje confirma que el reporte fue enviado al equipo de atención prioritaria y
+pregunta el número principal. El siguiente turno solicita un número adicional de emergencia;
+al confirmarlo:
+
+1. ambos números quedan como observaciones `CONTACT_PRIMARY` y `CONTACT_EMERGENCY` con turno
+   fuente y normalización determinista;
+2. la traza de `/audit` los entrega y la UI los muestra junto al handoff;
+3. el agente confirma que una persona contactará al paciente;
+4. la FSM avanza `escalated → summarizing → closed`, persiste `closed_at`, pronuncia la
+   despedida y el frontend cierra el WebSocket sin cancelar el último TTS.
+
+Las llamadas rutinarias también terminan automáticamente cuando todos los objetivos quedan
+cubiertos. Ya no dependen del botón “Finalizar llamada” para alcanzar `closed`.
+
+### Decisión sobre la segunda página
+
+La página no se elimina. La web oficial enumera como construcción obligatoria “una consola
+para actualizar el conocimiento en caliente”, y la compuerta G5 elimina la entrega si subir y
+eliminar conocimiento no funciona. Se renombró “Conocimiento” a **“Base clínica”**, se explicó
+en la cabecera que demuestra learn/retrieve/forget sin reinicio y se habilitó `.pdf` en el
+selector, coherente con el backend y el corpus oficial. “Auditoría” también se conserva porque
+demuestra trazabilidad, decisiones, handoff y métricas exigidas.
+
+La experiencia visible dejó de presentarse como “prototipo clínico”: encabezado, metadata,
+footer, panel de handoff y respuesta hablada usan lenguaje de producto del caso simulado. La
+documentación técnica mantiene las limitaciones reales y la naturaleza del concurso, donde sí
+corresponde.
+
+Regresión E2E completa: saludo → dolor fuerte (sin escalar) → ubicación → intensidad →
+evolución peor → `HARD_RED_FLAG` → teléfono principal → teléfono alternativo → `closed` +
+`server.summary`; además valida que ambos teléfonos aparecen en la traza humana. Verificación:
+**336 tests recolectados, 333 passed, 3 skipped**; ruff, ESLint, TypeScript y build Next.js
+verdes.
+
+## 9.10 Décima pasada — bucle de herida y backend local desactualizado
+
+Una nueva prueba hablada mostró esta secuencia incorrecta: “tengo dolor” avanzó al estado
+general sin localizarlo y, más tarde, “está un poco roja e inflamada” provocó tres preguntas
+idénticas sobre la herida. La inspección encontró dos causas distintas:
+
+1. la API local había arrancado antes de la corrección de dolor y `levantar_app.sh` ejecutaba
+   Uvicorn sin `--reload`; Next.js sí se actualizaba, de modo que la UI nueva podía conversar
+   con lógica Python antigua;
+2. el adapter determinista reconocía `WOUND_APPEARANCE` únicamente cuando la respuesta
+   repetía “herida”, “secreción”, “olor”, etc. No comprendía la elipsis natural “está roja e
+   inflamada” después de una pregunta cuyo sujeto ya era la herida.
+
+El arranque local usa ahora `uvicorn --reload`. El adapter reconoce color, enrojecimiento e
+inflamación como respuesta al aspecto de la herida y varía sus acuses según el contenido del
+turno, sin anteponer siempre “Entiendo”. Además, el prompt de cada turno calcula objetivos cubiertos con la
+misma función del orquestador: una negación de dolor no vuelve a introducir ubicación,
+intensidad y evolución como pendientes fantasma.
+
+Dos pruebas WebSocket reproducen las frases observadas. La primera exige que “un poco mejor,
+pero tengo dolor” produzca “¿En qué parte exacta siente el dolor?” antes de estado general. La
+segunda recorre dolor negado, estado general, ingesta, fiebre negada y herida roja/inflamada;
+verifica que la siguiente pregunta sea movilidad y que la herida no se repita. Verificación:
+**338 tests recolectados, 335 passed, 3 skipped**; ruff, ESLint, TypeScript, build Next.js y
+validación sintáctica de `levantar_app.sh` verdes.
+
+## 9.11 Undécima pasada — “muy mal”, microtriaje y decisión sobre Docker
+
+La frase aislada “muy mal” disparaba `EMERGENCY_CONCERN`, por lo que el agente afirmaba haber
+detectado una solicitud explícita de atención urgente y creaba el handoff sin saber qué le
+ocurría al paciente. Esa normalización no era fiel al texto y fallaba precisamente el caso
+ambiguo que la rúbrica exige indagar antes de decidir.
+
+Se separó malestar inespecífico de una alarma concreta. “Muy mal”, “me siento terrible” y
+formas equivalentes producen ahora una observación trazable de estado general y una única
+intervención de microtriaje: pide el síntoma principal y pregunta por dificultad respiratoria,
+desmayo/confusión, sangrado abundante, dolor insoportable, fiebre medida y vómito persistente.
+No se ejecutan todavía retrieval, triage ni decisión. Si la respuesta contiene una señal
+inequívoca, el detector sobre texto crudo la eleva inmediatamente a las reglas no degradables;
+por ejemplo, “no puedo respirar” produce `HARD_RED_FLAG` y crea el reporte en ese turno.
+Desmayo, pérdida de conciencia y confusión se incorporaron al detector y a `RF-008`; no se
+pregunta por una señal que luego el motor sea incapaz de interpretar.
+
+También se revisó G2. El requisito normativo es que la solución quede accesible en 15 minutos
+siguiendo el README; el formulario oficial menciona explícitamente `docker-compose` entre las
+formas aceptadas de declarar dependencias. Por decisión del propietario, Docker Compose se
+mantiene como ruta recomendada para el jurado y `./levantar_app.sh` como alternativa local.
+El compose ya no fuerza necesariamente el adapter de prueba: acepta
+`LLM_PROVIDER=groq` y `LLM_API_KEY` desde el entorno, mientras mantiene `fake` únicamente
+como smoke test sin secretos.
+
+La primera ejecución real del build encontró dos defectos que una validación estática de
+Compose no mostraba: Corepack descargaba pnpm 11 sin versión fijada y la política de scripts
+ignorados fallaba; además, la imagen API ejecutaba `uv sync` antes de copiar el README exigido
+por Hatchling. Se fijó `pnpm@10.28.0`, se separó la instalación de dependencias del proyecto
+editable y se añadieron `.dockerignore` para ambos servicios. El contexto del frontend bajó
+de aproximadamente 747 MB a 2,17 KB. Después, ambas imágenes construyeron, Compose levantó
+API y web, `/health` quedó sano, `/call` respondió 200 y un turno WebSocket dentro del stack
+devolvió el microtriaje esperado sin escalar “muy mal”.
+
+Regresión viva y automatizada: “muy mal” permanece en `interviewing` y formula el microtriaje;
+“no puedo respirar y siento que me voy a desmayar” produce `HARD_RED_FLAG` y handoff. Suite:
+**343 tests recolectados, 340 passed, 3 skipped**; ruff, `git diff --check`, sintaxis del
+script, build de imágenes y `docker compose up` verdes.
+
+## 9.12 Duodécima pasada — launcher único e idempotente
+
+La ruta Docker todavía obligaba al evaluador a recordar comandos de Compose y el script
+`levantar_app.sh` servía únicamente para desarrollo local. Se unificó la entrada operativa:
+
+```bash
+./levantar_app.sh
+```
+
+El launcher inspecciona el estado antes de actuar. La primera ejecución construye imágenes y
+crea servicios; con imágenes pero sin contenedores usa `up --no-build`; con contenedores
+detenidos usa `compose start`; si `/health` y `/call` ya responden, no reinicia ni reinstala.
+Después espera ambos endpoints, muestra las URLs y abre `/call`. Los procesos quedan en
+segundo plano, como una aplicación instalada.
+
+Se añadieron `--rebuild` para cambios de código/dependencias, `--stop`, `--logs`,
+`--no-open`, `--clean` y `--local` para conservar el flujo de desarrollo con hot reload. La
+prueba real ejecutó `--stop`, luego el comando normal (salida “sin reinstalar”), y una segunda
+ejecución que detectó la instancia sana. API y web quedaron `Up` en 49317/49318 y los datos
+persistentes no se eliminaron.
+
+## 9.13 Decimotercera pasada — dataset y corpus reales dentro de Docker
+
+Después de convertir Docker en la ruta predeterminada apareció una regresión de empaquetado:
+el host conservaba `api/data/dataset` con el kit completo, pero `.dockerignore` excluía `data`
+y Compose montaba un volumen nuevo sobre `/app/data`. El backend no encontraba los tres XLSX
+requeridos por `DatasetCaseAdapter`, registraba el fallback y mostraba únicamente Camila,
+Julián y Sofía. Una instalación del jurado habría reproducido exactamente ese estado, aunque
+la máquina de desarrollo mostrara antes los 160 casos oficiales.
+
+La solución no depende de una carpeta preexistente en el computador del autor. La imagen API
+incluye ahora `fetch_dataset.py`, `load_corpus.py` y un entrypoint idempotente. Antes de iniciar
+Uvicorn, el primer arranque:
+
+1. descarga desde `TechSphere2026/ParticipantArtifacts` los 4 XLSX y los 107 PDF;
+2. valida archivos no vacíos y el conteo completo del corpus;
+3. ejecuta la misma ingestión usada por la consola de Base clínica contra la SQLite del
+   volumen;
+4. crea un marcador versionado únicamente después de terminar la indexación.
+
+El volumen `care_companion_data` conserva dataset, documentos, chunks, sesiones y marcador.
+Los reinicios siguientes verifican y reutilizan ese estado sin redescargar ni recalcular. Dos
+variables explícitas permiten desactivar cada bootstrap para diagnóstico, pero sus defaults de
+Compose son seguros para evaluación. Si la descarga queda incompleta, el contenedor falla con
+un error visible en vez de levantar silenciosamente tres fixtures.
+
+La preparación inicial puede incluir ~127 MB y miles de chunks, por lo que el launcher espera
+hasta 15 minutos y emite progreso periódico; el tiempo se mantiene alineado con la compuerta G2.
+También se corrigió un defecto independiente: `--rebuild` se ignoraba cuando los endpoints ya
+estaban sanos debido al atajo inicial del launcher. Ese atajo ahora solo aplica si no se pidió
+rebuild, reinstall ni limpieza.
+
+El ensayo real reveló además que `DatasetCaseAdapter` cargaba 160 casos, pero
+`CaseFilters.limit=20` ocultaba 140 porque la UI no implementa paginación. El valor
+predeterminado subió a 200 y `/api/v1/cases` entrega ahora los 160. Uvicorn se ejecuta
+directamente desde el entorno ya construido para que `uv run` no sincronice dependencias de
+desarrollo al iniciar el contenedor.
+
+Prueba completa sobre el volumen de Compose ya existente: descarga de 111 archivos (~128 MB),
+ingestión `ok=103 / fallidos esperados=4`, 8.987 chunks persistidos, marcador presente y log
+`case_port=DatasetCaseAdapter case_count=160`. Después de elevar el límite, el endpoint entrega
+los 160 casos. El proceso completo desde recreate hasta health-check tardó ~166 segundos con
+las capas base disponibles; aún falta medir un clon sin caché para cerrar formalmente G2.
+Suite: **344 tests recolectados, 341 passed, 3 skipped**; ruff, sintaxis shell,
+`docker compose config`, build de imágenes y health-check verdes.
+
+## 9.14 Inspección de los cuatro PDF no indexados
+
+La cifra de 103/107 no significa que el volumen esté incompleto. Se inspeccionaron los cuatro
+rechazos sobre los archivos descargados del kit:
+
+| Archivo | Resultado técnico | Observación |
+|---|---|---|
+| `breast_cancer/Herramientas-Tecnica-Cancer-cuello-uterino-2018.pdf` | cifrado AES, 14 páginas | `pdfinfo` marca `copy:no`, `print:no`; contraseña de usuario vacía permite abrirlo técnicamente. |
+| `breast_cancer/cervical-es-patient.pdf` | cifrado RC4, 76 páginas | contraseña de usuario vacía permite abrirlo técnicamente; `copy:no`. |
+| `breast_cancer/gom226c.pdf` | cifrado RC4, 10 páginas | contraseña de usuario vacía permite abrirlo técnicamente; `copy:yes`. |
+| `Appendicitis/REVISIÓN DE LA LITERATURA SOBRE LAAPENDICITIS AGUDA PEDIATRICA NO ESPECIFICADA EN EL PERI000 2000-2021.pdf` | no cifrado, sin capa de texto útil | requiere OCR o una versión con texto; `pdftotext` solo produce una línea vacía. |
+
+El repositorio oficial no atribuye una contraseña ni explica una decisión de cifrado específica.
+Sí aclara que los PDF son obra de sus respectivos autores/editores y conservan sus propios
+derechos, aunque se incluyan como referencia para el reto
+([README oficial](https://github.com/TechSphere2026/ParticipantArtifacts)). La explicación más
+prudente es que las protecciones vienen heredadas de las fuentes originales, no que Docker o
+Care Companion las haya cifrado.
+
+### Qué haría falta para descifrarlos
+
+La vía correcta es obtener del titular una copia sin restricciones o la contraseña/licencia de
+extracción. Con autorización explícita, se puede usar `qpdf --password='...' --decrypt` o
+`pypdf` (para AES, además, instalar `cryptography`) y después cargar una copia derivada al RAG.
+Los dos RC4 y el AES aceptaron la contraseña vacía durante la inspección, pero automatizar ese
+desbloqueo para eliminar `copy:no` sería saltarse una restricción del editor; no se incorporó al
+bootstrap ni se intentó fuerza bruta.
+
+Por eso el comportamiento actual es intencional: se indexan 103 documentos legibles, se dejan
+los tres cifrados y el escaneado registrados con una causa verificable, y el sistema sigue
+funcionando con el corpus restante. Si el organizador confirma que el uso de esos cuatro PDF y
+la eliminación de sus restricciones está autorizado, se puede añadir un paso de descifrado
+controlado y auditable; no hace falta cambiar Docker para ello.
+
+## 9.15 Revisión de requisitos de privacidad y HIPAA
+
+Se volvió a revisar el README oficial, `docs/rubrica-evaluacion.md` y
+`docs/stack-tecnico.md` del kit, buscando `HIPAA`, `HIPPA`, `PHI`, privacidad, datos personales,
+cifrado y requisitos equivalentes. El resultado es:
+
+- El kit declara que los datos del reto son sintéticos y que ningún paciente, nombre, documento,
+  dirección o EPS corresponde a una persona real.
+- La rúbrica exige una solución reproducible, voz, RAG, decisiones, escalamiento y conocimiento
+  vivo; no exige HIPAA, una BAA, telefonía real, EHR, autenticación empresarial ni un entorno de
+  producción hospitalario.
+- El README oficial indica que los PDF conservan los derechos de sus autores y editores. Eso
+  explica por qué no se debe asumir que el participante está autorizado a quitar restricciones
+  de copia solo porque la contraseña de usuario esté vacía.
+
+El repositorio propio aplica una capa de seguridad proporcional al concurso: BR-040 exige solo
+datos sintéticos, anonimizados o autorizados; BR-042 excluye audio/PII de logs y capturas por
+defecto; NFR-008 exige minimización y separación de sesiones; y el release gate bloquea secretos,
+PHI o IP no autorizada. La implementación no se presenta como “HIPAA compliant”.
+
+HIPAA sería una cuestión de una eventual operación real: según HHS, sus reglas aplican a entidades
+cubiertas y business associates que manejan PHI identificable, normalmente con acuerdos y
+salvaguardas específicos ([HHS: Covered Entities and Business Associates](https://www.hhs.gov/hipaa/for-professionals/covered-entities/index.html)). Si Care Companion
+se conectara después a un hospital o recibiera pacientes reales, habría que hacer una revisión
+legal y de seguridad, incluyendo BAA cuando corresponda, retención, control de acceso, cifrado,
+auditoría, consentimiento y respuesta a incidentes. Ese trabajo está correctamente separado en
+`PROD-011 Privacy/compliance`; no forma parte del concurso actual.
+
+## 9.16 Extracción de los tres PDF protegidos y OCR del escaneo
+
+Dado que no existe un canal operativo para obtener respuesta del organizador, se hizo una
+verificación técnica local antes de cambiar el comportamiento: los tres PDF protegidos aceptan
+contraseña de usuario vacía y producen texto; no se intentó fuerza bruta ni se suministra una
+contraseña externa. La extracción quedó encapsulada en `extract_pdf_pages()` y requiere
+`cryptography` para el PDF AES.
+
+El cuarto archivo (`Appendicitis/REVISIÓN...2000-2021.pdf`) tiene una sola página escaneada.
+Docker incorpora `poppler-utils`, `tesseract-ocr` y `tesseract-ocr-spa`; `scripts/ocr_scanned_pdf.py`
+rasteriza a 220 DPI, reconoce `spa+eng` y escribe una salida `.txt` idempotente en el volumen.
+`load_corpus.py` ingesta esa salida con la categoría `appendicitis`, manteniendo el PDF original
+sin modificar.
+
+El marcador de bootstrap pasó a `v2` para que una instalación existente reprocesara la ampliación
+una sola vez. Ensayo real contra el volumen Docker: los tres PDF protegidos quedaron en estado
+`ready`, el OCR generó 4.985 caracteres y 8 chunks, el corpus quedó en **107 documentos listos**
+(`106 PDF + 1 texto OCR`) y **9.296 chunks**. El backend sigue levantando como
+`DatasetCaseAdapter case_count=160`. En futuras cargas manuales de documentos, el rechazo de
+PDF cifrados permanece como comportamiento conservador; la apertura con contraseña vacía se
+aplica al batch oficial del kit.
+
+## 9.17 Paciente como entidad longitudinal y nuevo seguimiento
+
+La inspección directa de los XLSX confirmó 40 `paciente_id` únicos y 160 trayectorias: todos
+los pacientes tienen exactamente los días 1, 3, 7 y 14, además de una fecha de cirugía en el
+perfil clínico. La lista plana anterior era fiel al `case_id` técnico, pero repetía cuatro veces
+cada nombre y hacía que el jurado tuviera que interpretar identificadores de fase.
+
+`DatasetCaseAdapter` construye ahora 40 agregados de paciente. Cada uno conserva perfil,
+procedimiento, fecha de cirugía y los cuatro hitos históricos con dolor NRS, temperatura,
+movilidad, herida, apetito y sueño. Los 160 episodios originales continúan resolviendo por su
+`case_id`, pero `/api/v1/cases` devuelve las 40 entidades que la interfaz representa como
+tarjetas buscables. La llamada se presenta como un seguimiento nuevo posterior a la historia
+disponible; la apertura no obliga al usuario a escoger ni pronuncia un día posoperatorio.
+
+Los agentes reciben el perfil estable y los cuatro hitos dentro de `prior_followups`, además de
+las llamadas nuevas previamente completadas para el mismo `patient_id`. El registro producido
+por la nueva llamada conserva las observaciones fuente y añade una proyección `FollowupRecord`
+con los nombres del dataset (`dolor_nrs`, `fiebre_c`, `movilidad`, `herida`, `apetito`, `sueno`),
+nivel de decisión y `alerta_equipo_medico`. La proyección se materializa idempotentemente en
+SQLite (`followup_records`); Redis no aporta valor para 40 entidades y añadiría otro servicio al
+arranque cronometrado de Docker. Verificación: API real devuelve 40 pacientes con cuatro hitos
+cada uno; Docker, build Next y `make verify` verdes (**348 recolectados, 345 passed, 3 skipped**).
+
+## 9.18 Auditoría de conversación longitudinal, normalización y superficies del jurado
+
+La prueba con Janeth mostró cuatro fallos conectados. “Más o menos” era atribuido a dolor sin
+evidencia; ante “usted tiene todos mis registros” el agente ignoraba su propia línea base; un
+dolor siete, fiebre de 38 °C e incisión roja/inflamada no se combinaban hasta que la persona
+pidiera una ambulancia; y el registro final conservaba frases libres o datos de otra pregunta
+en los campos del dataset.
+
+Se añadieron guardas conversacionales deterministas. Una respuesta general vaga pregunta qué
+no está bien antes de crear un síntoma. Una referencia a los registros reconoce el último hito,
+contrasta dolor histórico y actual, y solicita solo inicio/evolución de hoy. Dolor expresado con
+palabras se convierte a NRS 0–10, la fiebre numérica a grados Celsius y movilidad, herida,
+apetito y sueño a categorías semiestructuradas. `CallSummary` pasa a v1.2; campos inciertos ya
+no contaminan `followup_records`.
+
+`rules-v2` incorpora dos combinaciones de deterioro posoperatorio: fiebre + dolor ≥7 + herida
+inflamada, o fiebre + dolor ≥7 + intolerancia oral. Dolor alto aislado todavía se caracteriza;
+“quiero que me hospitalicen” sí se reconoce como solicitud urgente, y “no puedo comer” queda
+como intolerancia oral, nunca como vómito inventado. Para señales de amenaza inmediata, el
+cierre hablado indica contactar servicios de emergencia sin esperar la devolución del equipo.
+
+En `/call`, el selector se repliega durante la conversación y una línea longitudinal expone los
+cuatro hitos que el agente conoce. `/knowledge` se rediseñó como consola administrativa guiada:
+el corpus oficial se identifica por checksum/origen y está protegido en API y UI, mientras los
+documentos cargados por el evaluador conservan el ciclo learn/retrieve/forget. El inventario
+tiene búsqueda, filtros y paginación. `/audit` ya no obliga a interpretar UUID o enums: muestra
+paciente, procedimiento, estado/resultados legibles, selecciona la sesión reciente y presenta
+el `followup_record` consolidado.
+
+Verificación: **361 tests recolectados, 358 passed, 3 skipped**; ruff, ESLint y build Next.js
+verdes. La imagen Docker migra de forma idempotente bases persistentes anteriores para marcar
+el corpus oficial sin reindexarlo ni alterar `knowledge_version`.

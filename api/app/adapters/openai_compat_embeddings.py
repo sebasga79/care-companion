@@ -81,7 +81,6 @@ class OpenAICompatEmbeddings(EmbeddingsPort):
 
         if len(vectors) != len(texts):
             raise EmbeddingsProviderError(
-                f"{self._provider_name}: se pidieron {len(texts)} vectores, "
-                f"llegaron {len(vectors)}"
+                f"{self._provider_name}: se pidieron {len(texts)} vectores, llegaron {len(vectors)}"
             )
         return vectors

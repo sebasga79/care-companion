@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.domain.observation import Observation
 
-RULESET_VERSION = "rules-v1"
+RULESET_VERSION = "rules-v2"
 
 
 class RuleCondition(BaseModel):
@@ -42,13 +42,10 @@ class RuleEngineResult(BaseModel):
     ruleset_version: str = RULESET_VERSION
 
 
-# Reglas sintéticas de demostración (fixtures del propio proyecto — spec.md
-# advierte que ningún dato clínico real del reto se incorpora todavía;
-# estos triggers son deliberadamente genéricos e ilustrativos del
-# mecanismo, no una guía clínica). Codificadas como datos versionados, no
-# como `if`/`else` disperso, para que agregar/revisar una regla no toque
-# la lógica de evaluación.
-RULESET_V1: tuple[Rule, ...] = (
+# Reglas conservadoras de seguimiento postoperatorio, versionadas como
+# datos. Las combinaciones se apoyan en las guías del corpus oficial y se
+# mantienen separadas del LLM para que una alerta no sea degradable.
+RULESET_V2: tuple[Rule, ...] = (
     Rule(
         id="RF-001",
         description=(
@@ -70,6 +67,97 @@ RULESET_V1: tuple[Rule, ...] = (
         requires=[RuleCondition(observation_code="PAIN_WORSENING")],
         combine="any",
     ),
+    # Reglas añadidas tras una prueba en vivo donde el paciente reportó
+    # "40 grados de fiebre", dolor persistente y pidió ser hospitalizado, y
+    # el sistema respondió "todo se ve dentro de lo esperado": ninguna regla
+    # cubría esas señales por sí solas (RF-001 exige fiebre Y secreción a la
+    # vez). Ver `app/domain/safety_signals.py` para el detector que las
+    # alimenta sin depender del LLM.
+    Rule(
+        id="RF-003",
+        description=(
+            "Temperatura reportada superior a 38 °C en seguimiento "
+            "postoperatorio. El valor numérico se detecta sobre el texto crudo "
+            "sin depender de la extracción del LLM."
+        ),
+        trigger_codes=["HIGH_FEVER"],
+        requires=[RuleCondition(observation_code="HIGH_FEVER")],
+        combine="any",
+    ),
+    Rule(
+        id="RF-004",
+        description="Dificultad respiratoria reportada — urgencia potencial.",
+        trigger_codes=["BREATHING_DIFFICULTY"],
+        requires=[RuleCondition(observation_code="BREATHING_DIFFICULTY")],
+        combine="any",
+    ),
+    Rule(
+        id="RF-005",
+        description="Sangrado reportado sobre el sitio quirúrgico o general.",
+        trigger_codes=["BLEEDING"],
+        requires=[RuleCondition(observation_code="BLEEDING")],
+        combine="any",
+    ),
+    Rule(
+        id="RF-006",
+        description=(
+            "El paciente pide atención urgente, menciona hospitalización o "
+            "expresa temor por su vida. Un pedido explícito de ayuda urgente "
+            "nunca se responde con tranquilización automática — se escala y "
+            "que una persona valore."
+        ),
+        trigger_codes=["EMERGENCY_CONCERN"],
+        requires=[RuleCondition(observation_code="EMERGENCY_CONCERN")],
+        combine="any",
+    ),
+    Rule(
+        id="RF-007",
+        description=(
+            "Intolerancia a la vía oral / vómito persistente combinado con "
+            "dolor que empeora — riesgo de complicación abdominal."
+        ),
+        trigger_codes=["VOMITING_WITH_PAIN"],
+        requires=[
+            RuleCondition(observation_code="VOMITING"),
+            RuleCondition(observation_code="PAIN_WORSENING"),
+        ],
+        combine="all",
+    ),
+    Rule(
+        id="RF-008",
+        description="Desmayo, pérdida de conciencia o confusión reportada.",
+        trigger_codes=["ALTERED_CONSCIOUSNESS"],
+        requires=[RuleCondition(observation_code="ALTERED_CONSCIOUSNESS")],
+        combine="any",
+    ),
+    Rule(
+        id="RF-009",
+        description=(
+            "Deterioro posoperatorio combinado: fiebre, dolor actual alto y "
+            "enrojecimiento o inflamación de la herida."
+        ),
+        trigger_codes=["POSTOP_DETERIORATION_WITH_WOUND"],
+        requires=[
+            RuleCondition(observation_code="FEVER"),
+            RuleCondition(observation_code="PAIN_SEVERE"),
+            RuleCondition(observation_code="WOUND_INFLAMMATION"),
+        ],
+        combine="all",
+    ),
+    Rule(
+        id="RF-010",
+        description=(
+            "Deterioro posoperatorio combinado: fiebre, dolor actual alto e "
+            "intolerancia a alimentos o líquidos."
+        ),
+        trigger_codes=["POSTOP_DETERIORATION_WITH_INTAKE"],
+        requires=[
+            RuleCondition(observation_code="FEVER"),
+            RuleCondition(observation_code="PAIN_SEVERE"),
+            RuleCondition(observation_code="ORAL_INTAKE_INTOLERANCE"),
+        ],
+        combine="all",
+    ),
 )
 
 
@@ -78,7 +166,7 @@ def evaluate_rules(
     *,
     ruleset: tuple[Rule, ...] | None = None,
 ) -> RuleEngineResult:
-    active_ruleset = ruleset if ruleset is not None else RULESET_V1
+    active_ruleset = ruleset if ruleset is not None else RULESET_V2
 
     # "Último gana" por código: el `InterviewAgent` ya resuelve
     # contradicciones dentro de una llamada (CON-002/CON-003) antes de que
@@ -86,8 +174,8 @@ def evaluate_rules(
     # resuelta, llega como `certainty="uncertain"`, que este motor trata
     # igual que "dato faltante" (ni confirma ni descarta la regla).
     by_code: dict[str, Observation] = {}
-    for obs in observations:
-        by_code[obs.code] = obs
+    for observation in observations:
+        by_code[observation.code] = observation
 
     fired_rule_ids: list[str] = []
     trigger_codes: set[str] = set()
@@ -140,7 +228,7 @@ def evaluate_rules(
 
 
 __all__ = [
-    "RULESET_V1",
+    "RULESET_V2",
     "RULESET_VERSION",
     "Rule",
     "RuleCondition",

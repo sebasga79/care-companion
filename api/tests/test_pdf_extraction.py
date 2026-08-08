@@ -86,3 +86,14 @@ def test_extract_pdf_pages_rejects_encrypted_pdf() -> None:
     with pytest.raises(UploadRejected) as exc_info:
         extract_pdf_pages(buf.getvalue())
     assert exc_info.value.code == "pdf_encrypted"
+
+
+def test_extract_pdf_pages_opens_empty_user_password() -> None:
+    writer = PdfWriter()
+    _pdf_page_with_text(writer, "contenido del kit con protección de editor")
+    writer.encrypt(user_password="")
+    buf = io.BytesIO()
+    writer.write(buf)
+
+    pages = extract_pdf_pages(buf.getvalue(), allow_empty_password=True)
+    assert "contenido del kit" in pages[0]

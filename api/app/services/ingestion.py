@@ -161,9 +161,7 @@ class KnowledgeIngestionService:
             # canaria falla, `raise` revierte la transacción completa,
             # incluido este UPDATE — el documento nunca queda "ready" sin
             # haber pasado la canaria (BR-016).
-            self._document_repo.update_status(
-                conn, document_id, status="ready", updated_at=now
-            )
+            self._document_repo.update_status(conn, document_id, status="ready", updated_at=now)
 
             expected_chunk_ids = {chunk.chunk_id for chunk in chunks}
             found = await self._canary_found(
@@ -185,9 +183,7 @@ class KnowledgeIngestionService:
             document=document, knowledge_version=new_version, chunk_count=len(chunks)
         )
 
-    def _chunk_content(
-        self, document_id: str, extension: str, content: bytes
-    ) -> list[ChunkRecord]:
+    def _chunk_content(self, document_id: str, extension: str, content: bytes) -> list[ChunkRecord]:
         """Deriva el texto según el tipo de archivo y lo fragmenta.
 
         `txt`/`md`: un único blob de texto UTF-8, `page=None` (comportamiento
@@ -197,7 +193,13 @@ class KnowledgeIngestionService:
         determinista (`document_id|chunk_index|text`) sigue siendo único."""
         if extension == "pdf":
             chunks: list[ChunkRecord] = []
-            for page_number, page_text in enumerate(extract_pdf_pages(content), start=1):
+            for page_number, page_text in enumerate(
+                extract_pdf_pages(
+                    content,
+                    allow_empty_password=self._settings.rag_allow_empty_pdf_password,
+                ),
+                start=1,
+            ):
                 if not page_text.strip():
                     continue
                 chunks.extend(

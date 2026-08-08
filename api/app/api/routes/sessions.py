@@ -48,8 +48,8 @@ from app.repositories.sessions import SessionRepository
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
-def _to_response(record: dict) -> SessionResponse:
-    return SessionResponse(**record)
+def _to_response(record: dict, *, opening_message: str | None = None) -> SessionResponse:
+    return SessionResponse(**record, opening_message=opening_message)
 
 
 @router.post("", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
@@ -58,6 +58,7 @@ async def create_session(
     case_port: ChallengeCasePort = Depends(get_case_port),
     session_repo: SessionRepository = Depends(get_session_repo),
     settings: Settings = Depends(get_settings_dep),
+    call_cycle_orchestrator: CallCycleOrchestrator = Depends(get_call_cycle_orchestrator),
 ) -> SessionResponse:
     case = await case_port.get_case(body.case_id)
     if case is None:
@@ -69,7 +70,10 @@ async def create_session(
         state=SessionState.CREATED.value,
         knowledge_version=knowledge_version,
     )
-    return _to_response(record)
+    opening_message = await call_cycle_orchestrator.start_session(record["id"])
+    updated = session_repo.get(record["id"])
+    assert updated is not None
+    return _to_response(updated, opening_message=opening_message)
 
 
 @router.get("/{session_id}", response_model=SessionResponse)

@@ -115,9 +115,7 @@ class Settings(BaseSettings):
     llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
     llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
     llm_model: str = Field(default="fake-model-v1", alias="LLM_MODEL")
-    llm_request_timeout_seconds: float = Field(
-        default=20.0, alias="LLM_REQUEST_TIMEOUT_SECONDS"
-    )
+    llm_request_timeout_seconds: float = Field(default=20.0, alias="LLM_REQUEST_TIMEOUT_SECONDS")
 
     # Resguardo (docs/auditoria-kit-oficial-2026-08-07.md §3): si el
     # primario (Groq, nube) falla o no responde durante la sesión de
@@ -125,9 +123,7 @@ class Settings(BaseSettings):
     # `LLMPort` (Ollama local). `None` desactiva el resguardo por completo
     # — es el comportamiento por defecto y el de todos los tests que no lo
     # configuran explícitamente.
-    llm_fallback_provider: LLMProvider | None = Field(
-        default=None, alias="LLM_FALLBACK_PROVIDER"
-    )
+    llm_fallback_provider: LLMProvider | None = Field(default=None, alias="LLM_FALLBACK_PROVIDER")
     llm_fallback_base_url: str | None = Field(default=None, alias="LLM_FALLBACK_BASE_URL")
     llm_fallback_api_key: str | None = Field(default=None, alias="LLM_FALLBACK_API_KEY")
     llm_fallback_model: str | None = Field(default=None, alias="LLM_FALLBACK_MODEL")
@@ -164,6 +160,10 @@ class Settings(BaseSettings):
     # pequeño/mediano de reto (architecture.md §9.1); todos overrideables
     # por entorno para tests y ajuste sin tocar código.
     rag_allowed_extensions: str = Field(default="txt,md,pdf", alias="RAG_ALLOWED_EXTENSIONS")
+    # El kit oficial contiene tres PDF con user-password vacía. El default
+    # conservador mantiene el rechazo en instalaciones locales; Docker lo
+    # habilita explícitamente para el bootstrap del corpus oficial.
+    rag_allow_empty_pdf_password: bool = Field(default=False, alias="RAG_ALLOW_EMPTY_PDF_PASSWORD")
     # 15 MB: el PDF más grande del corpus real del reto (dataset/textos/)
     # pesa ~9.6 MB — 2 MB (default original, pensado para txt/md) rechazaba
     # varios PDFs académicos reales legítimos. Ver

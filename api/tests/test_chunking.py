@@ -58,9 +58,7 @@ def test_chunk_ids_are_stable_hash_of_doc_index_and_text() -> None:
 
     chunks = chunk_document("doc-1", _FIXTURE_DOCUMENT, chunk_size_chars=120, overlap_chars=30)
     for chunk in chunks:
-        expected = hashlib.sha256(
-            f"doc-1|{chunk.chunk_index}|{chunk.text}".encode()
-        ).hexdigest()
+        expected = hashlib.sha256(f"doc-1|{chunk.chunk_index}|{chunk.text}".encode()).hexdigest()
         assert chunk.chunk_id == expected
 
 

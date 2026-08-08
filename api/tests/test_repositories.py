@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import threading
+from datetime import UTC, datetime
 
+from app.domain.decision import DecisionLevel
+from app.domain.summary import FollowupField, FollowupRecord
 from app.repositories.db import apply_schema, get_connection
 from app.repositories.events import EventRepository
+from app.repositories.followups import FollowupRecordRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.turns import TurnRepository
 
@@ -82,6 +86,32 @@ def test_event_repository_add_and_list(db_path: str) -> None:
 
     by_correlation = event_repo.list_by_correlation("corr-1")
     assert len(by_correlation) == 1
+
+
+def test_followup_record_repository_upserts_patient_projection(db_path: str) -> None:
+    _init_db(db_path)
+    session = SessionRepository(db_path).create(
+        case_id="paciente_pac_1", state="closed", knowledge_version=1
+    )
+    repo = FollowupRecordRepository(db_path)
+    record = FollowupRecord(
+        patient_id="pac_1",
+        recorded_at=datetime.now(UTC),
+        dolor_nrs=FollowupField(value="7", certainty="confirmed", original_text="siete de diez"),
+        decision_level=DecisionLevel.HARD_RED_FLAG,
+        alerta_equipo_medico=True,
+    )
+
+    repo.upsert(session_id=session["id"], case_id=session["case_id"], record=record)
+    repo.upsert(session_id=session["id"], case_id=session["case_id"], record=record)
+
+    stored = repo.get_for_session(session["id"])
+    assert stored is not None
+    assert stored["patient_id"] == "pac_1"
+    assert stored["payload"]["dolor_nrs"]["value"] == "7"
+    assert stored["decision_level"] == "HARD_RED_FLAG"
+    assert stored["should_escalate"] is True
+    assert len(repo.list_for_patient("pac_1")) == 1
 
 
 def test_concurrent_turn_inserts_all_persisted(db_path: str) -> None:

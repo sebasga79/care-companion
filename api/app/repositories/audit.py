@@ -12,6 +12,14 @@ import json
 from datetime import datetime
 from typing import Any
 
+from app.domain.clinical_values import (
+    normalize_appetite,
+    normalize_mobility,
+    normalize_sleep,
+    normalize_wound,
+    parse_pain_nrs,
+    parse_temperature_c,
+)
 from app.repositories.db import session_scope
 
 _LLM_CALL_EVENT_TYPES = (
@@ -19,6 +27,33 @@ _LLM_CALL_EVENT_TYPES = (
     "agent.triage.completed",
     "agent.response.completed",
 )
+
+
+def _normalize_followup_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Proyecta registros v1.1 existentes al vocabulario clínico actual.
+
+    No altera la evidencia original; solo corrige el valor mostrado en la
+    vista de auditoría usando el ``original_text`` conservado en cada campo.
+    Las llamadas nuevas ya se persisten normalizadas por ``summary.py``.
+    """
+    normalizers = {
+        "dolor_nrs": lambda value, text: parse_pain_nrs(value, text),
+        "fiebre_c": lambda value, text: parse_temperature_c(value, text),
+        "movilidad": lambda _value, text: normalize_mobility(text),
+        "herida": lambda _value, text: normalize_wound(text),
+        "apetito": lambda _value, text: normalize_appetite(text),
+        "sueno": lambda _value, text: normalize_sleep(text),
+    }
+    for key, normalizer in normalizers.items():
+        field = payload.get(key)
+        if not isinstance(field, dict):
+            continue
+        normalized = normalizer(field.get("value"), field.get("original_text", ""))
+        if normalized is None:
+            payload[key] = None
+        else:
+            field["value"] = normalized
+    return payload
 
 
 def _duration_seconds(created_at: str, closed_at: str | None) -> float | None:
@@ -40,9 +75,7 @@ class AuditRepository:
         """Una fila por sesión con la última decisión, conteo de citas y
         si tuvo escalamiento. Orden: más reciente primero."""
         with session_scope(self._database_path) as conn:
-            sessions = conn.execute(
-                "SELECT * FROM sessions ORDER BY created_at DESC"
-            ).fetchall()
+            sessions = conn.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
 
             rows: list[dict[str, Any]] = []
             for s in sessions:
@@ -87,9 +120,7 @@ class AuditRepository:
         """Timeline de una sesión: eventos instrumentados + decisiones +
         escalamientos, ordenados cronológicamente."""
         with session_scope(self._database_path) as conn:
-            session = conn.execute(
-                "SELECT * FROM sessions WHERE id = ?", (session_id,)
-            ).fetchone()
+            session = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
             if session is None:
                 return None
 
@@ -114,6 +145,38 @@ class AuditRepository:
                 """,
                 (session_id,),
             ).fetchall()
+            contact_rows = conn.execute(
+                """
+                SELECT code, label, value, created_at
+                FROM observations
+                WHERE session_id = ?
+                  AND code IN ('CONTACT_PRIMARY', 'CONTACT_EMERGENCY')
+                  AND certainty = 'confirmed'
+                ORDER BY created_at ASC
+                """,
+                (session_id,),
+            ).fetchall()
+            contacts = []
+            for row in contact_rows:
+                record = dict(row)
+                try:
+                    record["value"] = json.loads(record["value"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                contacts.append(record)
+
+            followup_row = conn.execute(
+                "SELECT payload FROM followup_records WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            followup_record = None
+            if followup_row is not None:
+                try:
+                    followup_record = _normalize_followup_payload(
+                        json.loads(followup_row["payload"])
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    followup_record = None
 
             return {
                 "session_id": session_id,
@@ -122,6 +185,8 @@ class AuditRepository:
                 "events": [dict(e) for e in events],
                 "decisions": [dict(d) for d in decisions],
                 "escalations": [dict(e) for e in escalations],
+                "contacts": contacts,
+                "followup_record": followup_record,
             }
 
     def latency_percentiles(self) -> dict[str, float | None]:

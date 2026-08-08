@@ -110,9 +110,7 @@ class CallOrchestrator:
     def transition(self, target: SessionState, *, event: str | None = None) -> SessionState:
         if not self.can_transition(target):
             raise InvalidTransitionError(self._state, target)
-        self._history.append(
-            TransitionRecord(from_state=self._state, to_state=target, event=event)
-        )
+        self._history.append(TransitionRecord(from_state=self._state, to_state=target, event=event))
         self._state = target
         return self._state
 

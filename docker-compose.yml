@@ -10,15 +10,21 @@ services:
     environment:
       - APP_ENV=development
       - DATABASE_PATH=/app/data/care_companion.db
+      - DATASET_DIR=/app/data/dataset
+      - RAG_ALLOW_EMPTY_PDF_PASSWORD=${RAG_ALLOW_EMPTY_PDF_PASSWORD:-true}
+      # En el primer arranque descarga el kit público e indexa el corpus en
+      # el volumen. Los siguientes arranques reutilizan ambos sin repetirlo.
+      - BOOTSTRAP_OFFICIAL_DATASET=${BOOTSTRAP_OFFICIAL_DATASET:-true}
+      - BOOTSTRAP_OFFICIAL_CORPUS=${BOOTSTRAP_OFFICIAL_CORPUS:-true}
+      - BOOTSTRAP_OFFICIAL_OCR=${BOOTSTRAP_OFFICIAL_OCR:-true}
       - API_HOST=0.0.0.0
       - API_PORT=8000
-      # Producción del reto: LLM_PROVIDER=groq + LLM_API_KEY real (ver
-      # .env.example y docs/auditoria-kit-oficial-2026-08-07.md §3). `fake`
-      # es el default de este compose para que `docker compose up --build`
-      # arranque sin credenciales (gate G2 no depende de tener una API key
-      # a mano solo para levantar el contenedor).
-      - LLM_PROVIDER=fake
-      - LLM_MODEL=fake-model-v1
+      # `fake` permite un smoke test sin credenciales. Para la evaluación
+      # competitiva (G3), Compose acepta Groq/Llama mediante variables del
+      # shell: LLM_PROVIDER=groq LLM_API_KEY=... docker compose up --build.
+      - LLM_PROVIDER=${LLM_PROVIDER:-fake}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-fake-model-v1}
     volumes:
       - care_companion_data:/app/data
 

@@ -192,3 +192,24 @@ CREATE TABLE IF NOT EXISTS escalations (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_escalations_session_idem
     ON escalations(session_id, idempotency_key);
+
+-- Proyección longitudinal de la llamada terminada. `payload` conserva el
+-- objeto `FollowupRecord` completo con los mismos ejes clínicos del dataset
+-- oficial (dolor, fiebre, movilidad, herida, apetito y sueño), más la
+-- decisión y la alerta. Las observaciones fuente permanecen normalizadas en
+-- `observations`; esta tabla facilita recuperar el seguimiento como una sola
+-- entidad semiestructurada sin depender de Redis ni duplicar transcripciones.
+CREATE TABLE IF NOT EXISTS followup_records (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    patient_id TEXT NOT NULL,
+    case_id TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    decision_level TEXT NOT NULL,
+    should_escalate INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_followup_records_patient
+    ON followup_records(patient_id, recorded_at);

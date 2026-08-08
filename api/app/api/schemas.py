@@ -30,6 +30,9 @@ class SessionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     closed_at: datetime | None = None
+    # Solo se devuelve al crear la sesión: mensaje que el agente pronuncia
+    # primero, antes de esperar el turno del paciente.
+    opening_message: str | None = None
 
 
 # -- Conocimiento / RAG (RAG-010) --------------------------------------
@@ -43,6 +46,7 @@ class DocumentResponse(BaseModel):
     mime: str
     size_bytes: int
     applicability: dict[str, Any] = Field(default_factory=dict)
+    protected: bool = False
     knowledge_version_added: int
     knowledge_version_deleted: int | None = None
     error_reason: str | None = None

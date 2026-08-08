@@ -15,6 +15,7 @@ _EXPECTED_TABLES = {
     "document_chunks_fts",
     "citations",
     "metrics",
+    "followup_records",
 }
 
 _EXPECTED_DOCUMENT_COLUMNS = {
@@ -68,9 +69,7 @@ def test_apply_schema_creates_all_tables(db_path: str) -> None:
     conn = get_connection(db_path)
     try:
         apply_schema(conn)
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         table_names = {row["name"] for row in rows}
         assert _EXPECTED_TABLES.issubset(table_names)
     finally:
@@ -213,9 +212,7 @@ def test_rag_001_additive_migration_is_idempotent_on_preexisting_db(db_path: str
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
         assert _EXPECTED_DOCUMENT_COLUMNS.issubset(columns)
 
-        legacy_row = conn.execute(
-            "SELECT * FROM documents WHERE id = 'legacy-1'"
-        ).fetchone()
+        legacy_row = conn.execute("SELECT * FROM documents WHERE id = 'legacy-1'").fetchone()
         assert legacy_row is not None
         assert legacy_row["filename"] == ""  # default backfill para la fila preexistente
         assert legacy_row["applicability"] == "{}"

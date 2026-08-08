@@ -26,6 +26,7 @@ interface DocumentResponseWire {
   mime: string;
   size_bytes: number;
   applicability: Record<string, unknown>;
+  protected: boolean;
   knowledge_version_added: number;
   knowledge_version_deleted: number | null;
   error_reason: string | null;
@@ -105,6 +106,7 @@ export interface KnowledgeDocument {
   mime: string;
   sizeBytes: number;
   applicability: Record<string, unknown>;
+  protected: boolean;
   knowledgeVersionAdded: number;
   knowledgeVersionDeleted: number | null;
   errorReason: string | null;
@@ -177,6 +179,7 @@ function toDocument(wire: DocumentResponseWire): KnowledgeDocument {
     mime: wire.mime,
     sizeBytes: wire.size_bytes,
     applicability: wire.applicability ?? {},
+    protected: wire.protected,
     knowledgeVersionAdded: wire.knowledge_version_added,
     knowledgeVersionDeleted: wire.knowledge_version_deleted,
     errorReason: wire.error_reason,

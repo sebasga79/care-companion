@@ -203,16 +203,12 @@ def _semantic_search(
         return []
     matrix_norms = np.linalg.norm(matrix, axis=1)
     denom = matrix_norms * query_norm
-    cosine = np.divide(
-        matrix @ query_arr, denom, out=np.zeros_like(matrix_norms), where=denom > 0
-    )
+    cosine = np.divide(matrix @ query_arr, denom, out=np.zeros_like(matrix_norms), where=denom > 0)
     order = np.argsort(-cosine)
     return [(chunk_ids[i], float(cosine[i])) for i in order]
 
 
-def _reciprocal_rank_fusion(
-    *rankings: list[tuple[str, float]], k: int
-) -> list[tuple[str, float]]:
+def _reciprocal_rank_fusion(*rankings: list[tuple[str, float]], k: int) -> list[tuple[str, float]]:
     scores: dict[str, float] = {}
     for ranking in rankings:
         for rank, (item_id, _score) in enumerate(ranking, start=1):

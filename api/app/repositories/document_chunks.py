@@ -68,9 +68,7 @@ class DocumentChunkRepository:
         return [dict(row) for row in rows]
 
     def get(self, conn: sqlite3.Connection, chunk_id: str) -> dict[str, Any] | None:
-        row = conn.execute(
-            "SELECT * FROM document_chunks WHERE id = ?", (chunk_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM document_chunks WHERE id = ?", (chunk_id,)).fetchone()
         return dict(row) if row is not None else None
 
     def delete_for_document(self, conn: sqlite3.Connection, document_id: str) -> list[dict]:
@@ -79,9 +77,7 @@ class DocumentChunkRepository:
         llamador pueda desalojar el caché de embeddings y para dejar
         evidencia del borrado en la respuesta de la API si hace falta."""
         purged = self.list_for_document(conn, document_id)
-        conn.execute(
-            "DELETE FROM document_chunks_fts WHERE document_id = ?", (document_id,)
-        )
+        conn.execute("DELETE FROM document_chunks_fts WHERE document_id = ?", (document_id,))
         conn.execute("DELETE FROM document_chunks WHERE document_id = ?", (document_id,))
         return purged
 

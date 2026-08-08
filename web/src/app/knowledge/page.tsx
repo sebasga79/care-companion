@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusBanner } from "@/components/StatusBanner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -20,7 +20,16 @@ const STATUS_META: Record<string, { icon: string; label: string }> = {
 };
 
 const SEARCH_TOP_K = 8;
-const CANARY_WORD_COUNT = 8;
+const INVENTORY_PAGE_SIZE = 20;
+
+const PROCEDURE_OPTIONS = [
+  ["", "Todos los procedimientos"],
+  ["appendicitis", "Apendicitis / apendicectomía"],
+  ["breast_cancer", "Cáncer de mama"],
+  ["cholecystitis", "Colecistitis / colecistectomía"],
+  ["colorectal_cancer", "Cáncer colorrectal"],
+  ["total_joint_replacement", "Reemplazo articular"],
+] as const;
 
 function statusMeta(status: string) {
   return STATUS_META[status] ?? { icon: "?", label: status };
@@ -44,6 +53,7 @@ function formatDate(iso: string | null): string {
 
 function applicabilityEntries(applicability: Record<string, unknown>): [string, string][] {
   return Object.entries(applicability)
+    .filter(([key]) => key !== "source")
     .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
     .map(([key, value]) => [key, String(value)]);
 }
@@ -89,7 +99,35 @@ export default function KnowledgePage() {
   const [searchResult, setSearchResult] = useState<KnowledgeSearchResponse | null>(null);
   const [canaryNote, setCanaryNote] = useState<string | null>(null);
 
+  const [inventoryQuery, setInventoryQuery] = useState("");
+  const [inventoryScope, setInventoryScope] = useState("all");
+  const [inventoryPage, setInventoryPage] = useState(1);
+
   const [liveMessage, setLiveMessage] = useState("");
+
+  const activeDocuments = documents.filter((doc) => doc.status !== "deleted");
+  const officialCount = activeDocuments.filter((doc) => doc.protected).length;
+  const testCount = activeDocuments.filter((doc) => !doc.protected).length;
+  const filteredDocuments = useMemo(() => {
+    const needle = inventoryQuery.trim().toLocaleLowerCase("es");
+    return documents.filter((doc) => {
+      const matchesScope =
+        inventoryScope === "all" ||
+        (inventoryScope === "official" && doc.protected && doc.status !== "deleted") ||
+        (inventoryScope === "test" && !doc.protected && doc.status !== "deleted") ||
+        (inventoryScope === "deleted" && doc.status === "deleted");
+      if (!matchesScope) return false;
+      if (!needle) return true;
+      return `${doc.filename} ${JSON.stringify(doc.applicability)}`
+        .toLocaleLowerCase("es")
+        .includes(needle);
+    });
+  }, [documents, inventoryQuery, inventoryScope]);
+  const inventoryPages = Math.max(1, Math.ceil(filteredDocuments.length / INVENTORY_PAGE_SIZE));
+  const pagedDocuments = filteredDocuments.slice(
+    (inventoryPage - 1) * INVENTORY_PAGE_SIZE,
+    inventoryPage * INVENTORY_PAGE_SIZE,
+  );
 
   async function fetchInventory() {
     try {
@@ -163,19 +201,16 @@ export default function KnowledgePage() {
       setLiveMessage(`Documento cargado: ${result.document.filename}, versión v${result.knowledgeVersion}.`);
       reloadInventory();
 
-      // Positive canary, live: derive a real verification query from the
-      // file's own opening words (same idea as the backend's own canary —
-      // app/services/ingestion.py `_pick_canary_query`) and actually query
-      // /knowledge/search with it, so the newly learned content is shown
-      // appearing in retrieval, not just asserted.
-      const text = await file.text().catch(() => "");
-      const words = text.split(/\s+/).filter(Boolean).slice(0, CANARY_WORD_COUNT).join(" ");
-      if (words) {
-        setKnownQueries((prev) => ({ ...prev, [result.document.id]: words }));
-        setSearchQuery(words);
-        setCanaryNote(`Canaria positiva: verificando "${words}" contra el índice…`);
-        await runSearch(words);
-        setCanaryNote(`Canaria positiva ejecutada para "${words}" tras la carga.`);
+      // The backend extracts the canary from the indexed content, so this
+      // works for text files and PDFs alike.
+      const detail = await knowledgeApi.getDocument(result.document.id);
+      const query = detail.canary?.query;
+      if (query) {
+        setKnownQueries((prev) => ({ ...prev, [result.document.id]: query }));
+        setSearchQuery(query);
+        setCanaryNote(`Canaria positiva: verificando "${query}" contra el índice…`);
+        await runSearch(query);
+        setCanaryNote(`Canaria positiva confirmada para "${query}" tras la carga.`);
       }
     } catch (error) {
       setUploadError(errorMessage(error));
@@ -214,6 +249,7 @@ export default function KnowledgePage() {
   }
 
   function openDeleteDialog(doc: KnowledgeDocument) {
+    if (doc.protected) return;
     setDeleteError(null);
     setPendingDelete({ doc, verifyQuery: knownQueries[doc.id] ?? null, loadingVerify: true });
     knowledgeApi
@@ -280,25 +316,42 @@ export default function KnowledgePage() {
 
       <div className="view-hero card">
         <div>
-          <p className="eyebrow">Conocimiento gobernado</p>
-          <h1 id="knowledge-heading">Aprende una guía nueva y demuestra que puede olvidarla</h1>
+          <p className="eyebrow">Base clínica versionada</p>
+          <h1 id="knowledge-heading">Evidencia que el agente puede aprender y olvidar</h1>
           <p>
-            Esta vista opera contra el backend real: cargar un documento (learn), verlo
-            participar en una consulta de recuperación (retrieve), y confirmar que al
-            eliminarlo una consulta canaria negativa devuelve 0 resultados (forget).
+            Aquí se administra la evidencia que fundamenta las respuestas. El corpus oficial
+            permanece protegido; los evaluadores pueden cargar una guía de prueba, recuperarla
+            y eliminarla sin reiniciar el sistema.
           </p>
         </div>
         <div className="hero-actions">
-          <span className="chip chip-simulation">Datos reales del backend · sin datos precargados</span>
+          <span className="chip chip-simulation">
+            {officialCount} guías oficiales protegidas · {testCount} de prueba
+          </span>
           <span className="chip chip-info">
             Versión de conocimiento: {knowledgeVersion !== null ? `v${knowledgeVersion}` : "…"}
           </span>
         </div>
       </div>
 
+      <ol className="knowledge-steps" aria-label="Recorrido de evaluación de la base clínica">
+        <li data-done={Boolean(uploadNote)}>
+          <span>1</span>
+          <div><strong>Cargar</strong><small>Agrega una guía de prueba</small></div>
+        </li>
+        <li data-done={Boolean(searchResult?.results.length)}>
+          <span>2</span>
+          <div><strong>Recuperar</strong><small>Confirma que el agente la encuentra</small></div>
+        </li>
+        <li data-done={Boolean(canaryNote?.includes("negativa ejecutada"))}>
+          <span>3</span>
+          <div><strong>Olvidar</strong><small>Elimina la prueba y verifica el índice</small></div>
+        </li>
+      </ol>
+
       {listError ? <StatusBanner message={listError} onRetry={reloadInventory} /> : null}
 
-      <div className="two-col">
+      <div className="two-col knowledge-overview">
         <section className="card card-pad" aria-labelledby="version-heading">
           <div className="section-heading">
             <div>
@@ -315,7 +368,7 @@ export default function KnowledgePage() {
           </div>
           <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>
             {knowledgeVersion !== null
-              ? `${documents.length} documento(s) en el inventario (incluye tombstones de eliminados).`
+              ? `${activeDocuments.length} documentos activos: ${officialCount} oficiales protegidos y ${testCount} de prueba. Los borrados quedan como trazabilidad.`
               : "El inventario de conocimiento (documentos, versión y prueba canaria) aparecerá aquí cuando el backend esté disponible."}
           </p>
         </section>
@@ -329,26 +382,40 @@ export default function KnowledgePage() {
           </div>
 
           <form className="upload-zone" onSubmit={handleUpload}>
-            <label htmlFor="knowledge-file">Documento (.txt o .md)</label>
-            <input id="knowledge-file" name="file" type="file" accept=".txt,.md" required />
-
-            <label htmlFor="applicability-procedure">Procedimiento (opcional)</label>
+            <label htmlFor="knowledge-file">Documento (.txt, .md o .pdf)</label>
             <input
-              id="applicability-procedure"
-              type="text"
-              placeholder="p. ej. apendicectomía"
-              value={procedure}
-              onChange={(event) => setProcedure(event.target.value)}
+              id="knowledge-file"
+              name="file"
+              type="file"
+              accept=".txt,.md,.pdf"
+              required
             />
 
-            <label htmlFor="applicability-phase">Fase (opcional)</label>
-            <input
-              id="applicability-phase"
-              type="text"
-              placeholder="p. ej. posoperatorio"
-              value={phase}
-              onChange={(event) => setPhase(event.target.value)}
-            />
+            <details className="advanced-fields">
+              <summary>Aplicabilidad clínica (opcional)</summary>
+              <label htmlFor="applicability-procedure">Procedimiento</label>
+              <select
+                id="applicability-procedure"
+                value={procedure}
+                onChange={(event) => setProcedure(event.target.value)}
+              >
+                {PROCEDURE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+
+              <label htmlFor="applicability-phase">Fase</label>
+              <select
+                id="applicability-phase"
+                value={phase}
+                onChange={(event) => setPhase(event.target.value)}
+              >
+                <option value="">Todas las fases</option>
+                <option value="postoperative">Posoperatorio</option>
+                <option value="discharge">Alta</option>
+                <option value="followup">Seguimiento</option>
+              </select>
+            </details>
 
             <span className="field-help">
               El backend valida extensión, tamaño, firma real de bytes y checksum duplicado
@@ -378,6 +445,38 @@ export default function KnowledgePage() {
           <span className="chip chip-neutral">{documents.length} documento(s)</span>
         </div>
 
+        <div className="inventory-toolbar">
+          <div className="filter-field">
+            <label htmlFor="inventory-query">Buscar documento</label>
+            <input
+              id="inventory-query"
+              value={inventoryQuery}
+              onChange={(event) => {
+                setInventoryQuery(event.target.value);
+                setInventoryPage(1);
+              }}
+              placeholder="Nombre o procedimiento"
+            />
+          </div>
+          <div className="filter-field">
+            <label htmlFor="inventory-scope">Origen y estado</label>
+            <select
+              id="inventory-scope"
+              value={inventoryScope}
+              onChange={(event) => {
+                setInventoryScope(event.target.value);
+                setInventoryPage(1);
+              }}
+            >
+              <option value="all">Todos</option>
+              <option value="official">Corpus oficial protegido</option>
+              <option value="test">Documentos de prueba</option>
+              <option value="deleted">Eliminados</option>
+            </select>
+          </div>
+          <span className="chip chip-neutral">{filteredDocuments.length} visibles</span>
+        </div>
+
         {listLoading ? (
           <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>Consultando el backend…</p>
         ) : documents.length === 0 ? (
@@ -385,6 +484,12 @@ export default function KnowledgePage() {
             icon="≡"
             title="Sin documentos aún"
             detail="Los documentos cargados aparecerán aquí con su versión, aplicabilidad, estado, checksum y acciones de inspección/eliminación."
+          />
+        ) : filteredDocuments.length === 0 ? (
+          <EmptyState
+            icon="⌕"
+            title="No hay coincidencias"
+            detail="Cambia el texto de búsqueda o el filtro de origen y estado."
           />
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -404,7 +509,7 @@ export default function KnowledgePage() {
                 </tr>
               </thead>
               <tbody>
-                {documents.map((doc) => {
+                {pagedDocuments.map((doc) => {
                   const meta = statusMeta(doc.status);
                   const entries = applicabilityEntries(doc.applicability);
                   const detailState = openDetails[doc.id];
@@ -412,7 +517,12 @@ export default function KnowledgePage() {
                   return (
                     <Fragment key={doc.id}>
                       <tr>
-                        <td>{doc.filename}</td>
+                        <td>
+                          <strong>{doc.filename}</strong>
+                          <span className={`document-origin ${doc.protected ? "official" : "test"}`}>
+                            {doc.protected ? "Oficial · protegido" : "Prueba del evaluador"}
+                          </span>
+                        </td>
                         <td>{formatBytes(doc.sizeBytes)}</td>
                         <td>
                           <span className="document-status-badge" data-status={doc.status}>
@@ -450,7 +560,7 @@ export default function KnowledgePage() {
                             >
                               {detailState ? "Ocultar detalle" : "Ver detalle"}
                             </button>
-                            {doc.status !== "deleted" ? (
+                            {doc.status !== "deleted" && !doc.protected ? (
                               <button
                                 type="button"
                                 className="btn btn-danger"
@@ -461,6 +571,10 @@ export default function KnowledgePage() {
                               >
                                 Eliminar
                               </button>
+                            ) : doc.protected ? (
+                              <span className="protected-label" title="El corpus oficial no se puede eliminar">
+                                Protegido
+                              </span>
                             ) : null}
                           </div>
                         </td>
@@ -526,6 +640,27 @@ export default function KnowledgePage() {
                 })}
               </tbody>
             </table>
+            {inventoryPages > 1 ? (
+              <nav className="inventory-pagination" aria-label="Páginas del inventario">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={inventoryPage === 1}
+                  onClick={() => setInventoryPage((page) => Math.max(1, page - 1))}
+                >
+                  Anterior
+                </button>
+                <span>Página {inventoryPage} de {inventoryPages}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={inventoryPage === inventoryPages}
+                  onClick={() => setInventoryPage((page) => Math.min(inventoryPages, page + 1))}
+                >
+                  Siguiente
+                </button>
+              </nav>
+            ) : null}
           </div>
         )}
       </section>

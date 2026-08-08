@@ -40,7 +40,9 @@ def test_create_session_for_known_case(client: TestClient) -> None:
     assert response.status_code == 201
     body = response.json()
     assert body["case_id"] == "demo-case-001"
-    assert body["state"] == "created"
+    assert body["state"] == "interviewing"
+    assert "seguimiento" in body["opening_message"].lower()
+    assert "cirugia ambulatoria general x" in body["opening_message"].lower()
     assert body["knowledge_version"] == 1
     assert body["closed_at"] is None
 
@@ -69,9 +71,10 @@ def test_finish_session_returns_valid_empty_summary(client: TestClient) -> None:
     assert response.status_code == 200
     summary = response.json()
 
-    assert summary["schema_version"] == "1.0"
+    assert summary["schema_version"] == "1.2"
     assert summary["session_id"] == created["id"]
     assert summary["case_id"] == "demo-case-001"
+    assert summary["procedure"] == "cirugia_ambulatoria_general_x"
     assert summary["patient_reported"] == []
     assert summary["explicit_denials"] == []
     assert summary["not_assessed"] == []

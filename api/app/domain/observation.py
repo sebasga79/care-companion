@@ -33,7 +33,7 @@ class Observation(BaseModel):
 
     code: str = Field(min_length=1)
     label: str = Field(min_length=1)
-    value: bool | str | None = None
+    value: bool | int | float | str | None = None
     certainty: Certainty
     source_turn_id: str | None = None
     original_text: str = ""

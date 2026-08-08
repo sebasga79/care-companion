@@ -78,7 +78,7 @@ flowchart LR
     DS["Delta Sharing<br/>dataset del reto"]
     LLM["Modelo obligatorio<br/>adaptador único"]
     KB["Documentos clínicos<br/>autorizados"]
-    H["Equipo humano<br/>alerta simulada"]
+    H["Equipo humano<br/>cola de handoff"]
 
     P <-->|"audio y eventos"| CC
     C <-->|"casos, conocimiento, auditoría"| CC
@@ -184,6 +184,7 @@ stateDiagram-v2
     Initializing --> Consent
     Consent --> Interview: consentimiento confirmado
     Consent --> Closed: rechazo o ausencia
+    Interview --> Interview: ambigüedad / microtriaje breve
     Interview --> Retrieve: observación clínica
     Retrieve --> Assess: evidencia disponible
     Retrieve --> Escalate: evidencia insuficiente + posible riesgo
@@ -191,7 +192,8 @@ stateDiagram-v2
     Assess --> Escalate: regla o riesgo alto
     Respond --> Interview: necesita seguimiento
     Respond --> Summarize: objetivos cubiertos
-    Escalate --> Summarize: handoff registrado
+    Escalate --> Escalate: confirmar teléfonos de contacto
+    Escalate --> Summarize: contacto principal + alternativo confirmados
     Summarize --> Closed
 ```
 
@@ -200,12 +202,14 @@ stateDiagram-v2
 1. STT entrega texto parcial y final.
 2. `InterviewAgent` extrae observaciones normalizadas y ambigüedades.
 3. `SafetyPolicyEngine` evalúa red flags inmediatas.
-4. Si existe red flag dura, bloquea el camino normal y crea `escalate`.
-5. `RetrievalAgent` recupera evidencia filtrada por procedimiento y fase.
-6. `TriageAgent` evalúa riesgo estructurado sin poder rebajar una regla dura.
-7. `ResponseAgent` genera una intervención breve con citas internas.
-8. TTS empieza a transmitir; una nueva voz del paciente cancela la reproducción.
-9. Los eventos se escriben asíncronamente y con política fail-open para telemetría no clínica.
+4. Un malestar intenso pero inespecífico (“muy mal”) activa un solo microtriaje de peligro
+   inmediato; no se presenta como solicitud explícita de urgencia.
+5. Si existe red flag dura, bloquea el camino normal y crea `escalate`.
+6. `RetrievalAgent` recupera evidencia filtrada por procedimiento y fase.
+7. `TriageAgent` evalúa riesgo estructurado sin poder rebajar una regla dura.
+8. `ResponseAgent` genera una intervención breve con citas internas.
+9. TTS empieza a transmitir; una nueva voz del paciente cancela la reproducción.
+10. Los eventos se escriben asíncronamente y con política fail-open para telemetría no clínica.
 
 ## 8. Lógica de decisión y escalamiento
 
@@ -239,13 +243,14 @@ Una decisión de mayor severidad nunca puede ser degradada por el LLM.
 
 ### 8.3 Handoff
 
-En el reto, “alertar” será un evento visible y auditable, no una integración real:
+En el reto, “alertar” es un handoff visible, persistente y auditable dentro de la aplicación:
 
 - crea un registro `escalation`;
 - cambia el estado de la sesión;
 - muestra la justificación, señales y fuentes;
-- ofrece un botón explícito de confirmación del operador si la ficha técnica lo permite;
-- nunca llama, envía mensajes o escribe en un EHR real.
+- solicita teléfono principal y contacto alternativo;
+- incorpora ambos al reporte y cierra automáticamente la llamada;
+- no depende de un botón ni de un operador para crear el handoff.
 
 ## 9. RAG y conocimiento vivo
 
@@ -343,14 +348,16 @@ Son objetivos internos hasta recibir las métricas oficiales:
 
 ### 11.1 Entidades principales
 
-| Tabla | Propósito |
+| Entidad/tabla | Propósito |
 |---|---|
-| `cases` | proyección mínima del caso desde Delta Share |
+| `patients` | agregado Pydantic en memoria construido desde los XLSX oficiales |
+| `followup_episodes` | 160 hitos históricos agrupados bajo 40 pacientes |
 | `sessions` | ciclo de vida y versión de conocimiento fijada |
 | `turns` | transcripción, speaker, tiempos y estado |
 | `observations` | síntomas/atributos normalizados y procedencia |
 | `decisions` | nivel, triggers, reglas, evidencia y explicación |
-| `escalations` | handoff simulado y estado |
+| `escalations` | handoff idempotente enviado a revisión humana |
+| `followup_records` | proyección semiestructurada persistida de la llamada nueva y su alerta |
 | `summaries` | JSON estructurado y versión de schema |
 | `documents` | identidad lógica del documento |
 | `document_versions` | checksum, vigencia y estado |
@@ -367,9 +374,9 @@ Son objetivos internos hasta recibir las métricas oficiales:
 - Cada sesión fija una `knowledge_version`; una eliminación invalida nuevas sesiones y cachés.
 - Las vistas de auditoría redactan contenido sensible por defecto.
 
-### 11.3 Delta Sharing
+### 11.3 Dataset oficial y agregado longitudinal
 
-`ChallengeCasePort` aísla el lector Delta Sharing de la lógica clínica:
+`ChallengeCasePort` aísla los `.xlsx` oficiales de la lógica clínica:
 
 ```python
 class ChallengeCasePort(Protocol):
@@ -380,10 +387,13 @@ class ChallengeCasePort(Protocol):
 El adaptador:
 
 - usa acceso de solo lectura;
-- normaliza nombres del dataset a un contrato propio;
+- normaliza los 40 pacientes y agrupa sus días 1/3/7/14 en un contrato propio;
+- conserva los 160 `case_id` originales para trazabilidad, aunque la UI solo
+  presenta una entidad seleccionable por paciente;
 - valida schema y nullability al inicio;
 - no expone credenciales al frontend;
-- no persiste columnas innecesarias.
+- entrega el historial como datos estructurados, no como embeddings RAG;
+- persiste cada llamada nueva en `followup_records` con los ejes del dataset.
 
 ## 12. API propuesta
 
@@ -589,4 +599,3 @@ No se permitirá que Databricks, el LLM o el agente ejecuten escrituras directas
 - [ ] El modelo obligatorio se configura en un solo adapter y no existen llamadas a otros LLM.
 - [ ] El proyecto arranca desde cero en ≤15 minutos con el proceso definido por la ficha técnica.
 - [ ] El repositorio público no contiene secretos, PII, PHI, información institucional confidencial ni activos sin licencia.
-

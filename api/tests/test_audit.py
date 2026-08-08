@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.repositories.audit import _normalize_followup_payload
+
 
 def test_audit_sessions_empty(client: TestClient) -> None:
     r = client.get("/api/v1/audit/sessions")
@@ -60,3 +62,24 @@ def test_audit_session_appears_after_creation(client: TestClient) -> None:
     trace = client.get(f"/api/v1/audit/sessions/{session['id']}/trace").json()
     assert trace["session_id"] == session["id"]
     assert isinstance(trace["events"], list)
+    assert trace["contacts"] == []
+
+
+def test_legacy_followup_values_are_normalized_for_audit_display() -> None:
+    payload = {
+        "dolor_nrs": {"value": "siete", "original_text": "siete"},
+        "fiebre_c": {"value": "tengo fiebre de 38", "original_text": "tengo fiebre de 38"},
+        "herida": {
+            "value": "está roja y un poco inflamada",
+            "original_text": "está roja y un poco inflamada",
+        },
+        "movilidad": {
+            "value": "yo quiero que me hospitalicen ya",
+            "original_text": "yo quiero que me hospitalicen ya",
+        },
+    }
+    normalized = _normalize_followup_payload(payload)
+    assert normalized["dolor_nrs"]["value"] == 7
+    assert normalized["fiebre_c"]["value"] == 38.0
+    assert normalized["herida"]["value"] == "enrojecida_inflamada"
+    assert normalized["movilidad"] is None

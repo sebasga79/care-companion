@@ -72,6 +72,7 @@ _UPLOAD_REJECTION_STATUS: dict[str, int] = {
 
 
 def _to_document_response(record: dict[str, Any]) -> DocumentResponse:
+    applicability = record["applicability"]
     return DocumentResponse(
         id=record["id"],
         filename=record["filename"],
@@ -79,7 +80,8 @@ def _to_document_response(record: dict[str, Any]) -> DocumentResponse:
         status=record["status"],
         mime=record["mime"],
         size_bytes=record["size_bytes"],
-        applicability=record["applicability"],
+        applicability=applicability,
+        protected=applicability.get("source") == "official_corpus",
         knowledge_version_added=record["knowledge_version"],
         knowledge_version_deleted=record["knowledge_version_deleted"],
         error_reason=record["error_reason"],
@@ -124,6 +126,10 @@ async def upload_document(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="`applicability` debe ser un objeto JSON",
             )
+    # El origen es una propiedad del servidor, no un valor confiable del
+    # formulario. Solo el cargador/migrador del kit puede marcar contenido
+    # como corpus oficial protegido.
+    parsed_applicability["source"] = "evaluator_upload"
 
     content = await file.read()
     try:
@@ -134,9 +140,7 @@ async def upload_document(
         )
     except UploadRejected as exc:
         raise HTTPException(
-            status_code=_UPLOAD_REJECTION_STATUS.get(
-                exc.code, status.HTTP_400_BAD_REQUEST
-            ),
+            status_code=_UPLOAD_REJECTION_STATUS.get(exc.code, status.HTTP_400_BAD_REQUEST),
             detail={"code": exc.code, "message": exc.reason},
         ) from exc
     except KnowledgeCanaryError as exc:
@@ -186,9 +190,7 @@ async def get_document(
                     top_k=5,
                 )
                 found = any(r.document_id == document_id for r in results)
-                canary = CanaryStatus(
-                    query=query, found=found, checked_at=datetime.now(UTC)
-                )
+                canary = CanaryStatus(query=query, found=found, checked_at=datetime.now(UTC))
 
     return DocumentDetailResponse(document=_to_document_response(record), canary=canary)
 
@@ -197,15 +199,25 @@ async def get_document(
 async def delete_document(
     document_id: str,
     ingestion_service: KnowledgeIngestionService = Depends(get_ingestion_service),
+    document_repo: DocumentRepository = Depends(get_document_repo),
 ) -> DocumentDeleteResponse:
+    record = document_repo.get(document_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    if record["applicability"].get("source") == "official_corpus":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "El corpus oficial está protegido. La demostración learn/forget "
+                "solo permite eliminar documentos de prueba cargados por el evaluador."
+            ),
+        )
     try:
         result = await ingestion_service.forget(document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Documento no encontrado") from exc
     except DocumentAlreadyDeletedError as exc:
-        raise HTTPException(
-            status_code=409, detail="El documento ya está eliminado"
-        ) from exc
+        raise HTTPException(status_code=409, detail="El documento ya está eliminado") from exc
     except KnowledgeCanaryError as exc:
         logger.exception("knowledge_forget_canary_failed")
         raise HTTPException(

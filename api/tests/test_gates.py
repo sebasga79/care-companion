@@ -152,6 +152,8 @@ def test_agent_asks_the_next_checklist_question(client: TestClient) -> None:
 
     message = response_env["payload"]["message"]
     assert "?" in message, f"el agente debe conducir la entrevista preguntando; dijo: {message!r}"
+    assert "gracias por contarme" not in message.lower()
+    assert message.lower().startswith("buenas tardes")
 
 
 def test_greeting_alone_does_not_escalate_the_call(client: TestClient) -> None:
@@ -184,6 +186,208 @@ def test_greeting_alone_does_not_escalate_the_call(client: TestClient) -> None:
                     f"la llamada terminó en {state_env['payload']['state']} tras un saludo "
                     f"(turno {seq}: {text!r})"
                 )
+
+
+def test_denied_pain_skips_irrelevant_location_questions(client: TestClient) -> None:
+    case_id = client.get("/api/v1/cases").json()[0]["case_id"]
+    session_id = client.post("/api/v1/sessions", json={"case_id": case_id}).json()["id"]
+
+    with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
+        ws.send_json(
+            {
+                "v": 1,
+                "type": "client.turn_text",
+                "seq": 1,
+                "payload": {"text": "No tengo dolor"},
+            }
+        )
+        ws.receive_json()
+        response = ws.receive_json()
+        ws.receive_json()
+
+    message = response["payload"]["message"].lower()
+    assert "parte exacta" not in message
+    assert "sentido en general" in message
+
+
+def test_plain_pain_is_characterized_before_general_checklist(client: TestClient) -> None:
+    """Dolor sin adjetivos también exige localización antes de avanzar."""
+    case_id = client.get("/api/v1/cases").json()[0]["case_id"]
+    session_id = client.post("/api/v1/sessions", json={"case_id": case_id}).json()["id"]
+
+    with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
+        ws.send_json(
+            {
+                "v": 1,
+                "type": "client.turn_text",
+                "seq": 1,
+                "payload": {"text": "Un poco mejor, pero tengo dolor"},
+            }
+        )
+        ws.receive_json()
+        response = ws.receive_json()
+        decision = ws.receive_json()
+
+    message = response["payload"]["message"].lower()
+    assert "parte exacta" in message
+    assert "estado general" not in message
+    assert decision["payload"]["escalated"] is False
+
+
+def test_unspecified_distress_gets_one_urgent_screen_before_decision(
+    client: TestClient,
+) -> None:
+    """ "Muy mal" no inventa una urgencia; una señal concreta sí escala."""
+    case_id = client.get("/api/v1/cases").json()[0]["case_id"]
+    session_id = client.post("/api/v1/sessions", json={"case_id": case_id}).json()["id"]
+
+    with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
+        ws.send_json({"v": 1, "type": "client.turn_text", "seq": 1, "payload": {"text": "Muy mal"}})
+        vague_state = ws.receive_json()
+        vague_response = ws.receive_json()
+        vague_decision = ws.receive_json()
+
+        assert vague_state["payload"]["state"] == "interviewing"
+        assert vague_response["payload"]["needs_clarification"] is True
+        screen = vague_response["payload"]["message"].lower()
+        assert "qué siente exactamente" in screen
+        assert "dificultad para respirar" in screen
+        assert vague_decision["payload"]["escalated"] is False
+
+        ws.send_json(
+            {
+                "v": 1,
+                "type": "client.turn_text",
+                "seq": 2,
+                "payload": {"text": "No puedo respirar y siento que me voy a desmayar"},
+            }
+        )
+        escalated_state = ws.receive_json()
+        escalated_response = ws.receive_json()
+        escalated_decision = ws.receive_json()
+
+    assert escalated_state["payload"]["state"] == "escalated"
+    assert escalated_decision["payload"]["level"] == "HARD_RED_FLAG"
+    assert escalated_decision["payload"]["escalated"] is True
+    assert "reporte" in escalated_response["payload"]["message"].lower()
+
+
+def test_wound_description_without_repeating_subject_advances(client: TestClient) -> None:
+    """ "Está roja e inflamada" responde la pregunta sobre la herida.
+
+    Regresión de un bucle observado en vivo: el adapter solo reconocía la
+    respuesta si el paciente volvía a decir literalmente "herida".
+    """
+    case_id = client.get("/api/v1/cases").json()[0]["case_id"]
+    session_id = client.post("/api/v1/sessions", json={"case_id": case_id}).json()["id"]
+
+    turns = (
+        "No tengo dolor",
+        "Me siento normal",
+        "Puedo tomar líquidos y estoy comiendo alimentos licuados",
+        "Estoy en temperatura normal, sin fiebre",
+        "Está un poco roja y tiene un poquito de inflamación, no sé si sea normal",
+    )
+
+    with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
+        responses: list[str] = []
+        for seq, text in enumerate(turns, start=1):
+            ws.send_json(
+                {"v": 1, "type": "client.turn_text", "seq": seq, "payload": {"text": text}}
+            )
+            ws.receive_json()
+            responses.append(ws.receive_json()["payload"]["message"])
+            decision = ws.receive_json()
+            assert decision["payload"]["escalated"] is False
+
+    wound_response = responses[-1].lower()
+    assert "cómo se ve la herida" not in wound_response
+    assert "aspecto de la herida" not in wound_response
+    assert "movilidad" in wound_response
+    opening_phrases = {message.split(".", maxsplit=1)[0] for message in responses}
+    assert len(opening_phrases) >= 3, "el agente no debe repetir el mismo acuse en cada turno"
+
+
+def test_pain_is_characterized_then_handoff_collects_contacts_and_closes(
+    client: TestClient,
+) -> None:
+    """Dolor fuerte aislado se caracteriza; empeoramiento explícito escala.
+
+    Tras el handoff se confirman dos teléfonos y la llamada se cierra sola.
+    """
+    case_id = client.get("/api/v1/cases").json()[0]["case_id"]
+    session_id = client.post("/api/v1/sessions", json={"case_id": case_id}).json()["id"]
+
+    with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
+        ws.send_json(
+            {"v": 1, "type": "client.turn_text", "seq": 1, "payload": {"text": "buenas tardes"}}
+        )
+        ws.receive_json()  # server.state
+        ws.receive_json()  # server.agent_response
+        greeting_decision = ws.receive_json()
+        assert greeting_decision["payload"]["should_escalate"] is False
+
+        def send_turn(seq: int, text: str) -> tuple[dict, dict, dict]:
+            ws.send_json(
+                {"v": 1, "type": "client.turn_text", "seq": seq, "payload": {"text": text}}
+            )
+            return ws.receive_json(), ws.receive_json(), ws.receive_json()
+
+        pain_state, pain_response, pain_decision = send_turn(
+            2, "Sigo muy inflamado y me duele mucho, tengo mucho dolor"
+        )
+        assert pain_state["payload"]["state"] == "interviewing"
+        assert "parte exacta" in pain_response["payload"]["message"].lower()
+        assert pain_decision["payload"]["should_escalate"] is False
+
+        _, location_response, _ = send_turn(3, "En el lado derecho del abdomen")
+        assert "0 a 10" in location_response["payload"]["message"]
+
+        _, severity_response, _ = send_turn(4, "Es un nueve de diez")
+        assert "mejorando" in severity_response["payload"]["message"].lower()
+
+        state_env, response_env, decision_env = send_turn(5, "Ha empeorado, cada vez está peor")
+        assert state_env["payload"]["state"] == "escalated"
+        assert response_env["payload"]["intent"] == "handoff"
+        assert "número principal" in response_env["payload"]["message"].lower()
+
+        primary_state, primary_response, _ = send_turn(6, "300 123 4567")
+        assert primary_state["payload"]["state"] == "escalated"
+        assert "número adicional" in primary_response["payload"]["message"].lower()
+
+        ws.send_json(
+            {
+                "v": 1,
+                "type": "client.turn_text",
+                "seq": 7,
+                "payload": {"text": "604 555 1234"},
+            }
+        )
+        closed_state = ws.receive_json()
+        closed_response = ws.receive_json()
+        ws.receive_json()  # server.decision
+        summary_env = ws.receive_json()
+
+    message = response_env["payload"]["message"].lower()
+    assert decision_env["payload"] == {
+        "level": "HARD_RED_FLAG",
+        "should_escalate": True,
+        "escalated": True,
+    }
+    assert "valoración médica urgente" in message
+    assert "dentro de lo esperado" not in message
+    assert closed_state["payload"]["state"] == "closed"
+    assert "finalizar la llamada" in closed_response["payload"]["message"].lower()
+    assert summary_env["type"] == "server.summary"
+    assert summary_env["payload"]["handoff"]["status"] == "created"
+    contact_codes = {item["code"] for item in summary_env["payload"]["patient_reported"]}
+    assert {"CONTACT_PRIMARY", "CONTACT_EMERGENCY"} <= contact_codes
+
+    trace = client.get(f"/api/v1/audit/sessions/{session_id}/trace").json()
+    assert {contact["code"] for contact in trace["contacts"]} == {
+        "CONTACT_PRIMARY",
+        "CONTACT_EMERGENCY",
+    }
 
 
 # ---------------------------------------------------------------------------

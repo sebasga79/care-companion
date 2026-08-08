@@ -15,7 +15,7 @@ const STATE_CONTENT: Record<
   ready: {
     icon: "○",
     label: "Listo para iniciar",
-    copy: "Selecciona un caso ficticio para comenzar la llamada.",
+    copy: "Selecciona un paciente para comenzar la llamada de seguimiento.",
   },
   listening: {
     icon: "●",

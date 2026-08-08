@@ -16,14 +16,76 @@ _TRIAGE_MARKER = "evaluador de riesgo estructurado"
 _RESPONSE_MARKER = "asistente de voz de seguimiento postoperatorio"
 
 _ROUTINE_OBSERVATIONS = [
-    {"code": "GENERAL_STATE", "label": "ánimo", "certainty": "confirmed",
-     "original_text": "bien, jugando", "normalized_text": None},
-    {"code": "FEVER", "label": "fiebre", "certainty": "denied",
-     "original_text": "no, fresquito", "normalized_text": None},
-    {"code": "WOUND_APPEARANCE", "label": "aspecto de la herida", "certainty": "confirmed",
-     "original_text": "se ve limpia y seca", "normalized_text": None},
-    {"code": "INTAKE", "label": "líquidos y comida", "certainty": "confirmed",
-     "original_text": "comió arroz sin problema", "normalized_text": None},
+    {
+        "code": "PAIN",
+        "label": "dolor",
+        "certainty": "denied",
+        "original_text": "no tiene dolor",
+        "normalized_text": None,
+    },
+    {
+        "code": "PAIN_LOCATION",
+        "label": "lugar",
+        "certainty": "denied",
+        "original_text": "no aplica",
+        "normalized_text": None,
+    },
+    {
+        "code": "PAIN_SEVERITY",
+        "label": "intensidad",
+        "certainty": "denied",
+        "original_text": "no aplica",
+        "normalized_text": None,
+    },
+    {
+        "code": "PAIN_EVOLUTION",
+        "label": "evolución",
+        "certainty": "denied",
+        "original_text": "no aplica",
+        "normalized_text": None,
+    },
+    {
+        "code": "GENERAL_STATE",
+        "label": "ánimo",
+        "certainty": "confirmed",
+        "original_text": "bien, jugando",
+        "normalized_text": None,
+    },
+    {
+        "code": "INTAKE",
+        "label": "líquidos y comida",
+        "certainty": "confirmed",
+        "original_text": "comió arroz sin problema",
+        "normalized_text": None,
+    },
+    {
+        "code": "FEVER",
+        "label": "fiebre",
+        "certainty": "denied",
+        "original_text": "no, fresquito",
+        "normalized_text": None,
+    },
+    {
+        "code": "WOUND_APPEARANCE",
+        "label": "aspecto de la herida",
+        "certainty": "confirmed",
+        "original_text": "se ve limpia y seca",
+        "normalized_text": None,
+    },
+    {
+        "code": "MOBILITY",
+        "label": "movilidad",
+        "certainty": "confirmed",
+        "original_text": "camina sin problema",
+        "normalized_text": None,
+    },
+    {
+        "code": "SLEEP",
+        "label": "sueño",
+        "certainty": "confirmed",
+        "original_text": "durmió bien",
+        "normalized_text": None,
+    },
 ]
 
 
@@ -34,15 +96,23 @@ def _client_with_scripted_llm(clean_env: None) -> tuple[TestClient, ScriptedFake
         (
             _INTERVIEW_MARKER,
             json.dumps(
-                {"needs_clarification": False, "clarification_question": None,
-                 "next_question": None, "observations": _ROUTINE_OBSERVATIONS}
+                {
+                    "needs_clarification": False,
+                    "clarification_question": None,
+                    "next_question": None,
+                    "observations": _ROUTINE_OBSERVATIONS,
+                }
             ),
         ),
         (
             _TRIAGE_MARKER,
             json.dumps(
-                {"model_level": "ROUTINE_FOLLOW_UP", "rationale": "sin hallazgos",
-                 "missing_information": [], "patient_message_intent": "explain_routine_follow_up"}
+                {
+                    "model_level": "ROUTINE_FOLLOW_UP",
+                    "rationale": "sin hallazgos",
+                    "missing_information": [],
+                    "patient_message_intent": "explain_routine_follow_up",
+                }
             ),
         ),
         (_RESPONSE_MARKER, "Qué bueno escuchar eso, todo se ve dentro de lo esperado."),
@@ -74,7 +144,9 @@ def test_ws_full_turn_cycle_sends_versioned_envelopes_with_monotonic_seq(
     with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
         ws.send_json(
             {
-                "v": 1, "type": "client.turn_text", "seq": 1,
+                "v": 1,
+                "type": "client.turn_text",
+                "seq": 1,
                 "payload": {"text": "hoy amaneció jugando, comió normal"},
                 "correlation_id": "corr-turn-1",
             }
@@ -92,7 +164,7 @@ def test_ws_full_turn_cycle_sends_versioned_envelopes_with_monotonic_seq(
     assert [e["seq"] for e in (state_env, response_env, decision_env, summary_env)] == [1, 2, 3, 4]
 
     assert state_env["type"] == "server.state"
-    assert state_env["payload"]["state"] == "summarizing"
+    assert state_env["payload"]["state"] == "closed"
 
     assert response_env["type"] == "server.agent_response"
     assert response_env["payload"]["message"]
@@ -118,7 +190,9 @@ def test_ws_turn_persists_conversational_latency_event(clean_env: None) -> None:
     with client.websocket_connect(f"/ws/sessions/{session_id}") as ws:
         ws.send_json(
             {
-                "v": 1, "type": "client.turn_text", "seq": 1,
+                "v": 1,
+                "type": "client.turn_text",
+                "seq": 1,
                 "payload": {"text": "hoy amaneció jugando, comió normal"},
                 "correlation_id": "corr-latency-1",
             }
@@ -152,7 +226,9 @@ def test_ws_unsupported_message_type_errors_without_closing_connection(
         # la conexión sigue viva: un turno válido después del error funciona.
         ws.send_json(
             {
-                "v": 1, "type": "client.turn_text", "seq": 2,
+                "v": 1,
+                "type": "client.turn_text",
+                "seq": 2,
                 "payload": {"text": "hoy amaneció jugando, comió normal"},
             }
         )
@@ -175,9 +251,7 @@ def test_ws_invalid_payload_returns_server_error(clean_env: None) -> None:
 def test_ws_unknown_session_returns_server_error(clean_env: None) -> None:
     client, _llm = _client_with_scripted_llm(clean_env)
 
-    with client.websocket_connect(
-        "/ws/sessions/00000000-0000-0000-0000-000000000000"
-    ) as ws:
+    with client.websocket_connect("/ws/sessions/00000000-0000-0000-0000-000000000000") as ws:
         ws.send_json({"v": 1, "type": "client.turn_text", "seq": 1, "payload": {"text": "hola"}})
         error_env = ws.receive_json()
         assert error_env["type"] == "server.error"
@@ -196,8 +270,13 @@ def test_ws_clarification_turn_does_not_emit_summary(clean_env: None) -> None:
                     "clarification_question": "¿A qué se refiere con 'maluca'?",
                     "next_question": None,
                     "observations": [
-                        {"code": "GENERAL_STATE", "label": "ánimo", "certainty": "uncertain",
-                         "original_text": "la vi maluca", "normalized_text": None}
+                        {
+                            "code": "GENERAL_STATE",
+                            "label": "ánimo",
+                            "certainty": "uncertain",
+                            "original_text": "la vi maluca",
+                            "normalized_text": None,
+                        }
                     ],
                 }
             ),

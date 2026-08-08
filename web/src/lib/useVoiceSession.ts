@@ -28,6 +28,9 @@ export interface VoiceSession {
   speaking: boolean;
   partial: string;
   start: () => void;
+  /** Detiene solo STT; no cancela una locución TTS actual o pendiente. */
+  stopListening: () => void;
+  /** Apagado total: detiene STT y cancela TTS. */
   stop: () => void;
   speak: (text: string) => void;
   cancelSpeech: () => void;
@@ -311,13 +314,9 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
     }
   }, [lang, isEcho]);
 
-  const stop = useCallback(() => {
+  const stopListening = useCallback(() => {
     wantListeningRef.current = false;
     pausedForTtsRef.current = false;
-    if (ttsWatchdogRef.current) {
-      clearTimeout(ttsWatchdogRef.current);
-      ttsWatchdogRef.current = null;
-    }
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
     if (recognition) {
@@ -326,8 +325,16 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
     }
     setListening(false);
     setPartial("");
+  }, []);
+
+  const stop = useCallback(() => {
+    stopListening();
+    if (ttsWatchdogRef.current) {
+      clearTimeout(ttsWatchdogRef.current);
+      ttsWatchdogRef.current = null;
+    }
     cancelSpeech();
-  }, [cancelSpeech]);
+  }, [cancelSpeech, stopListening]);
 
   useEffect(() => {
     return () => {
@@ -342,5 +349,15 @@ export function useVoiceSession(options: VoiceSessionOptions): VoiceSession {
     };
   }, []);
 
-  return { supported, listening, speaking, partial, start, stop, speak, cancelSpeech };
+  return {
+    supported,
+    listening,
+    speaking,
+    partial,
+    start,
+    stopListening,
+    stop,
+    speak,
+    cancelSpeech,
+  };
 }

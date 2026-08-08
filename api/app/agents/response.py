@@ -22,21 +22,30 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.agents.support import AgentInvocationError, invoke_structured
-from app.domain.models import AgentRequest, AgentResult, CitationRef
+from app.domain.decision import DecisionLevel
+from app.domain.models import AgentRequest, AgentResult, CitationRef, UsageMetrics
 from app.ports.llm import LLMMessage, LLMPort
 
 Intent = Literal["grounded_answer", "abstain", "handoff"]
+
+SAFE_HANDOFF_VERSION = "safe-handoff-v1"
 
 _BASE_SYSTEM_PROMPT = (
     "Eres el asistente de voz de seguimiento postoperatorio de Care "
     "Companion. Hablas español natural, cálido y CONCISO (2-4 frases, "
     "hablable, sin listas ni JSON). Nunca diagnosticas, prescribes ni "
-    "cambias un tratamiento. Nunca prometes una acción clínica real que no "
-    "ejecutas (eres un prototipo de apoyo, no un canal de emergencias).\n\n"
+    "cambias un tratamiento. Solo confirmas acciones que el flujo realmente "
+    "persistió, como el envío del reporte al equipo de revisión.\n\n"
     "Tú CONDUCES la llamada de seguimiento: no te limites a reaccionar. Si "
     "el contexto incluye una SIGUIENTE PREGUNTA DEL SEGUIMIENTO, cierra tu "
     "respuesta formulándola de forma natural, en tus palabras. No repitas "
-    "una pregunta que el paciente ya respondió en este mismo turno."
+    "una pregunta que el paciente ya respondió en este mismo turno. Si el "
+    "paciente solo saluda, responde el saludo antes de continuar. No uses "
+    "muletillas fijas como 'Gracias por contarme' en cada turno: reconoce "
+    "solo cuando aporta valor y varía u omite la transición. Tampoco abras "
+    "cada respuesta con 'De acuerdo' o 'Lo tengo presente': cuando exista un "
+    "cambio frente a los seguimientos anteriores, nómbralo brevemente con los "
+    "valores disponibles antes de preguntar por el estado actual."
 )
 
 _GROUNDED_INSTRUCTIONS = (
@@ -51,18 +60,20 @@ _GROUNDED_INSTRUCTIONS = (
 _ABSTAIN_INSTRUCTIONS = (
     "\n\nNO tienes evidencia verificada y aplicable para responder esta "
     "pregunta o hallazgo. NO afirmes NINGÚN hecho clínico, NO inventes una "
-    "respuesta plausible desde conocimiento general. Explica con claridad "
-    "que no cuentas con información verificada en tus fuentes actuales en "
-    "este momento, y que vas a dejarlo registrado / redirigir al equipo "
-    "médico tratante real."
+    "respuesta plausible desde conocimiento general. Si el paciente pidió "
+    "orientación clínica, explica con claridad que no cuentas con información "
+    "verificada y que vas a dejarlo registrado / redirigir al equipo médico. "
+    "Si solo saludó o reportó información y hay una siguiente pregunta, NO "
+    "recites esa abstención: responde el saludo o reconoce brevemente el dato "
+    "y continúa la entrevista."
 )
 
 _HANDOFF_INSTRUCTIONS = (
     "\n\nEsta llamada se está escalando a revisión humana. Comunica la "
-    "acción de forma clara, tranquila y SIN lenguaje alarmista: explica "
-    "qué se observó (en términos generales, sin diagnosticar) y que una "
-    "persona del equipo va a revisar el caso. No prometas una llamada o "
-    "acción inmediata que el sistema no ejecuta realmente."
+    "acción de forma clara, tranquila y SIN lenguaje alarmista. El registro "
+    "de handoff ya fue creado, por lo que puedes confirmar que el reporte fue "
+    "enviado al equipo de atención. Indica que una persona lo contactará y "
+    "solicita el número principal donde puede recibir la llamada."
 )
 
 
@@ -76,9 +87,13 @@ def _parse_response_text(text: str) -> str:
 class ResponseTurnInput(BaseModel):
     evidence_sufficient: bool = False
     should_escalate: bool = False
+    decision_level: DecisionLevel = DecisionLevel.ROUTINE_FOLLOW_UP
+    trigger_codes: list[str] = Field(default_factory=list)
     evidence_fragments: list[dict] = Field(default_factory=list)
     observations_summary: list[str] = Field(default_factory=list)
     patient_question_or_context: str = ""
+    case_context: dict = Field(default_factory=dict)
+    prior_followups: list[dict] = Field(default_factory=list)
     # Siguiente pregunta del checklist de entrevista, decidida por
     # `InterviewAgent` (CON-002). Bug real corregido: este campo no existía y
     # `next_question` solo se usaba como consulta de retrieval, así que el
@@ -96,6 +111,19 @@ class ResponseAgent:
     async def run(self, request: AgentRequest) -> AgentResult:
         turn_input = ResponseTurnInput.model_validate(request.payload)
         intent = _select_intent(turn_input)
+
+        # El mensaje que comunica una alerta dura no puede depender de que
+        # otro LLM interprete correctamente el prompt. El incidente que
+        # motivó SAFE-001 mostró exactamente ese modo de falla: la decisión
+        # debía escalar, pero el texto visible tranquilizaba al paciente.
+        # Para handoff usamos una respuesta determinista, honesta sobre las
+        # nivel de decisión y abre la recolección de datos de contacto.
+        if intent == "handoff":
+            return AgentResult(
+                status="ok",
+                output={"message": _safe_handoff_message(turn_input), "intent": intent},
+                usage=UsageMetrics(provider="deterministic", model=SAFE_HANDOFF_VERSION),
+            )
 
         messages = [
             LLMMessage(role="system", content=_system_prompt_for(intent)),
@@ -142,6 +170,67 @@ def _select_intent(turn_input: ResponseTurnInput) -> Intent:
     return "abstain"
 
 
+_TRIGGER_LABELS: dict[str, str] = {
+    "HIGH_FEVER": "una temperatura muy alta reportada",
+    "PAIN_WORSENING": "dolor intenso, persistente o que empeora",
+    "BREATHING_DIFFICULTY": "dificultad para respirar",
+    "ALTERED_CONSCIOUSNESS": "desmayo, pérdida de conciencia o confusión",
+    "BLEEDING": "sangrado",
+    "EMERGENCY_CONCERN": "una solicitud explícita de atención urgente",
+    "VOMITING_WITH_PAIN": "intolerancia a alimentos o líquidos junto con dolor",
+    "FEVER_WITH_WOUND_DISCHARGE": "fiebre junto con cambios en la herida",
+    "POSTOP_DETERIORATION_WITH_WOUND": (
+        "fiebre, dolor alto y enrojecimiento o inflamación de la herida"
+    ),
+    "POSTOP_DETERIORATION_WITH_INTAKE": (
+        "fiebre, dolor alto e intolerancia a los alimentos o líquidos"
+    ),
+}
+
+
+def _safe_handoff_message(turn_input: ResponseTurnInput) -> str:
+    """Mensaje no generativo para decisiones que implican escalamiento.
+
+    En HARD_RED_FLAG comunica urgencia sin diagnosticar. Para fallos de
+    datos/evidencia o riesgo reportado por el modelo comunica revisión
+    humana y abre la confirmación de contacto.
+    """
+    if turn_input.decision_level is DecisionLevel.HARD_RED_FLAG:
+        labels = [
+            _TRIGGER_LABELS[code] for code in turn_input.trigger_codes if code in _TRIGGER_LABELS
+        ]
+        observed = f" Detecté {', '.join(labels)}." if labels else " Detecté señales de alarma."
+        immediate_emergency = bool(
+            {
+                "EMERGENCY_CONCERN",
+                "BREATHING_DIFFICULTY",
+                "ALTERED_CONSCIOUSNESS",
+                "BLEEDING",
+            }
+            & set(turn_input.trigger_codes)
+        )
+        emergency_instruction = (
+            " No espere la devolución de llamada: contacte ahora los servicios de "
+            "emergencia de su zona o pídale a alguien cercano que lo haga."
+            if immediate_emergency
+            else ""
+        )
+        return (
+            "Voy a detener el cuestionario de seguimiento."
+            f"{observed} Necesita valoración médica urgente.{emergency_instruction} "
+            "Ya envié el reporte al "
+            "equipo de atención prioritaria para "
+            "revisión inmediata y una persona lo contactará. ¿Cuál es el número "
+            "principal donde pueden comunicarse con usted?"
+        )
+
+    return (
+        "Por seguridad, envié el reporte al equipo de atención para revisión humana. "
+        "Una persona lo contactará para continuar el seguimiento. ¿Cuál es el número "
+        "principal donde pueden comunicarse con usted?"
+    )
+
+
 def _system_prompt_for(intent: Intent) -> str:
     extra = {
         "grounded_answer": _GROUNDED_INSTRUCTIONS,
@@ -152,7 +241,16 @@ def _system_prompt_for(intent: Intent) -> str:
 
 
 def _build_user_prompt(intent: Intent, turn_input: ResponseTurnInput) -> str:
-    lines = ["## Contexto del turno"]
+    lines = ["## Contexto conocido del caso (no es un síntoma actual)"]
+    lines.append(str(turn_input.case_context) if turn_input.case_context else "(sin contexto)")
+    lines.append("\n## Seguimientos anteriores (no asumir vigencia hoy)")
+    if turn_input.prior_followups:
+        for followup in turn_input.prior_followups:
+            lines.append(f"- {followup}")
+    else:
+        lines.append("(ninguno)")
+
+    lines.append("\n## Contexto del turno actual")
     lines.append(turn_input.patient_question_or_context or "(sin pregunta explícita)")
 
     if turn_input.observations_summary:
@@ -179,4 +277,4 @@ def _build_user_prompt(intent: Intent, turn_input: ResponseTurnInput) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["ResponseAgent", "ResponseTurnInput"]
+__all__ = ["ResponseAgent", "ResponseTurnInput", "SAFE_HANDOFF_VERSION"]

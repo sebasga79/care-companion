@@ -21,6 +21,43 @@ const RISK_OPTIONS: { value: RiskLevel; label: string }[] = [
   { value: "failed_safe", label: "Seguridad" },
 ];
 
+const DECISION_LABEL: Record<string, string> = {
+  HARD_RED_FLAG: "Atención prioritaria",
+  DATA_INTEGRITY_FAILURE: "Revisión por seguridad",
+  EVIDENCE_INSUFFICIENT_WITH_RISK: "Riesgo por confirmar",
+  MODEL_HIGH_RISK: "Riesgo alto",
+  MODEL_MODERATE_RISK: "Riesgo moderado",
+  ROUTINE_FOLLOW_UP: "Seguimiento rutinario",
+};
+
+const SESSION_LABEL: Record<string, string> = {
+  created: "Creada",
+  interviewing: "En llamada",
+  closed: "Finalizada",
+  escalated: "Escalada",
+  fail_safe: "Detenida por seguridad",
+};
+
+const EVENT_LABEL: Record<string, string> = {
+  "session.agent_opened": "Llamada iniciada por el agente",
+  "turn.received": "Turno recibido",
+  "agent.interview.completed": "Información clínica interpretada",
+  "rag.retrieval.completed": "Evidencia clínica recuperada",
+  "agent.triage.completed": "Riesgo evaluado",
+  "agent.response.completed": "Respuesta preparada",
+  "turn.response_sent": "Respuesta enviada",
+  "handoff.created": "Reporte enviado a revisión humana",
+  "escalation.created": "Alerta humana registrada",
+  "handoff.contact_completed": "Teléfonos de contacto confirmados",
+  "safety.signals_detected": "Señales de seguridad verificadas",
+};
+
+function displayClinicalValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "Sin dato confirmado";
+  if (typeof value === "boolean") return value ? "Sí" : "No";
+  return String(value).replaceAll("_", " ");
+}
+
 export default function AuditPage() {
   const [filters, setFilters] = useState<AuditFilters>({});
   const [rows, setRows] = useState<AuditSessionRow[]>([]);
@@ -53,10 +90,25 @@ export default function AuditPage() {
           return false;
         if (nextFilters.dateFrom && row.startedAt < nextFilters.dateFrom) return false;
         if (nextFilters.dateTo && row.startedAt > `${nextFilters.dateTo}T23:59:59`) return false;
+        if (
+          nextFilters.procedure &&
+          !row.procedure?.toLocaleLowerCase("es").includes(nextFilters.procedure.toLocaleLowerCase("es"))
+        )
+          return false;
         return true;
       });
       setRows(filtered);
       setError(null);
+      const preferred =
+        filtered.find((row) => row.sessionId === selectedId) ??
+        filtered.find((row) => row.state === "closed" || row.state === "escalated") ??
+        filtered[0];
+      if (preferred && preferred.sessionId !== selectedId) {
+        await selectSession(preferred.sessionId);
+      } else if (!preferred) {
+        setSelectedId(null);
+        setTrace(null);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error desconocido.");
     } finally {
@@ -72,11 +124,14 @@ export default function AuditPage() {
     fetchSessions(nextFilters);
   }
 
+  // The fetch function intentionally owns the initial selection as well as
+  // the list request; it is stable for this mount-only initialization.
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useEffect(() => {
     // Standard mount-time fetch of the unfiltered session list.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchSessions({});
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
   return (
     <section aria-labelledby="audit-heading">
@@ -91,7 +146,7 @@ export default function AuditPage() {
           </p>
         </div>
         <div className="hero-actions">
-          <span className="chip chip-simulation">Sesiones reales del backend · sin datos precargados</span>
+          <span className="chip chip-simulation">{rows.length} sesiones visibles · datos del backend</span>
         </div>
       </div>
 
@@ -198,11 +253,15 @@ export default function AuditPage() {
             <table className="document-table">
               <thead>
                 <tr>
+                  <th scope="col">Paciente</th>
+                  <th scope="col">Procedimiento</th>
                   <th scope="col">Inicio</th>
                   <th scope="col">Estado</th>
-                  <th scope="col">Nivel de decisión</th>
+                  <th scope="col">Resultado</th>
                   <th scope="col">Fuentes</th>
-                  <th scope="col">Escalamiento</th>
+                  <th scope="col">
+                    <span className="sr-only">Acciones</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -226,11 +285,35 @@ export default function AuditPage() {
                           : undefined,
                     }}
                   >
+                    <td><strong>{row.patientDisplayName ?? "Paciente no identificado"}</strong></td>
+                    <td>
+                      {row.procedure ?? "—"}
+                      {row.surgeryDate ? <small className="audit-cell-detail">Cirugía: {new Date(`${row.surgeryDate}T00:00:00`).toLocaleDateString("es")}</small> : null}
+                    </td>
                     <td>{new Date(row.startedAt).toLocaleString("es")}</td>
-                    <td>{row.state}</td>
-                    <td translate="no">{row.decisionLevel ?? "—"}</td>
+                    <td>{SESSION_LABEL[row.state] ?? row.state}</td>
+                    <td>
+                      {row.decisionLevel ? DECISION_LABEL[row.decisionLevel] : "Sin decisión"}
+                      {row.escalated ? <small className="audit-cell-detail risk">Reporte humano enviado</small> : null}
+                    </td>
                     <td>{row.citationCount}</td>
-                    <td>{row.escalated ? "Sí" : "No"}</td>
+                    {/* Botón explícito (hallazgo H-08 del video): la fila
+                        completa sigue siendo clickeable, pero que lo sea no
+                        era evidente para nadie que viera la tabla por
+                        primera vez. */}
+                    <td>
+                      <button
+                        type="button"
+                        className="audit-detail-btn"
+                        aria-current={selectedId === row.sessionId ? "true" : undefined}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          selectSession(row.sessionId);
+                        }}
+                      >
+                        {selectedId === row.sessionId ? "Viendo" : "Ver detalle"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -266,7 +349,8 @@ export default function AuditPage() {
             <ol className="trace-timeline" style={{ margin: 0, paddingLeft: 18 }}>
               {trace.events.map((event, index) => (
                 <li key={`${event.correlationId}-${index}`} style={{ marginBottom: 10 }}>
-                  <strong translate="no">{event.component}</strong> · {event.eventType}
+                  <strong>{EVENT_LABEL[event.eventType] ?? event.eventType}</strong>
+                  <span style={{ opacity: 0.7 }}> · {event.component}</span>
                   {event.latencyMs != null ? (
                     <span style={{ opacity: 0.7 }}> · {event.latencyMs.toFixed(0)} ms</span>
                   ) : null}
@@ -301,9 +385,41 @@ export default function AuditPage() {
             />
           ) : (
             <div>
+              {trace.followupRecord ? (
+                <div className="followup-audit-card">
+                  <div className="followup-audit-heading">
+                    <strong>Seguimiento clínico consolidado</strong>
+                    <span className={`chip ${trace.followupRecord.medicalTeamAlert ? "chip-simulation" : "chip-neutral"}`}>
+                      {trace.followupRecord.medicalTeamAlert ? "Alerta enviada" : "Sin alerta"}
+                    </span>
+                  </div>
+                  <dl className="followup-audit-grid">
+                    {[
+                      ["Dolor", trace.followupRecord.painNrs, "/10"],
+                      ["Temperatura", trace.followupRecord.temperatureC, " °C"],
+                      ["Movilidad", trace.followupRecord.mobility, ""],
+                      ["Herida", trace.followupRecord.wound, ""],
+                      ["Alimentación", trace.followupRecord.appetite, ""],
+                      ["Sueño", trace.followupRecord.sleep, ""],
+                    ].map(([label, field, suffix]) => {
+                      const clinicalField = field as typeof trace.followupRecord.painNrs;
+                      return (
+                        <div key={label as string}>
+                          <dt>{label as string}</dt>
+                          <dd>
+                            {clinicalField
+                              ? `${displayClinicalValue(clinicalField.value)}${suffix as string}`
+                              : "No evaluado"}
+                          </dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
+                </div>
+              ) : null}
               {trace.decisions.map((decision, index) => (
                 <div key={index} className="trace-decision" style={{ marginBottom: 12 }}>
-                  <strong translate="no">{decision.level}</strong>
+                  <strong>{DECISION_LABEL[decision.level] ?? decision.level}</strong>
                   {decision.shouldEscalate ? (
                     <span className="chip chip-simulation" style={{ marginLeft: 8 }}>
                       escala
@@ -315,9 +431,23 @@ export default function AuditPage() {
                 </div>
               ))}
               {trace.escalations.length > 0 ? (
-                <p style={{ fontSize: 13 }}>
-                  <strong>{trace.escalations.length}</strong> escalamiento(s) registrado(s).
-                </p>
+                <>
+                  <p style={{ fontSize: 13 }}>
+                    <strong>{trace.escalations.length}</strong> escalamiento(s) registrado(s).
+                  </p>
+                  {trace.contacts.length > 0 ? (
+                    <div className="trace-decision" style={{ marginTop: 12 }}>
+                      <strong>Datos para contacto inmediato</strong>
+                      {trace.contacts.map((contact) => (
+                        <p key={contact.code} style={{ margin: "6px 0 0", fontSize: 13 }}>
+                          {contact.label}: <strong>{contact.value}</strong>
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: 13 }}>Esperando confirmación de teléfonos.</p>
+                  )}
+                </>
               ) : null}
             </div>
           )}

@@ -73,7 +73,7 @@ router = APIRouter(tags=["sessions"])
 
 ENVELOPE_VERSION = 1
 
-_SUMMARY_STATES = frozenset({SessionState.SUMMARIZING, SessionState.FAIL_SAFE})
+_SUMMARY_STATES = frozenset({SessionState.SUMMARIZING, SessionState.CLOSED, SessionState.FAIL_SAFE})
 
 
 class ClientTurnText(BaseModel):
@@ -129,7 +129,9 @@ def _log_turn_latency(
     try:
         event_repo: EventRepository = websocket.app.state.event_repo
         event_repo.add_event(
-            session_id=session_id, correlation_id=correlation_id, component="ws",
+            session_id=session_id,
+            correlation_id=correlation_id,
+            component="ws",
             event_type="turn.response_sent",
             payload={"state": state, "intent": intent},
             latency_ms=latency_ms,
@@ -137,7 +139,8 @@ def _log_turn_latency(
     except Exception:
         logger.exception(
             "turn_latency_persist_failed session_id=%s correlation_id=%s",
-            session_id, correlation_id,
+            session_id,
+            correlation_id,
         )
 
 
@@ -155,8 +158,11 @@ async def session_turn_websocket(websocket: WebSocket, session_id: str) -> None:
         except ValueError:
             correlation_id = new_correlation_id()
             if not await _send(
-                websocket, type_="server.error", seq=seq.next(),
-                payload={"reason": "mensaje no es JSON válido"}, correlation_id=correlation_id,
+                websocket,
+                type_="server.error",
+                seq=seq.next(),
+                payload={"reason": "mensaje no es JSON válido"},
+                correlation_id=correlation_id,
             ):
                 return
             continue
@@ -167,7 +173,9 @@ async def session_turn_websocket(websocket: WebSocket, session_id: str) -> None:
 
         if msg_type != "client.turn_text":
             if not await _send(
-                websocket, type_="server.error", seq=seq.next(),
+                websocket,
+                type_="server.error",
+                seq=seq.next(),
                 payload={"reason": f"tipo de mensaje no soportado: {msg_type!r}"},
                 correlation_id=correlation_id,
             ):
@@ -178,7 +186,9 @@ async def session_turn_websocket(websocket: WebSocket, session_id: str) -> None:
             turn_payload = ClientTurnText.model_validate(raw.get("payload") or {})
         except ValidationError as exc:
             if not await _send(
-                websocket, type_="server.error", seq=seq.next(),
+                websocket,
+                type_="server.error",
+                seq=seq.next(),
                 payload={"reason": f"payload inválido: {exc.errors()}"},
                 correlation_id=correlation_id,
             ):
@@ -190,14 +200,19 @@ async def session_turn_websocket(websocket: WebSocket, session_id: str) -> None:
             result = await orchestrator.handle_turn(session_id, turn_payload.text)
         except SessionNotFoundError:
             if not await _send(
-                websocket, type_="server.error", seq=seq.next(),
-                payload={"reason": "sesión no encontrada"}, correlation_id=correlation_id,
+                websocket,
+                type_="server.error",
+                seq=seq.next(),
+                payload={"reason": "sesión no encontrada"},
+                correlation_id=correlation_id,
             ):
                 return
             continue
         except SessionNotAcceptingTurnsError as exc:
             if not await _send(
-                websocket, type_="server.error", seq=seq.next(),
+                websocket,
+                type_="server.error",
+                seq=seq.next(),
                 payload={"reason": str(exc), "state": exc.state.value},
                 correlation_id=correlation_id,
             ):
@@ -205,13 +220,18 @@ async def session_turn_websocket(websocket: WebSocket, session_id: str) -> None:
             continue
 
         if not await _send(
-            websocket, type_="server.state", seq=seq.next(),
-            payload={"state": result.state.value}, correlation_id=correlation_id,
+            websocket,
+            type_="server.state",
+            seq=seq.next(),
+            payload={"state": result.state.value},
+            correlation_id=correlation_id,
         ):
             return
 
         if not await _send(
-            websocket, type_="server.agent_response", seq=seq.next(),
+            websocket,
+            type_="server.agent_response",
+            seq=seq.next(),
             payload={
                 "message": result.agent_message,
                 "intent": result.intent,
@@ -232,13 +252,18 @@ async def session_turn_websocket(websocket: WebSocket, session_id: str) -> None:
         # rápido, pero no es 0ms) — límite conocido, documentado en vez de
         # fingir precisión que el backend no puede medir por sí solo.
         _log_turn_latency(
-            websocket, session_id=session_id, correlation_id=correlation_id,
-            state=result.state.value, intent=result.intent,
+            websocket,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            state=result.state.value,
+            intent=result.intent,
             latency_ms=(time.perf_counter() - turn_started_at) * 1000,
         )
 
         if not await _send(
-            websocket, type_="server.decision", seq=seq.next(),
+            websocket,
+            type_="server.decision",
+            seq=seq.next(),
             payload={
                 "level": result.decision_level.value,
                 "should_escalate": result.should_escalate,
@@ -251,7 +276,10 @@ async def session_turn_websocket(websocket: WebSocket, session_id: str) -> None:
         if result.state in _SUMMARY_STATES:
             summary = await orchestrator.build_summary(session_id)
             if not await _send(
-                websocket, type_="server.summary", seq=seq.next(),
-                payload=summary.model_dump(mode="json"), correlation_id=correlation_id,
+                websocket,
+                type_="server.summary",
+                seq=seq.next(),
+                payload=summary.model_dump(mode="json"),
+                correlation_id=correlation_id,
             ):
                 return

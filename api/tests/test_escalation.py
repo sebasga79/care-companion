@@ -20,11 +20,13 @@ def _init_db(db_path: str) -> None:
 
 def test_idempotency_key_is_stable_regardless_of_trigger_code_order() -> None:
     key_a = compute_idempotency_key(
-        session_id="s1", decision_level=DecisionLevel.HARD_RED_FLAG,
+        session_id="s1",
+        decision_level=DecisionLevel.HARD_RED_FLAG,
         trigger_codes=["B", "A"],
     )
     key_b = compute_idempotency_key(
-        session_id="s1", decision_level=DecisionLevel.HARD_RED_FLAG,
+        session_id="s1",
+        decision_level=DecisionLevel.HARD_RED_FLAG,
         trigger_codes=["A", "B"],
     )
     assert key_a == key_b
@@ -52,8 +54,10 @@ def test_create_if_absent_is_idempotent_for_the_same_condition(db_path: str) -> 
     )
     repo = EscalationRepository(db_path)
     decision = DecisionResult(
-        level=DecisionLevel.HARD_RED_FLAG, should_escalate=True,
-        trigger_codes=["FEVER_WITH_WOUND_DISCHARGE"], rationale="alarma determinista",
+        level=DecisionLevel.HARD_RED_FLAG,
+        should_escalate=True,
+        trigger_codes=["FEVER_WITH_WOUND_DISCHARGE"],
+        rationale="alarma determinista",
     )
 
     first = repo.create_if_absent(session_id=session["id"], decision=decision)
@@ -75,15 +79,19 @@ def test_create_if_absent_creates_new_row_for_different_condition(db_path: str) 
     first = repo.create_if_absent(
         session_id=session["id"],
         decision=DecisionResult(
-            level=DecisionLevel.HARD_RED_FLAG, should_escalate=True,
-            trigger_codes=["FEVER_WITH_WOUND_DISCHARGE"], rationale="r1",
+            level=DecisionLevel.HARD_RED_FLAG,
+            should_escalate=True,
+            trigger_codes=["FEVER_WITH_WOUND_DISCHARGE"],
+            rationale="r1",
         ),
     )
     second = repo.create_if_absent(
         session_id=session["id"],
         decision=DecisionResult(
-            level=DecisionLevel.HARD_RED_FLAG, should_escalate=True,
-            trigger_codes=["PAIN_WORSENING"], rationale="r2",
+            level=DecisionLevel.HARD_RED_FLAG,
+            should_escalate=True,
+            trigger_codes=["PAIN_WORSENING"],
+            rationale="r2",
         ),
     )
 

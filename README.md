@@ -28,15 +28,23 @@ tipada** que coordina agentes de responsabilidad única (`Interview`, `Triage`,
 `Response`) — los agentes nunca se llaman entre sí. RAG híbrido (**FTS5 + coseno
 + RRF**) con evidence gate. Todo proveedor externo (LLM, STT, TTS, embeddings,
 datos) entra por **puertos/adaptadores**; hoy corren adapters `fake`
-deterministas y el modelo obligatorio del 7 de agosto se conecta cambiando un
-adapter, sin tocar el dominio (ver `docs/adr/ADR-001`).
+deterministas para pruebas, **Groq/Llama 3.1 70B** como opción competitiva primaria
+y **Ollama/Phi-3.5 Mini** como resguardo local, sin tocar el dominio (ver
+`docs/adr/ADR-001`).
 
 Detalle en [`docs/architecture.md`](docs/architecture.md).
 
 ## Requisitos
 
-- **Docker + Docker Compose** (ruta recomendada), o
-- **Python 3.11 + [uv](https://docs.astral.sh/uv/)** y **Node 22 + pnpm** (ruta local).
+Ruta recomendada para el jurado:
+
+- **Docker + Docker Compose**.
+- conexión a internet en la primera ejecución para descargar el kit público (~127 MB).
+
+Ruta local alternativa, útil para desarrollo:
+
+- **Python 3.11 o 3.12 + [uv](https://docs.astral.sh/uv/)**;
+- **Node 22 + pnpm**.
 
 No se necesitan credenciales para correr el prototipo: usa el proveedor LLM
 `fake` determinista. No hay secretos en el repositorio.
@@ -87,21 +95,41 @@ ahí, en tu máquina.
 
 ### Dataset y corpus clínico real del reto
 
-El repo no incluye el dataset oficial (`.xlsx` + 107 PDFs, ~127 MB) — se
-descarga aparte:
+La ruta recomendada con Docker no requiere pasos manuales. En el primer
+`./levantar_app.sh`, el contenedor API descarga los 4 `.xlsx` y 107 PDF del kit
+oficial (~127 MB), valida que estén completos y carga el corpus al RAG **antes**
+de exponer el backend. Dataset, índice y base quedan en el volumen persistente
+`care_companion_data`; detener o volver a levantar la aplicación no los descarga
+ni los procesa otra vez.
+
+En desarrollo local sin Docker, los comandos equivalentes son:
 
 ```bash
 cd api
+export RAG_ALLOW_EMPTY_PDF_PASSWORD=true # solo para el corpus oficial auditado
 uv run python scripts/fetch_dataset.py   # 4 .xlsx + 107 PDFs a ./data/dataset
+uv run python scripts/ocr_scanned_pdf.py \
+  --input "data/dataset/textos/Appendicitis/REVISIÓN DE LA LITERATURA SOBRE LAAPENDICITIS AGUDA PEDIATRICA NO ESPECIFICADA EN EL PERI000 2000-2021.pdf" \
+  --output data/dataset/ocr/appendicitis-literature-review-ocr.txt
 uv run python scripts/load_corpus.py     # los carga al RAG (misma consola /knowledge)
 ```
 
-Con esto: el selector de casos de `/call` pasa de 3 pacientes ficticios a
-los 160 casos reales del dataset (`DatasetCaseAdapter`, con fallback
-automático a los 3 ficticios si no descargaste el dataset), y el RAG queda
-poblado con ~103 de los 107 PDFs reales (los 4 restantes son 3 PDFs
-protegidos con contraseña y 1 escaneado sin capa de texto — casos
-esperados, documentados en el propio kit oficial). Cada documento queda
+La ruta local del OCR requiere `pdftoppm` y `tesseract` instalados en el
+sistema; la imagen Docker ya los incluye junto con el paquete de idioma
+español. La apertura de los tres PDF protegidos es una opción explícita para
+este corpus oficial, con contraseña de usuario vacía conocida: no se adivinan
+contraseñas ni se eliminan restricciones del archivo original.
+
+Con esto: `/call` muestra **40 pacientes únicos** como tarjetas con nombre,
+cirugía y fecha. Cada entidad consolida sus cuatro seguimientos históricos
+(días 1, 3, 7 y 14), manteniendo los 160 episodios originales disponibles
+internamente para trazabilidad (`DatasetCaseAdapter`; el fallback a fixtures
+solo se conserva para desarrollo local sin dataset). El RAG queda poblado
+con los 106 PDF reales con texto más un documento de texto generado por OCR
+para el escaneo (107 documentos indexados en total). Los tres PDF protegidos
+se abren únicamente con contraseña de usuario vacía; el escaneo se rasteriza
+con Poppler y se reconoce con Tesseract. El PDF original se conserva intacto
+y el `.txt` OCR queda en el volumen Docker. Cada documento queda
 etiquetado por procedimiento (`applicability.procedure`), así que el
 retrieval de una llamada solo usa evidencia del procedimiento del caso en
 curso, no de los otros cuatro.
@@ -109,28 +137,50 @@ curso, no de los otros cuatro.
 `fetch_dataset.py --no-textos` descarga solo los `.xlsx` (rápido) si no
 necesitas el corpus PDF todavía.
 
-## Arranque rápido (un solo script)
+## Arranque recomendado: un solo comando
 
 ```bash
 git clone <repo-url> care-companion && cd care-companion
 ./levantar_app.sh
 ```
 
-Instala dependencias la primera vez, levanta backend + frontend, espera a que
-estén sanos y sigue los logs. **Ctrl+C** detiene todo de forma limpia.
-Opciones: `--reinstall` (reinstala deps), `--clean` (borra la BD local).
+El launcher detecta el estado automáticamente:
+
+- primera ejecución: construye las imágenes, instala dependencias, descarga el kit oficial
+  e indexa el corpus dentro del volumen Docker (puede tardar varios minutos);
+- ejecuciones posteriores: inicia los contenedores existentes sin reinstalar;
+- si la aplicación ya está funcionando: únicamente abre la página;
+- siempre espera el health-check antes de abrir el navegador.
+
+Comandos disponibles:
+
+```bash
+./levantar_app.sh --stop       # detener sin borrar datos
+./levantar_app.sh --logs       # ver logs
+./levantar_app.sh --rebuild    # aplicar cambios de código/dependencias
+./levantar_app.sh --no-open    # levantar sin abrir el navegador
+./levantar_app.sh --local      # desarrollo sin Docker, con hot reload
+```
 
 - Frontend: <http://localhost:49318> (redirige a `/call`)
 - API + OpenAPI: <http://localhost:49317/docs>
 - Health: <http://localhost:49317/health>
 
-## Arranque con Docker (≤15 min)
+### Equivalente manual con Docker Compose
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-Mismos puertos host (49318 frontend, 49317 API).
+Mismos puertos host (49318 frontend, 49317 API). El comando anterior usa el adapter
+determinista `fake` para comprobar instalación y flujo sin secretos. Para ejecutar con el
+modelo permitido elegido para el concurso:
+
+```bash
+LLM_PROVIDER=groq LLM_API_KEY=gsk_tu_api_key_real ./levantar_app.sh --rebuild
+```
+
+No se debe publicar una API key en el repositorio.
 
 ## Arranque local manual (sin script ni Docker)
 
@@ -147,23 +197,32 @@ NEXT_PUBLIC_API_URL=http://localhost:49317 pnpm dev --port 49318
 ## Probar que funciona
 
 **Demo de la llamada (`/call`):**
-1. Elige un caso ficticio y pulsa **Iniciar llamada**.
-2. Escribe un turno del paciente (la captura de voz es un ticket posterior; hoy
-   la conversación se maneja por texto sobre el mismo WebSocket).
+1. Elige una de las 40 tarjetas de paciente y pulsa **Iniciar llamada**. El agente
+   recibe su perfil, cirugía y evolución histórica de los días 1/3/7/14.
+2. Habla por el micrófono. El campo de texto aparece únicamente como fallback si el
+   navegador no ofrece reconocimiento de voz.
 3. Observa en vivo: estado de la máquina, respuesta del agente, **nivel de
    decisión** y evidencia citada.
 
-**Aprendizaje/olvido en vivo (`/knowledge`):** sube un `.txt`/`.md`, verifica con
-la consulta canaria que aparece, bórralo y verifica que desaparece. El
-`knowledge_version` cambia en cada operación.
+Cada llamada terminada materializa además un `followup_record` semiestructurado
+en SQLite con dolor y temperatura normalizados, movilidad, herida, ingesta, sueño, decisión y
+bandera de alerta. No se requiere Redis: los perfiles del kit se transforman
+en objetos Pydantic en memoria y SQLite conserva el historial operativo y
+auditable.
 
-**Auditoría (`/audit`):** cada sesión queda con su nivel de decisión, conteo de
-fuentes, escalamiento y métricas honestas (medidas o `pendiente`).
+**Base clínica (`/knowledge`):** el corpus oficial ya indexado está identificado y
+protegido contra borrado. Para demostrar la compuerta learn/retrieve/forget, sube
+un `.txt`/`.md`/`.pdf` de prueba, verifica automáticamente que aparece, bórralo y
+confirma que desaparece. El `knowledge_version` cambia en cada operación.
+
+**Auditoría (`/audit`):** cada sesión identifica paciente y procedimiento y muestra
+el seguimiento clínico consolidado, nivel de decisión, fuentes, escalamiento y
+métricas honestas (medidas o `pendiente`).
 
 ## Tests y calidad
 
 ```bash
-make verify          # backend: ruff + pytest (235 tests)
+make verify          # backend: ruff + pytest (suite completa)
 cd web && pnpm build # frontend: type-check + build
 ```
 
@@ -189,10 +248,10 @@ docs/   SDD: spec, architecture, plan, design, traceability, ADRs, evidencia
 
 ## Licencia
 
-MIT (pendiente de archivo `LICENSE` en el ticket DOC-007).
+MIT; texto completo disponible en [`LICENSE`](LICENSE).
 
 ---
 
-> Estado: construcción anticipada pre-concurso (ADR-001). El modelo obligatorio,
-> el dataset (Delta Sharing) y las métricas oficiales se integran el 7 de agosto
-> a través de los puertos existentes. Ver [`docs/plan.md`](docs/plan.md).
+> Estado: implementación funcional integrada con el kit oficial del 7 de agosto.
+> Ver [`docs/plan.md`](docs/plan.md) y
+> [`docs/auditoria-kit-oficial-2026-08-07.md`](docs/auditoria-kit-oficial-2026-08-07.md).

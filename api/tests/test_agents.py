@@ -23,8 +23,11 @@ from app.ports.llm import LLMMessage
 
 def _request(payload: dict) -> AgentRequest:
     return AgentRequest(
-        session_id=uuid4(), correlation_id=uuid4(), knowledge_version=1,
-        payload=payload, deadline_ms=2000,
+        session_id=uuid4(),
+        correlation_id=uuid4(),
+        knowledge_version=1,
+        payload=payload,
+        deadline_ms=2000,
     )
 
 
@@ -36,8 +39,11 @@ def _request(payload: dict) -> AgentRequest:
 async def test_invoke_structured_returns_parsed_result_on_first_try() -> None:
     llm = ScriptedFakeLLM(default="hola")
     parsed, usage = await invoke_structured(
-        llm, messages=[LLMMessage(role="user", content="hi")],
-        response_schema=None, deadline_ms=1000, parse=lambda text: text.upper(),
+        llm,
+        messages=[LLMMessage(role="user", content="hi")],
+        response_schema=None,
+        deadline_ms=1000,
+        parse=lambda text: text.upper(),
     )
     assert parsed == "HOLA"
     assert usage.provider == "fake-scripted"
@@ -46,8 +52,11 @@ async def test_invoke_structured_returns_parsed_result_on_first_try() -> None:
 async def test_invoke_structured_retries_once_after_transient_failure() -> None:
     llm = ScriptedFakeLLM(default="ok", fail_first_n_calls=1)
     parsed, _usage = await invoke_structured(
-        llm, messages=[LLMMessage(role="user", content="hi")],
-        response_schema=None, deadline_ms=1000, parse=lambda text: text,
+        llm,
+        messages=[LLMMessage(role="user", content="hi")],
+        response_schema=None,
+        deadline_ms=1000,
+        parse=lambda text: text,
     )
     assert parsed == "ok"
     assert len(llm.calls) == 2
@@ -57,8 +66,12 @@ async def test_invoke_structured_raises_after_exhausting_retries() -> None:
     llm = ScriptedFakeLLM(default="ok", fail_first_n_calls=5)
     with pytest.raises(AgentInvocationError) as exc_info:
         await invoke_structured(
-            llm, messages=[LLMMessage(role="user", content="hi")],
-            response_schema=None, deadline_ms=1000, parse=lambda text: text, max_retries=1,
+            llm,
+            messages=[LLMMessage(role="user", content="hi")],
+            response_schema=None,
+            deadline_ms=1000,
+            parse=lambda text: text,
+            max_retries=1,
         )
     assert exc_info.value.attempts == 2
 
@@ -75,8 +88,11 @@ async def test_invoke_structured_retries_on_invalid_parse_then_succeeds() -> Non
         return text
 
     parsed, _usage = await invoke_structured(
-        llm, messages=[LLMMessage(role="user", content="hi")],
-        response_schema=None, deadline_ms=1000, parse=_parse,
+        llm,
+        messages=[LLMMessage(role="user", content="hi")],
+        response_schema=None,
+        deadline_ms=1000,
+        parse=_parse,
     )
     assert parsed == "not-json"
 
@@ -124,8 +140,11 @@ async def test_interview_agent_extracts_confirmed_observation() -> None:
             "next_question": "¿Y la herida?",
             "observations": [
                 {
-                    "code": "FEVER", "label": "fiebre", "value": False,
-                    "certainty": "denied", "original_text": "no, para nada",
+                    "code": "FEVER",
+                    "label": "fiebre",
+                    "value": False,
+                    "certainty": "denied",
+                    "original_text": "no, para nada",
                     "normalized_text": None,
                 }
             ],
@@ -136,8 +155,10 @@ async def test_interview_agent_extracts_confirmed_observation() -> None:
     result = await agent.run(
         _request(
             InterviewTurnInput(
-                turns=[], remaining_objectives=[{"code": "FEVER", "label": "fiebre"}],
-                last_patient_utterance="no, para nada", last_patient_turn_id="t1",
+                turns=[],
+                remaining_objectives=[{"code": "FEVER", "label": "fiebre"}],
+                last_patient_utterance="no, para nada",
+                last_patient_turn_id="t1",
             ).model_dump()
         )
     )
@@ -164,8 +185,11 @@ async def test_interview_agent_ambiguous_expression_requests_clarification() -> 
             "next_question": None,
             "observations": [
                 {
-                    "code": "GENERAL_STATE", "label": "ánimo general", "value": None,
-                    "certainty": "uncertain", "original_text": "la he visto un poco maluca",
+                    "code": "GENERAL_STATE",
+                    "label": "ánimo general",
+                    "value": None,
+                    "certainty": "uncertain",
+                    "original_text": "la he visto un poco maluca",
                     "normalized_text": None,
                 }
             ],
@@ -176,8 +200,10 @@ async def test_interview_agent_ambiguous_expression_requests_clarification() -> 
     result = await agent.run(
         _request(
             InterviewTurnInput(
-                turns=[], remaining_objectives=[{"code": "GENERAL_STATE", "label": "ánimo"}],
-                last_patient_utterance="la he visto un poco maluca", last_patient_turn_id="t1",
+                turns=[],
+                remaining_objectives=[{"code": "GENERAL_STATE", "label": "ánimo"}],
+                last_patient_utterance="la he visto un poco maluca",
+                last_patient_turn_id="t1",
             ).model_dump()
         )
     )
@@ -195,12 +221,16 @@ async def test_interview_agent_tolerates_markdown_fenced_json_from_real_provider
     debe seguir funcionando (extract_json_payload en _parse_interview_output)."""
     payload = json.dumps(
         {
-            "needs_clarification": False, "clarification_question": None,
+            "needs_clarification": False,
+            "clarification_question": None,
             "next_question": "¿cómo sigue?",
             "observations": [
                 {
-                    "code": "FEVER", "label": "fiebre", "value": False,
-                    "certainty": "denied", "original_text": "no tiene fiebre",
+                    "code": "FEVER",
+                    "label": "fiebre",
+                    "value": False,
+                    "certainty": "denied",
+                    "original_text": "no tiene fiebre",
                     "normalized_text": None,
                 }
             ],
@@ -212,8 +242,10 @@ async def test_interview_agent_tolerates_markdown_fenced_json_from_real_provider
     result = await agent.run(
         _request(
             InterviewTurnInput(
-                turns=[], remaining_objectives=[{"code": "FEVER", "label": "fiebre"}],
-                last_patient_utterance="no tiene fiebre", last_patient_turn_id="t1",
+                turns=[],
+                remaining_objectives=[{"code": "FEVER", "label": "fiebre"}],
+                last_patient_utterance="no tiene fiebre",
+                last_patient_turn_id="t1",
             ).model_dump()
         )
     )
@@ -226,15 +258,21 @@ async def test_interview_agent_needs_clarification_without_question_is_invalid_o
     needs_clarification=true sin pregunta — eso cuenta como salida inválida
     y agota reintentos -> `status="error"`, nunca un resultado a medias."""
     response = json.dumps(
-        {"needs_clarification": True, "clarification_question": None, "next_question": None,
-         "observations": []}
+        {
+            "needs_clarification": True,
+            "clarification_question": None,
+            "next_question": None,
+            "observations": [],
+        }
     )
     llm = ScriptedFakeLLM(default=response)
     agent = InterviewAgent(llm)
     result = await agent.run(
         _request(
             InterviewTurnInput(
-                turns=[], remaining_objectives=[], last_patient_utterance="algo",
+                turns=[],
+                remaining_objectives=[],
+                last_patient_utterance="algo",
                 last_patient_turn_id="t1",
             ).model_dump()
         )
@@ -249,7 +287,9 @@ async def test_interview_agent_returns_error_result_on_malformed_json() -> None:
     result = await agent.run(
         _request(
             InterviewTurnInput(
-                turns=[], remaining_objectives=[], last_patient_utterance="hola",
+                turns=[],
+                remaining_objectives=[],
+                last_patient_utterance="hola",
                 last_patient_turn_id="t1",
             ).model_dump()
         )
@@ -265,8 +305,12 @@ async def test_interview_agent_returns_error_result_on_malformed_json() -> None:
 
 async def test_triage_agent_reports_routine_level() -> None:
     response = json.dumps(
-        {"model_level": "ROUTINE_FOLLOW_UP", "rationale": "sin hallazgos",
-         "missing_information": [], "patient_message_intent": "explain_routine_follow_up"}
+        {
+            "model_level": "ROUTINE_FOLLOW_UP",
+            "rationale": "sin hallazgos",
+            "missing_information": [],
+            "patient_message_intent": "explain_routine_follow_up",
+        }
     )
     llm = ScriptedFakeLLM(default=response)
     agent = TriageAgent(llm)
@@ -284,8 +328,12 @@ async def test_triage_agent_cannot_construct_hard_red_flag_output() -> None:
     MODEL_HIGH_RISK} es una salida inválida — ni siquiera "HARD_RED_FLAG"
     puede llegar como resultado ok (SAFE-002: estructuralmente imposible)."""
     response = json.dumps(
-        {"model_level": "HARD_RED_FLAG", "rationale": "intento adversarial",
-         "missing_information": [], "patient_message_intent": "x"}
+        {
+            "model_level": "HARD_RED_FLAG",
+            "rationale": "intento adversarial",
+            "missing_information": [],
+            "patient_message_intent": "x",
+        }
     )
     llm = ScriptedFakeLLM(default=response)
     agent = TriageAgent(llm)
@@ -297,9 +345,12 @@ async def test_triage_agent_cannot_construct_hard_red_flag_output() -> None:
 
 async def test_triage_agent_reports_moderate_risk_with_missing_info() -> None:
     response = json.dumps(
-        {"model_level": "MODEL_MODERATE_RISK", "rationale": "dato incompleto",
-         "missing_information": ["temperature_c"],
-         "patient_message_intent": "explain_routine_follow_up"}
+        {
+            "model_level": "MODEL_MODERATE_RISK",
+            "rationale": "dato incompleto",
+            "missing_information": ["temperature_c"],
+            "patient_message_intent": "explain_routine_follow_up",
+        }
     )
     llm = ScriptedFakeLLM(default=response)
     agent = TriageAgent(llm)
@@ -326,12 +377,17 @@ async def test_response_agent_grounded_answer_only_with_sufficient_evidence() ->
     result = await agent.run(
         _request(
             ResponseTurnInput(
-                evidence_sufficient=True, should_escalate=False,
+                evidence_sufficient=True,
+                should_escalate=False,
                 evidence_fragments=[
                     {
-                        "title": "Guía de alta", "text": "sentir calor leve es normal",
-                        "citation_id": "c1", "document_id": "d1", "document_version": 1,
-                        "chunk_id": "ch1", "knowledge_version": 1,
+                        "title": "Guía de alta",
+                        "text": "sentir calor leve es normal",
+                        "citation_id": "c1",
+                        "document_id": "d1",
+                        "document_version": 1,
+                        "chunk_id": "ch1",
+                        "knowledge_version": 1,
                     }
                 ],
                 observations_summary=["ánimo general — bien [confirmed]"],
@@ -359,7 +415,9 @@ async def test_response_agent_abstains_without_evidence_and_without_escalation()
     result = await agent.run(
         _request(
             ResponseTurnInput(
-                evidence_sufficient=False, should_escalate=False, evidence_fragments=[],
+                evidence_sufficient=False,
+                should_escalate=False,
+                evidence_fragments=[],
                 observations_summary=[],
                 patient_question_or_context="¿le puedo dar jugo de un cítrico específico?",
             ).model_dump()
@@ -379,18 +437,32 @@ async def test_response_agent_handoff_takes_priority_over_evidence_sufficiency()
     result = await agent.run(
         _request(
             ResponseTurnInput(
-                evidence_sufficient=True, should_escalate=True,
+                evidence_sufficient=True,
+                should_escalate=True,
+                decision_level="HARD_RED_FLAG",
+                trigger_codes=["HIGH_FEVER", "PAIN_WORSENING"],
                 evidence_fragments=[
                     {
-                        "title": "x", "text": "y", "citation_id": "c1", "document_id": "d1",
-                        "document_version": 1, "chunk_id": "ch1", "knowledge_version": 1,
+                        "title": "x",
+                        "text": "y",
+                        "citation_id": "c1",
+                        "document_id": "d1",
+                        "document_version": 1,
+                        "chunk_id": "ch1",
+                        "knowledge_version": 1,
                     }
                 ],
-                observations_summary=[], patient_question_or_context="fiebre alta",
+                observations_summary=[],
+                patient_question_or_context="fiebre alta",
             ).model_dump()
         )
     )
     assert result.output["intent"] == "handoff"
+    assert "valoración médica urgente" in result.output["message"]
+    assert "reporte al equipo" in result.output["message"]
+    assert "número principal" in result.output["message"]
+    assert "dentro de lo esperado" not in result.output["message"]
+    assert llm.calls == []  # el texto crítico no depende del LLM
     # el intent handoff no adjunta evidencia (no es una "respuesta clínica").
     assert result.evidence == []
 
@@ -404,9 +476,11 @@ async def test_response_agent_grounded_prompt_never_leaks_into_abstain_or_handof
     await agent.run(
         _request(
             ResponseTurnInput(
-                evidence_sufficient=False, should_escalate=False,
+                evidence_sufficient=False,
+                should_escalate=False,
                 evidence_fragments=[{"title": "no debería aparecer", "text": "contenido oculto"}],
-                observations_summary=[], patient_question_or_context="pregunta sin evidencia",
+                observations_summary=[],
+                patient_question_or_context="pregunta sin evidencia",
             ).model_dump()
         )
     )
@@ -421,8 +495,11 @@ async def test_response_agent_returns_error_when_llm_output_is_empty() -> None:
     result = await agent.run(
         _request(
             ResponseTurnInput(
-                evidence_sufficient=False, should_escalate=False, evidence_fragments=[],
-                observations_summary=[], patient_question_or_context="x",
+                evidence_sufficient=False,
+                should_escalate=False,
+                evidence_fragments=[],
+                observations_summary=[],
+                patient_question_or_context="x",
             ).model_dump()
         )
     )

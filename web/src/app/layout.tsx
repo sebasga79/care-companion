@@ -15,9 +15,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Care Companion — Prototipo clínico",
+  title: "Care Companion — Seguimiento postoperatorio",
   description:
-    "Seguimiento postoperatorio por voz con evidencia clínica, agentes de responsabilidad única y supervisión humana. Prototipo de concurso — sin datos ni acciones clínicas reales.",
+    "Seguimiento postoperatorio por voz con evidencia clínica, agentes de responsabilidad única y supervisión humana.",
 };
 
 export default function RootLayout({

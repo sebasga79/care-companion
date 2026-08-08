@@ -28,3 +28,6 @@ build/
 .vscode/
 .idea/
 .run/
+
+# Artefactos temporales de QA (capturas de verificación, PDFs de prueba)
+tmp/

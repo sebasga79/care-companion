@@ -15,13 +15,31 @@ const STATUS_LABEL: Record<MetricValue["status"], string> = {
 };
 
 export function Metric({ label, metric }: MetricProps) {
+  // El detalle trae las cifras que la rúbrica §5 exige reportar (tokens de
+  // entrada/salida, invocaciones al modelo por turno, consultas RAG por
+  // llamada) — no se pueden omitir. Lo que sí se corrige (hallazgo H-07 del
+  // video) es la presentación: en vez de una sola cadena densa separada por
+  // "·", que parecía salida de depuración, cada cifra va en su propia línea
+  // con el estado como etiqueta y no como prefijo del texto.
+  const detailParts = metric.detail
+    .split("·")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
   return (
     <article className="metric-card">
-      <p className="metric-card__label">{label}</p>
+      <p className="metric-card__label">
+        {label}
+        <span className={`metric-card__status metric-card__status--${metric.status}`}>
+          {STATUS_LABEL[metric.status]}
+        </span>
+      </p>
       <strong className="metric-card__value">{metric.value}</strong>
-      <small className="metric-card__detail">
-        {STATUS_LABEL[metric.status]} · {metric.detail}
-      </small>
+      <ul className="metric-card__detail-list">
+        {detailParts.map((part) => (
+          <li key={part}>{part}</li>
+        ))}
+      </ul>
     </article>
   );
 }

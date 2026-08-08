@@ -19,7 +19,7 @@ def test_minimal_valid_summary() -> None:
         started_at=datetime.now(UTC),
         knowledge_version=1,
     )
-    assert summary.schema_version == "1.0"
+    assert summary.schema_version == "1.2"
     assert summary.risk.level == DecisionLevel.ROUTINE_FOLLOW_UP
     assert summary.risk.should_escalate is False
     assert summary.handoff.status == "none"

@@ -119,9 +119,7 @@ async def test_learn_canary_failure_rolls_back_everything(
     try:
         doc_count = conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"]
         chunk_count = conn.execute("SELECT COUNT(*) AS n FROM document_chunks").fetchone()["n"]
-        fts_count = conn.execute(
-            "SELECT COUNT(*) AS n FROM document_chunks_fts"
-        ).fetchone()["n"]
+        fts_count = conn.execute("SELECT COUNT(*) AS n FROM document_chunks_fts").fetchone()["n"]
     finally:
         conn.close()
 
@@ -137,9 +135,7 @@ async def test_forget_e2e_negative_canary_reaches_deleted(db_path: str) -> None:
     _init_db(db_path)
     svc, cache, _settings = _service(db_path)
 
-    learn_result = await svc.learn(
-        raw_filename="guia_alta.md", content=_CONTENT, applicability={}
-    )
+    learn_result = await svc.learn(raw_filename="guia_alta.md", content=_CONTENT, applicability={})
     document_id = learn_result.document["id"]
 
     forget_result = await svc.forget(document_id, actor="admin@care-companion.test")
@@ -289,9 +285,7 @@ async def test_learn_e2e_pdf_extracts_text_indexes_by_page_and_is_findable(
         "Segunda pagina con informacion adicional",
     )
 
-    result = await svc.learn(
-        raw_filename="protocolo.pdf", content=pdf_bytes, applicability={}
-    )
+    result = await svc.learn(raw_filename="protocolo.pdf", content=pdf_bytes, applicability={})
     assert result.document["status"] == "ready"
     assert result.document["mime"] == "application/pdf"
     assert result.chunk_count == 2  # una página con texto -> un chunk cada una

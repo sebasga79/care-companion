@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 #
-# Care Companion — arranque de todo el stack en local.
+# Launcher único de Care Companion.
 #
-#   Backend  : FastAPI (uvicorn)      → http://localhost:49317  (/docs, /health)
-#   Frontend : Next.js (dev server)   → http://localhost:49318  (redirige a /call)
-#   Base de  : SQLite (WAL) — sin servidor; el schema se aplica solo al
-#   datos      arrancar el backend (create_app → apply_schema).
+# El modo predeterminado usa Docker Compose. La primera ejecución construye
+# las imágenes; las siguientes inician lo ya creado sin reinstalar.
+# `--local` conserva el modo de desarrollo con Uvicorn/Next.js y hot reload.
 #
 # Puertos deliberadamente altos e inusuales para no chocar con otros
 # proyectos locales. Overridables: API_PORT=... WEB_PORT=... ./levantar_app.sh
 #
 # Uso:
-#   ./levantar_app.sh                 # instala deps la primera vez y levanta todo
-#   ./levantar_app.sh --reinstall     # fuerza reinstalar dependencias
-#   ./levantar_app.sh --clean         # borra la base de datos local antes de arrancar
-#
-# Ctrl+C detiene backend y frontend de forma limpia.
+#   ./levantar_app.sh                 # primera vez construye; después solo inicia
+#   ./levantar_app.sh --rebuild       # reconstruye tras cambios de código
+#   ./levantar_app.sh --stop          # detiene Docker sin borrar datos
+#   ./levantar_app.sh --logs          # sigue los logs de Docker
+#   ./levantar_app.sh --no-open       # no abre el navegador
+#   ./levantar_app.sh --local         # desarrollo sin Docker
+#   ./levantar_app.sh --local --reinstall
+#   ./levantar_app.sh --local --clean
 
 set -euo pipefail
 
@@ -30,13 +32,38 @@ WEB_PORT="${WEB_PORT:-49318}"
 API_URL="http://localhost:${API_PORT}"
 WEB_URL="http://localhost:${WEB_PORT}"
 
+MODE="docker"
+ACTION="up"
+REBUILD=false
+NO_OPEN=false
 REINSTALL=false
 CLEAN_DB=false
+
+usage() {
+  printf '%s\n' \
+    "Uso: ./levantar_app.sh [opción]" \
+    "" \
+    "Sin opciones       Primera vez construye Docker; después solo inicia." \
+    "--rebuild          Reconstruye tras cambios de código." \
+    "--stop             Detiene Docker sin borrar imágenes ni datos." \
+    "--logs             Sigue los logs de Docker." \
+    "--no-open          No abre el navegador." \
+    "--clean            Borra el volumen Docker (base, dataset e índice) y reconstruye." \
+    "--local            Desarrollo sin Docker y con hot reload." \
+    "--local --reinstall  Reinstala dependencias locales." \
+    "--local --clean      Borra la base local antes de arrancar."
+}
+
 for arg in "$@"; do
   case "$arg" in
+    --local)       MODE="local" ;;
+    --rebuild)     REBUILD=true ;;
+    --stop)        ACTION="stop" ;;
+    --logs)        ACTION="logs" ;;
+    --no-open)     NO_OPEN=true ;;
     --reinstall) REINSTALL=true ;;
     --clean)     CLEAN_DB=true ;;
-    -h|--help)   grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)   usage; exit 0 ;;
     *) echo "Argumento desconocido: $arg (usa --help)"; exit 2 ;;
   esac
 done
@@ -58,6 +85,129 @@ require() {
     exit 1
   fi
 }
+
+open_browser() {
+  [ "$NO_OPEN" = true ] && return 0
+  case "$(uname -s)" in
+    Darwin) open "${WEB_URL}/call" >/dev/null 2>&1 || true ;;
+    Linux) command -v xdg-open >/dev/null 2>&1 \
+      && xdg-open "${WEB_URL}/call" >/dev/null 2>&1 || true ;;
+  esac
+}
+
+wait_for_stack() {
+  local timeout_seconds="${STARTUP_TIMEOUT_SECONDS:-900}"
+  log "Esperando a que API y frontend estén listos…"
+  for attempt in $(seq 1 "$timeout_seconds"); do
+    if curl -fsS "${API_URL}/health" >/dev/null 2>&1 \
+      && curl -fsS "${WEB_URL}/call" >/dev/null 2>&1; then
+      log "Aplicación lista."
+      return 0
+    fi
+    if [ $((attempt % 15)) -eq 0 ]; then
+      echo "  Primera preparación o arranque en curso (${attempt}s); dataset y corpus se guardan una sola vez…"
+    fi
+    sleep 1
+  done
+  err "La aplicación no respondió a tiempo. Ejecuta ./levantar_app.sh --logs."
+  docker compose logs --tail=40 api >&2 || true
+  return 1
+}
+
+run_docker_launcher() {
+  # Si Docker o el modo local ya sirven una instancia sana, no reinstala ni
+  # reinicia nada: muestra las URLs y abre el navegador.
+  if [ "$ACTION" = "up" ] \
+    && [ "$REBUILD" = false ] \
+    && [ "$REINSTALL" = false ] \
+    && [ "$CLEAN_DB" = false ] \
+    && curl -fsS "${API_URL}/health" >/dev/null 2>&1 \
+    && curl -fsS "${WEB_URL}/call" >/dev/null 2>&1; then
+    log "Care Companion ya está en ejecución."
+    echo "  Frontend: ${WEB_URL}/call"
+    echo "  API/docs: ${API_URL}/docs"
+    open_browser
+    return 0
+  fi
+
+  require docker "Instala Docker Desktop y vuelve a ejecutar este comando."
+  if ! docker compose version >/dev/null 2>&1; then
+    err "Docker Compose no está disponible. Actualiza Docker Desktop."
+    return 1
+  fi
+
+  if ! docker info >/dev/null 2>&1; then
+    if [ "$(uname -s)" = "Darwin" ] && open -Ra Docker >/dev/null 2>&1; then
+      log "Iniciando Docker Desktop…"
+      open -a Docker
+      for attempt in $(seq 1 45); do
+        docker info >/dev/null 2>&1 && break
+        sleep 1
+      done
+    fi
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    err "Docker está instalado, pero el motor no está activo. Inicia Docker Desktop."
+    return 1
+  fi
+
+  case "$ACTION" in
+    stop)
+      log "Deteniendo Care Companion…"
+      docker compose stop
+      log "Servicios detenidos; imágenes y datos se conservan."
+      return 0
+      ;;
+    logs)
+      docker compose logs -f
+      return 0
+      ;;
+  esac
+
+  if [ "$CLEAN_DB" = true ]; then
+    warn "--clean eliminará base, dataset e índice persistidos; el kit se descargará de nuevo."
+    docker compose down --volumes
+    REBUILD=true
+  fi
+
+  if [ "$REBUILD" = true ] || [ "$REINSTALL" = true ]; then
+    log "Reconstruyendo imágenes y recreando servicios…"
+    docker compose up -d --build --force-recreate
+  else
+    local running_count existing_count image_count
+    running_count=$(docker compose ps --status running -q 2>/dev/null | wc -l | tr -d ' ')
+    existing_count=$(docker compose ps -a -q 2>/dev/null | wc -l | tr -d ' ')
+    image_count=$(docker compose images -q 2>/dev/null | sort -u | sed '/^$/d' | wc -l | tr -d ' ')
+
+    if [ "$running_count" -ge 2 ]; then
+      log "Los servicios Docker ya están activos."
+    elif [ "$existing_count" -ge 2 ]; then
+      log "Iniciando contenedores existentes, sin reinstalar…"
+      docker compose start
+    elif [ "$image_count" -ge 2 ]; then
+      log "Creando contenedores desde imágenes existentes, sin reconstruir…"
+      docker compose up -d --no-build
+    else
+      log "Primera ejecución: construyendo imágenes e instalando dependencias…"
+      docker compose up -d --build
+    fi
+  fi
+
+  wait_for_stack
+  echo
+  echo "  Care Companion está arriba"
+  echo "  Frontend: ${WEB_URL}/call"
+  echo "  API/docs: ${API_URL}/docs"
+  echo "  Detener  : ./levantar_app.sh --stop"
+  echo "  Logs     : ./levantar_app.sh --logs"
+  open_browser
+}
+
+if [ "$MODE" = "docker" ]; then
+  run_docker_launcher
+  exit $?
+fi
+
 log "Verificando prerrequisitos…"
 require uv   "Instala uv: https://docs.astral.sh/uv/getting-started/installation/"
 require node "Instala Node 20+ : https://nodejs.org/"
@@ -155,7 +305,11 @@ fi
 log "Arrancando backend en ${API_URL} …"
 (
   cd "$API_DIR"
-  exec uv run uvicorn app.main:app --host 0.0.0.0 --port "$API_PORT"
+  # En desarrollo, recargar el backend cuando cambia Python. Sin `--reload`,
+  # el frontend sí reflejaba sus cambios en caliente pero la API conservaba
+  # el código cargado al arrancar, produciendo transcripciones de una versión
+  # anterior durante la validación manual.
+  exec uv run uvicorn app.main:app --reload --host 0.0.0.0 --port "$API_PORT"
 ) >"$LOG_DIR/api.log" 2>&1 &
 API_PID=$!
 

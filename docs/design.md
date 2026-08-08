@@ -1,6 +1,6 @@
 # Care Companion — Product & Experience Design
 
-> SDD v0.2 · 23 de julio de 2026 · Estado visual: **Opción 3 — Family-first Pediatric seleccionada e implementada**
+> SDD v0.3 · 7 de agosto de 2026 · Estado visual: **Opción 3 — Family-first Pediatric seleccionada e implementada**
 
 ## 1. Concepto
 
@@ -31,19 +31,19 @@ La interfaz desktop prioriza la evaluación y el demo. La vista móvil se contem
 | Ruta | Pregunta que responde | Contenido |
 |---|---|---|
 | `/call` | ¿Qué está ocurriendo ahora? | voz, transcripción, observaciones, evidencia, riesgo y escalamiento |
-| `/knowledge` | ¿Qué sabe el agente y desde qué versión? | documentos, estado, carga, eliminación y prueba de olvido |
+| `/knowledge` | ¿Qué sabe el agente y desde qué versión? | base clínica, carga, eliminación y prueba de olvido obligatoria |
 | `/audit` | ¿Cómo llegó a esta respuesta/decisión? | sesiones, timeline, fuentes, agentes, prompts/config hashes y métricas |
 
 Navegación primaria fija:
 
 - **Llamada**
-- **Conocimiento**
+- **Base clínica**
 - **Auditoría**
 
 El header incluye siempre:
 
 - nombre del producto;
-- badge **Prototipo clínico**;
+- badge **Seguimiento inteligente**;
 - estado de preparación/supervisión;
 - acceso a ayuda técnica para la demo.
 
@@ -56,9 +56,9 @@ flowchart TD
     C --> D["Conversar e interrumpir naturalmente"]
     D --> E["Ver evidencia y señales en vivo"]
     E --> F{"¿Revisión humana?"}
-    F -->|"Sí"| G["Crear alerta simulada y explicar handoff"]
+    F -->|"Sí"| G["Enviar reporte y confirmar dos teléfonos"]
     F -->|"No"| H["Continuar hasta completar mínimos"]
-    G --> I["Cerrar y resumir"]
+    G --> I["Confirmar contacto, cerrar y resumir"]
     H --> I
     I --> J["Auditar decisión, fuentes y métricas"]
 ```
@@ -68,7 +68,7 @@ flowchart TD
 ### 5.1 Jerarquía desktop
 
 ```text
-Header: producto · navegación · prototipo/supervisión
+Header: producto · navegación · seguimiento/supervisión
 Context rail: caso · procedimiento · duración · latencia · agente activo
 ┌──────────────────────────────┬─────────────────────┐
 │ Conversación en vivo         │ Supervisión humana  │

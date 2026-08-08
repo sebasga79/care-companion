@@ -9,7 +9,9 @@ por página. El contenido extraído se trata igual que cualquier otro texto
 del pipeline de ingesta: nunca se interpreta como instrucción (spec.md §11,
 BR-015), solo se fragmenta, se embebe y se indexa.
 
-PDFs escaneados sin capa de texto (caso conocido en el corpus oficial:
+Los PDF del kit con protección de editor se abren únicamente si la contraseña
+de usuario es vacía — no se intenta fuerza bruta ni se acepta una contraseña
+configurada externamente. PDFs escaneados sin capa de texto (caso conocido en el corpus oficial:
 `Appendicitis/` tiene un PDF así) no producen texto extraíble — se
 detectan explícitamente y se rechazan con un motivo claro en vez de
 indexar páginas vacías en silencio."""
@@ -24,7 +26,7 @@ from pypdf.errors import PdfReadError
 from app.services.upload_validation import UploadRejected
 
 
-def extract_pdf_pages(content: bytes) -> list[str]:
+def extract_pdf_pages(content: bytes, *, allow_empty_password: bool = False) -> list[str]:
     """Devuelve el texto de cada página, en orden (índice de lista = página
     - 1). Lanza `UploadRejected` si el PDF está corrupto, cifrado, o si
     ninguna página tiene texto extraíble."""
@@ -37,10 +39,27 @@ def extract_pdf_pages(content: bytes) -> list[str]:
         ) from exc
 
     if reader.is_encrypted:
-        raise UploadRejected(
-            "El PDF está protegido con contraseña; no se puede extraer texto",
-            code="pdf_encrypted",
-        )
+        if not allow_empty_password:
+            raise UploadRejected(
+                "El PDF está protegido con una contraseña; no se permite abrirlo "
+                "sin autorización explícita",
+                code="pdf_encrypted",
+            )
+        # Los tres PDF protegidos del kit tienen user-password vacía. Esto
+        # recupera su contenido sin fuerza bruta; si el archivo realmente
+        # requiere una contraseña, se conserva el rechazo auditable.
+        try:
+            decrypted = reader.decrypt("")
+        except Exception as exc:  # pypdf necesita cryptography para AES
+            raise UploadRejected(
+                f"No se pudo abrir el PDF cifrado con contraseña vacía: {exc}",
+                code="pdf_encrypted",
+            ) from exc
+        if not decrypted:
+            raise UploadRejected(
+                "El PDF está protegido con una contraseña no disponible; no se puede extraer texto",
+                code="pdf_encrypted",
+            )
 
     pages: list[str] = []
     for page in reader.pages:

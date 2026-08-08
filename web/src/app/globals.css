@@ -645,6 +645,339 @@ footer {
 }
 
 /* ---------------------------------------------------------------------
+   /call — patient entity picker
+   ------------------------------------------------------------------- */
+
+.patient-picker {
+  margin-bottom: var(--space-4);
+}
+
+.patient-picker-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: var(--space-4);
+}
+
+.patient-picker-head h1 {
+  margin: 2px 0 6px;
+  color: var(--blue-deep);
+  font-size: clamp(20px, 2.4vw, 30px);
+  line-height: 1.15;
+}
+
+.patient-picker-head p:not(.eyebrow) {
+  max-width: 720px;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.patient-search {
+  flex: 0 1 330px;
+}
+
+.patient-search input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.patient-search input:focus-visible {
+  border-color: var(--aqua-deep);
+  outline: 3px solid rgba(34, 184, 188, 0.18);
+}
+
+.patient-card-grid {
+  display: grid;
+  max-height: 320px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 2px 4px 2px 2px;
+  overflow-y: auto;
+}
+
+.patient-card {
+  display: grid;
+  min-width: 0;
+  min-height: 112px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--motion-fast), background var(--motion-fast),
+    transform var(--motion-fast);
+}
+
+.patient-card:hover:not(:disabled) {
+  border-color: var(--aqua);
+  transform: translateY(-1px);
+}
+
+.patient-card[data-selected="true"] {
+  border-color: var(--aqua-deep);
+  background: var(--aqua-soft);
+  box-shadow: 0 0 0 2px rgba(34, 184, 188, 0.14);
+}
+
+.patient-card:focus-visible {
+  outline: 3px solid rgba(34, 184, 188, 0.22);
+  outline-offset: 2px;
+}
+
+.patient-card:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.patient-card-check {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.patient-card[data-selected="true"] .patient-card-check {
+  background: var(--aqua-deep);
+  color: white;
+}
+
+.patient-card-copy {
+  min-width: 0;
+}
+
+.patient-card-copy strong,
+.patient-card-copy span,
+.patient-card-copy small {
+  display: block;
+}
+
+.patient-card-copy strong {
+  overflow: hidden;
+  margin-bottom: 5px;
+  color: var(--blue-deep);
+  font-size: 13px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patient-card-copy span {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.patient-card-copy small,
+.patient-picker-status {
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.history-strip {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.7fr) minmax(0, 2.3fr);
+  gap: var(--space-5);
+  align-items: center;
+  padding: 14px 18px;
+  margin-bottom: var(--space-4);
+}
+
+.history-strip-heading span,
+.history-strip-heading small,
+.history-strip-heading strong {
+  display: block;
+}
+
+.history-strip-heading small {
+  margin-bottom: 4px;
+  color: var(--aqua-deep);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.history-strip-heading strong {
+  color: var(--blue-deep);
+  font-size: 14px;
+}
+
+.history-baseline {
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.history-timeline {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* La evolución vive en el rail lateral (hallazgo H-03 del video): dentro de
+   una columna angosta, 4 columnas se vuelven ilegibles — se apila en 2×2. */
+.clinical-rail .history-timeline {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.history-details {
+  padding-bottom: 14px;
+}
+
+.history-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.history-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.history-details > summary::after {
+  content: "▾";
+  color: var(--ink-muted);
+  font-size: 12px;
+  transition: transform 0.15s ease;
+}
+
+.history-details[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.history-details > summary small,
+.history-details > summary strong {
+  display: block;
+}
+
+.history-details > summary strong {
+  color: var(--blue-deep);
+  font-size: 13px;
+}
+
+.history-details .history-baseline {
+  margin: 8px 0 10px;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+/* CTA principal dentro de la ficha de contexto: al elegir paciente, iniciar
+   la llamada queda visible sin desplazarse (hallazgo H-02). */
+.context-start-btn {
+  margin-left: auto;
+  padding: 11px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--blue-deep);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.context-start-btn:hover {
+  background: var(--aqua-deep);
+}
+
+.context-start-btn:focus-visible {
+  outline: 3px solid var(--aqua-deep);
+  outline-offset: 3px;
+}
+
+.audit-detail-btn {
+  padding: 6px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--blue-deep);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.audit-detail-btn:hover {
+  border-color: var(--aqua-deep);
+  background: color-mix(in srgb, var(--aqua-deep) 8%, transparent);
+}
+
+.audit-detail-btn[aria-current="true"] {
+  border-color: var(--aqua-deep);
+  background: var(--aqua-deep);
+  color: #fff;
+}
+
+.audit-detail-btn:focus-visible {
+  outline: 3px solid var(--aqua-deep);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history-details > summary::after {
+    transition: none;
+  }
+}
+
+.history-node {
+  position: relative;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.history-node span,
+.history-node strong,
+.history-node small {
+  display: block;
+}
+
+.history-node strong {
+  margin: 3px 0;
+  color: var(--blue-deep);
+  font-size: 12px;
+}
+
+.history-node span:not(.history-day),
+.history-node small {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-day {
+  color: var(--aqua-deep);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------------
    Session context bar (shared by /call, /knowledge, /audit)
    ------------------------------------------------------------------- */
 
@@ -1195,6 +1528,56 @@ footer {
   margin-bottom: var(--space-6);
 }
 
+.knowledge-overview {
+  align-items: start;
+}
+
+.knowledge-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  padding: 0;
+  margin: 0 0 var(--space-6);
+  list-style: none;
+}
+
+.knowledge-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: white;
+}
+
+.knowledge-steps li > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.knowledge-steps li[data-done="true"] > span {
+  background: var(--lime-soft);
+  color: var(--lime-deep);
+}
+
+.knowledge-steps strong,
+.knowledge-steps small {
+  display: block;
+}
+
+.knowledge-steps small {
+  margin-top: 2px;
+  color: var(--ink-muted);
+}
+
 .status-orbit {
   display: grid;
   width: 96px;
@@ -1250,6 +1633,7 @@ footer {
 
 .upload-zone input[type="file"],
 .upload-zone input[type="text"],
+.upload-zone select,
 .filter-field input,
 .filter-field select {
   min-height: 44px;
@@ -1258,6 +1642,26 @@ footer {
   border-radius: 10px;
   background: white;
   font-size: 13px;
+}
+
+.advanced-fields {
+  display: grid;
+  gap: var(--space-3);
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+}
+
+.advanced-fields summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.advanced-fields[open] summary {
+  margin-bottom: 4px;
 }
 
 .upload-zone .field-help {
@@ -1286,6 +1690,116 @@ footer {
   padding: 12px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
+}
+
+.document-table td:first-child strong,
+.document-origin {
+  display: block;
+}
+
+.document-origin {
+  margin-top: 5px;
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.document-origin.official,
+.protected-label {
+  color: var(--blue);
+}
+
+.protected-label {
+  padding: 7px 9px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.inventory-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  border-radius: 14px;
+  background: var(--surface-muted);
+}
+
+.inventory-toolbar .filter-field {
+  min-width: 210px;
+}
+
+.inventory-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.inventory-pagination .btn {
+  min-height: 36px;
+}
+
+.audit-cell-detail {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: 10px;
+}
+
+.audit-cell-detail.risk {
+  color: var(--coral-deep);
+  font-weight: 800;
+}
+
+.followup-audit-card {
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--aqua-line);
+  border-radius: var(--radius-md);
+  background: var(--aqua-soft);
+}
+
+.followup-audit-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.followup-audit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.followup-audit-grid > div {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.followup-audit-grid dt {
+  color: var(--ink-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.followup-audit-grid dd {
+  margin: 3px 0 0;
+  color: var(--ink-strong);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: capitalize;
 }
 
 .document-status-badge {
@@ -1524,12 +2038,48 @@ footer {
 }
 
 .metric-card__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0 0 7px;
   color: var(--ink-muted);
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+/* El estado deja de ser un prefijo del texto denso y pasa a ser una etiqueta
+   propia (hallazgo H-07 del video). */
+.metric-card__status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.metric-card__status--medido {
+  background: color-mix(in srgb, var(--aqua-deep) 16%, transparent);
+  color: var(--aqua-deep);
+}
+
+.metric-card__status--pendiente {
+  background: color-mix(in srgb, var(--ink-muted) 12%, transparent);
+}
+
+.metric-card__detail-list {
+  margin: 8px 0 0;
+  padding: 0;
+  color: var(--ink-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  list-style: none;
+}
+
+.metric-card__detail-list li + li {
+  margin-top: 2px;
 }
 
 .metric-card__value {
@@ -1686,6 +2236,14 @@ footer {
     grid-template-columns: 1fr;
   }
 
+  .patient-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .history-strip {
+    grid-template-columns: 1fr;
+  }
+
   .metrics-band {
     grid-template-columns: 1fr 1fr;
   }
@@ -1725,6 +2283,23 @@ footer {
 
   .context-strip {
     display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .patient-picker-head {
+    display: block;
+  }
+
+  .patient-search {
+    display: block;
+    margin-top: var(--space-4);
+  }
+
+  .patient-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .history-timeline {
     grid-template-columns: 1fr 1fr;
   }
 

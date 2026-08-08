@@ -17,6 +17,7 @@ _GENERIC_PROCEDURE = "cirugia_ambulatoria_general_x"
 _FIXTURE_CASES: dict[str, ChallengeCase] = {
     "demo-case-001": ChallengeCase(
         case_id="demo-case-001",
+        patient_id="demo-patient-001",
         patient_display_name="Camila (paciente ficticia)",
         procedure=_GENERIC_PROCEDURE,
         procedure_category=_GENERIC_PROCEDURE,
@@ -27,6 +28,7 @@ _FIXTURE_CASES: dict[str, ChallengeCase] = {
     ),
     "demo-case-002": ChallengeCase(
         case_id="demo-case-002",
+        patient_id="demo-patient-002",
         patient_display_name="Julián (paciente ficticio)",
         procedure=_GENERIC_PROCEDURE,
         procedure_category=_GENERIC_PROCEDURE,
@@ -37,6 +39,7 @@ _FIXTURE_CASES: dict[str, ChallengeCase] = {
     ),
     "demo-case-003": ChallengeCase(
         case_id="demo-case-003",
+        patient_id="demo-patient-003",
         patient_display_name="Sofía (paciente ficticia)",
         procedure=_GENERIC_PROCEDURE,
         procedure_category=_GENERIC_PROCEDURE,

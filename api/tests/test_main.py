@@ -40,13 +40,29 @@ def _write_minimal_dataset(dataset_dir: Path) -> None:
     _write_xlsx(
         dataset_dir / TRAYECTORIAS_FILE,
         [
-            "trayectoria_id", "paciente_id", "dia_postop", "arquetipo_trayectoria",
-            "dolor_nrs", "fiebre_c", "movilidad", "herida", "apetito", "sueno",
+            "trayectoria_id",
+            "paciente_id",
+            "dia_postop",
+            "arquetipo_trayectoria",
+            "dolor_nrs",
+            "fiebre_c",
+            "movilidad",
+            "herida",
+            "apetito",
+            "sueno",
         ],
         [
             (
-                "tray_x_1", "pac_x", 1, "recuperacion_normal",
-                1, 36.8, "normal", "normal", "normal", "normal",
+                "tray_x_1",
+                "pac_x",
+                1,
+                "recuperacion_normal",
+                1,
+                36.8,
+                "normal",
+                "normal",
+                "normal",
+                "normal",
             )
         ],
     )

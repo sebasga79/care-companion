@@ -28,9 +28,7 @@ def test_groq_requires_api_key(clean_env: None, monkeypatch: pytest.MonkeyPatch)
         get_settings()
 
 
-def test_groq_rejects_changeme_api_key(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_groq_rejects_changeme_api_key(clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "groq")
     monkeypatch.setenv("LLM_API_KEY", "changeme")
     with pytest.raises(ValidationError, match="LLM_API_KEY"):
@@ -51,9 +49,7 @@ def test_groq_applies_known_defaults_with_only_api_key_set(
     assert settings.llm_model == "llama-3.1-70b-versatile"
 
 
-def test_ollama_does_not_require_api_key(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ollama_does_not_require_api_key(clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ollama local no exige credencial (no es un servicio de nube)."""
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
     settings = get_settings()
@@ -87,9 +83,7 @@ def test_fallback_disabled_by_default(clean_env: None) -> None:
     assert settings.llm_fallback_provider is None
 
 
-def test_fallback_ollama_applies_defaults(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fallback_ollama_applies_defaults(clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "groq")
     monkeypatch.setenv("LLM_API_KEY", "gsk_real_key")
     monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "ollama")
