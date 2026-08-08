@@ -1078,3 +1078,58 @@ el `followup_record` consolidado.
 Verificación: **361 tests recolectados, 358 passed, 3 skipped**; ruff, ESLint y build Next.js
 verdes. La imagen Docker migra de forma idempotente bases persistentes anteriores para marcar
 el corpus oficial sin reindexarlo ni alterar `knowledge_version`.
+
+## 9.19 El contenedor Docker corría con FakeLLM; se activó RAG semántico real
+
+Sospecha del usuario al probar en vivo: la conversación se sentía "demasiado rápida" para ser
+un modelo real. La sospecha era correcta. `docker-compose.yml` nunca leía `api/.env` — sólo
+cableaba `LLM_PROVIDER`/`LLM_API_KEY`/`LLM_MODEL` a mano desde variables del *shell* del host,
+con default `fake`/vacío si no se exportaban antes de `docker compose up`. El contenedor llevaba
+15 horas corriendo con esos defaults, ajeno a cada edición de `api/.env` de toda la sesión
+(modelo, API key, resguardo, rate limiting). Verificado con `docker exec ... env`:
+`LLM_PROVIDER=fake`, `LLM_API_KEY=` vacío, pese a que `api/.env` en disco tenía la config real.
+
+Dos fixes en `docker-compose.yml`:
+1. `env_file: ./api/.env` — Compose carga toda la config automáticamente; variables nuevas ya
+   no requieren tocar este archivo. `DATABASE_PATH`/`DATASET_DIR`/flags de bootstrap se dejan en
+   `environment:` (que tiene prioridad) porque son rutas dentro del contenedor, no del host.
+2. `LLM_FALLBACK_BASE_URL=http://host.docker.internal:11434/v1` + `extra_hosts:
+   host.docker.internal:host-gateway` — el resguardo Ollama corre en el host (Ollama.app), no en
+   un contenedor; `localhost:11434` desde adentro del contenedor es el contenedor mismo
+   (connection refused, verificado). Sin esto el resguardo quedaba inalcanzable justo cuando más
+   se necesita: un 429 de Groq.
+
+Investigar esto reveló un segundo hallazgo, más profundo: `EMBEDDINGS_PROVIDER` nunca estuvo
+seteado en `api/.env`, así que el RAG corría sobre `FakeEmbeddings` (n-gramas hasheados) desde
+el principio de la sesión, pese a que la decisión documentada en §3/§9 era BGE-M3 vía Ollama.
+El retrieval léxico (FTS5) funcionaba; la mitad semántica de la fusión RRF nunca se ejercitó
+con vectores reales.
+
+Se activó con tiempo de sobra antes del plazo. `ollama pull bge-m3` (1.2 GB). `api/.env`:
+`EMBEDDINGS_PROVIDER=ollama`, `EMBEDDINGS_MODEL=bge-m3`, y
+`EMBEDDINGS_REQUEST_TIMEOUT_SECONDS=300` — el documento más grande del corpus tiene **1.127
+chunks** que van en una sola llamada batch (`embed_batch` es por documento, no por chunk); el
+default de 30 s no alcanza. Cambiar de proveedor de embeddings invalida los vectores ya
+indexados (dimensiones distintas), así que se hizo reingestión completa: `docker compose down
+-v` (borra el volumen: dataset + base + índice) seguido de `docker compose up -d --build`, que
+dispara el bootstrap desde cero.
+
+Resultado, cronometrado (sirve como medición real de G2, arranque ≤15 min, pendiente desde
+hacía días): contenedor creado a las 19:50:29 UTC, `care_companion_app_ready` a las 20:00:20
+UTC — **9 min 50 s** con descarga del kit oficial (107 PDF + 4 xlsx), OCR del PDF escaneado, e
+indexación completa con embeddings reales incluidos. 107/107 documentos, 9.296 chunks — mismos
+números que con `FakeEmbeddings` (confirma que el chunking es determinista; sólo cambió el
+vector). Un solo "fallido" en el log de carga es el comportamiento esperado: el PDF escaneado se
+rechaza como PDF crudo (`pdf_no_text_layer`) y su versión OCR se indexa aparte — 107 documentos
+`ready` en total. Embedding verificado en 1024 dimensiones (float32, 4096 bytes), coincide con
+BGE-M3, no con la dimensión de `FakeEmbeddings`.
+
+Prueba end-to-end real tras la reingesta: turno con "me sale un liquido amarillo de la herida y
+tengo mal olor" devolvió `intent=grounded_answer` con 3 citas reales (documento, página,
+`chunk_id`) de dos PDF distintos del corpus oncológico/colorrectal — RAG semántico real
+funcionando de punta a punta, no un artefacto de prueba.
+
+Verificación: 383 passed / 3 skipped, ruff verde. El contenedor se reinició solo una vez durante
+la verificación (exit code 0, sin OOM — atribuible a Docker Desktop, no a la app); los datos
+sobrevivieron porque viven en el volumen nombrado `care_companion_data`, no en la capa del
+contenedor.

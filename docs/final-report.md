@@ -133,7 +133,11 @@ por temor hipotético, no por síntoma reportado) — ver commit
   TTS del agente se autoescuche.
 - **Modelo:** Groq (`llama-3.1-8b-instant`) primario, Ollama local
   (`llama3.2:3b`) de resguardo si Groq falla o excede la cuota. Dataset
-  oficial (160 casos, 4 xlsx) y corpus RAG oficial (107 PDFs) integrados.
+  oficial (160 casos, 4 xlsx) y corpus RAG oficial (107 PDFs, 9.296 chunks)
+  integrados, con embeddings semánticos reales (BGE-M3 vía Ollama, 1024
+  dim) — no `FakeEmbeddings`. `docker-compose.yml` carga la config real de
+  `api/.env` vía `env_file` (antes corría con defaults `fake` sin avisar,
+  ver `docs/auditoria-kit-oficial-2026-08-07.md` §9.19).
 - **No es un producto clínico:** prototipo, sin EHR, sin diagnóstico ni
   prescripción, solo datos sintéticos.
 - **Clean-install ≤15 min:** el stack Docker está listo; falta cronometrarlo

@@ -41,6 +41,9 @@ services:
       # Sin esto, el resguardo queda inalcanzable justo cuando más se
       # necesita (Groq con rate limit).
       - LLM_FALLBACK_BASE_URL=http://host.docker.internal:11434/v1
+      # Mismo motivo que LLM_FALLBACK_BASE_URL: BGE-M3 también corre en
+      # Ollama del host, no en el contenedor.
+      - EMBEDDINGS_BASE_URL=http://host.docker.internal:11434/v1
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
