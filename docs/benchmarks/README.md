@@ -31,10 +31,39 @@ uv run python scripts/benchmark.py --limit 12 --capa capa2_ruidosa --pause 8 \
 
 Usa el proveedor configurado en `api/.env`. Con `LLM_PROVIDER=fake` es
 instantáneo y determinista (sirve para verificar el arnés, **no** para medir
-el sistema). `--pause` existe porque el nivel gratuito de Groq son 6.000
-tokens/minuto: sin pausa, una corrida seguida agota la cuota, el sistema
-degrada al resguardo local y la latencia medida deja de ser la del modelo
-declarado.
+el sistema).
+
+### Cómo se resolvió el límite del nivel gratuito
+
+El primer intento de medir contra Groq fue inválido y conviene dejar
+registrado por qué: el nivel gratuito son **6.000 tokens/minuto** y cada caso
+consume ~5 turnos × 3 agentes. La corrida acumuló **8 rate limits y 4 caídas
+al resguardo**, así que la latencia medida era la de Ollama local (unas 20×
+más lenta) y el modelo evaluado ya no era el declarado para G3. Los números
+no describían nada.
+
+La causa era nuestra, no del proveedor: Groq responde 429 indicando
+exactamente cuánto esperar (cabecera `retry-after` y texto *"Please try again
+in 3.73s"*), y lo estábamos ignorando. Ahora `OpenAICompatLLM` puede esperar
+ese tiempo y reintentar **con el mismo modelo**:
+
+| Contexto | `LLM_RATE_LIMIT_MAX_RETRIES` | Por qué |
+|---|---|---|
+| Conversación en vivo | `0` (default) | Hacer esperar segundos a un paciente es peor que responder con el resguardo |
+| Benchmark | `6`, hasta 70 s | No hay nadie al teléfono; lo que importa es medir el modelo declarado |
+
+El benchmark activa esos valores por sí solo. Con eso, `--pause` ya no es
+necesario para respetar la cuota (sigue disponible para espaciar a mano).
+
+**Consecuencia metodológica:** una corrida de 12 casos tarda 15–25 minutos
+porque incluye las esperas del proveedor. Es el precio de que los números
+sean del sistema real y no del resguardo.
+
+### Latencia: se mide aparte
+
+`groq-latency.json` se obtiene con llamadas **aisladas y espaciadas**, no
+dentro del benchmark de decisión. Medir latencia mientras se compite contra
+la propia cuota daría tiempos de contención, no de servicio.
 
 ## Decisiones de diseño del arnés
 
