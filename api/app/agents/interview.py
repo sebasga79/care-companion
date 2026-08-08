@@ -17,14 +17,17 @@ síntoma) se traduce aquí en una instrucción explícita del prompt."""
 from __future__ import annotations
 
 import json
+import logging
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.agents.support import AgentInvocationError, extract_json_payload, invoke_structured
 from app.domain.models import AgentRequest, AgentResult, UsageMetrics
 from app.domain.observation import Certainty, Observation
 from app.ports.llm import LLMMessage, LLMPort
+
+logger = logging.getLogger("care_companion.agents.interview")
 
 # Checklist mínimo de seguimiento postoperatorio (conocimiento de diseño,
 # spec.md US-001/FR-020: "la siguiente pregunta depende de observaciones y
@@ -191,21 +194,7 @@ class InterviewAgent:
                 warnings=[f"InterviewAgent: {exc.reason}"],
             )
 
-        observations = [
-            Observation(
-                code=draft.code,
-                label=draft.label,
-                value=draft.value,
-                certainty=draft.certainty,
-                original_text=draft.original_text,
-                normalized_text=draft.normalized_text,
-                source_turn_id=(
-                    None if draft.certainty == "not_assessed" else turn_input.last_patient_turn_id
-                ),
-                normalized_by="interview-agent-v1",
-            ).model_dump(mode="json")
-            for draft in parsed.observations
-        ]
+        observations = _build_observations(parsed.observations, turn_input)
 
         return AgentResult(
             status="ok",
@@ -218,6 +207,65 @@ class InterviewAgent:
             },
             usage=usage,
         )
+
+
+def _build_observations(
+    drafts: list[_ObservationDraft], turn_input: InterviewTurnInput
+) -> list[dict]:
+    """Construye las `Observation` finales tolerando salidas incompletas del
+    modelo.
+
+    Bug real encontrado probando G3 contra un modelo permitido de verdad
+    (llama3.2:3b vía Ollama): el modelo devolvió una observación con
+    `certainty="uncertain"` pero `original_text` vacío. `Observation` lo
+    rechaza a propósito (BR-006: toda afirmación conserva su texto
+    verbatim), pero la `ValidationError` se lanzaba AQUÍ — fuera del
+    `try/except AgentInvocationError`, que sólo cubre la invocación — y
+    escapaba hasta el orquestador como excepción no anticipada. Resultado:
+    `DATA_INTEGRITY_FAILURE` y escalamiento en el PRIMER turno ante un
+    simple "buenas tardes". Los tests no lo detectaban porque los fakes
+    siempre rellenan `original_text`.
+
+    Dos defensas, en este orden:
+
+    1. Si el modelo no citó el texto, se usa el turno literal del paciente
+       — que es la fuente verbatim real y satisface BR-006 sin inventar
+       nada (no se fabrica una cita: se usa lo que el paciente dijo).
+    2. Si aun así la observación no valida (código vacío, certeza no
+       reconocida, etc.), se descarta ESA observación y se sigue. Perder
+       una observación malformada del modelo es preferible a tumbar el
+       turno completo: las señales críticas no dependen de esta ruta, las
+       detecta `app/domain/safety_signals.py` sobre el texto crudo.
+    """
+    fallback_text = (turn_input.last_patient_utterance or "").strip()
+    observations: list[dict] = []
+
+    for draft in drafts:
+        original_text = (draft.original_text or "").strip() or fallback_text
+        try:
+            observation = Observation(
+                code=draft.code,
+                label=draft.label,
+                value=draft.value,
+                certainty=draft.certainty,
+                original_text=original_text,
+                normalized_text=draft.normalized_text,
+                source_turn_id=(
+                    None if draft.certainty == "not_assessed" else turn_input.last_patient_turn_id
+                ),
+                normalized_by="interview-agent-v1",
+            )
+        except ValidationError:
+            logger.warning(
+                "interview_observation_descartada code=%r certainty=%r "
+                "(salida del modelo no cumple el contrato de Observation)",
+                draft.code,
+                draft.certainty,
+            )
+            continue
+        observations.append(observation.model_dump(mode="json"))
+
+    return observations
 
 
 def _build_user_prompt(turn_input: InterviewTurnInput) -> str:

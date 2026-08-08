@@ -6,12 +6,30 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import Settings
 from app.main import create_app
 
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> str:
     return str(tmp_path / "care_companion_test.db")
+
+
+@pytest.fixture(autouse=True)
+def _ignore_developer_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Impide que `api/.env` contamine los tests.
+
+    `Settings` declara `env_file=".env"`, así que pydantic-settings lo lee
+    del directorio de trabajo. En cuanto alguien configura un proveedor real
+    para probar a mano (`LLM_PROVIDER=groq`, `LLM_PROVIDER=ollama`…), ese
+    archivo se filtraba a TODA la suite y 8 tests fallaban por un estado de
+    la máquina, no por el código. Le pasaría igual al jurado en cuanto
+    siguiera el README para conectar Groq y luego corriera `make verify`.
+
+    `autouse` a propósito: no depende de que cada test recuerde pedir
+    `clean_env`.
+    """
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
 
 
 @pytest.fixture

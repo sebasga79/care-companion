@@ -298,6 +298,82 @@ async def test_interview_agent_returns_error_result_on_malformed_json() -> None:
     assert "InterviewAgent" in result.warnings[0]
 
 
+async def test_interview_agent_survives_observation_without_original_text() -> None:
+    """Regresión de un bug encontrado probando G3 contra un modelo permitido
+    REAL (llama3.2:3b vía Ollama), no contra un fake: el modelo devolvió una
+    observación con `certainty="uncertain"` y `original_text` vacío. El
+    validador de `Observation` la rechaza a propósito (BR-006), pero la
+    `ValidationError` se lanzaba fuera del `try/except` del agente y escapaba
+    hasta el orquestador — `DATA_INTEGRITY_FAILURE` y escalamiento en el
+    PRIMER turno ante un simple "buenas tardes". Los fakes nunca lo
+    detectaron porque siempre rellenan `original_text`."""
+    response = json.dumps(
+        {
+            "needs_clarification": False,
+            "clarification_question": None,
+            "next_question": "¿Cómo ha dormido?",
+            "observations": [
+                {
+                    "code": "GENERAL_STATE",
+                    "label": "estado general",
+                    "value": None,
+                    "certainty": "uncertain",
+                    "original_text": "",  # el modelo real omitió la cita
+                    "normalized_text": None,
+                }
+            ],
+        }
+    )
+    agent = InterviewAgent(ScriptedFakeLLM(default=response))
+    result = await agent.run(
+        _request(
+            InterviewTurnInput(
+                turns=[],
+                remaining_objectives=[{"code": "GENERAL_STATE", "label": "estado general"}],
+                last_patient_utterance="buenas tardes",
+                last_patient_turn_id="t1",
+            ).model_dump()
+        )
+    )
+
+    assert result.status == "ok", "una cita ausente no puede tumbar el turno completo"
+    observations = result.output["observations"]
+    assert len(observations) == 1
+    # BR-006 se sigue respetando: se usa el turno literal del paciente como
+    # texto verbatim, no se inventa una cita.
+    assert observations[0]["original_text"] == "buenas tardes"
+
+
+async def test_interview_agent_drops_unrecoverable_observation_without_failing_turn() -> None:
+    """Si la observación es irrecuperable (código vacío), se descarta esa
+    observación y el turno continúa — las señales críticas no dependen de
+    esta ruta, las cubre `app/domain/safety_signals.py`."""
+    response = json.dumps(
+        {
+            "needs_clarification": False,
+            "clarification_question": None,
+            "next_question": "¿Cómo sigue?",
+            "observations": [
+                {"code": "", "label": "", "certainty": "confirmed", "original_text": "algo"}
+            ],
+        }
+    )
+    agent = InterviewAgent(ScriptedFakeLLM(default=response))
+    result = await agent.run(
+        _request(
+            InterviewTurnInput(
+                turns=[],
+                remaining_objectives=[],
+                last_patient_utterance="me duele",
+                last_patient_turn_id="t1",
+            ).model_dump()
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output["observations"] == []
+
+
 # --------------------------------------------------------------------- #
 # TriageAgent (SAFE-002)
 # --------------------------------------------------------------------- #
