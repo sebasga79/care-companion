@@ -101,7 +101,11 @@ def create_app() -> FastAPI:
         # `default_agent_deadline_ms`. Sin esto, el resguardo local nunca
         # alcanza a responder antes del deadline y jamás se activa.
         agent_deadline_ms=default_agent_deadline_ms(
-            has_fallback=settings.llm_fallback_provider is not None
+            has_fallback=settings.llm_fallback_provider is not None,
+            rate_limit_budget_seconds=(
+                settings.llm_rate_limit_max_retries
+                * settings.llm_rate_limit_max_wait_seconds
+            ),
         ),
     )
 

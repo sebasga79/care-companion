@@ -92,8 +92,21 @@ AGENT_DEADLINE_WITH_FALLBACK_MS = 20000
 _MAX_PRIOR_COMPLETED_CALLS = 2
 
 
-def default_agent_deadline_ms(*, has_fallback: bool) -> int:
-    return AGENT_DEADLINE_WITH_FALLBACK_MS if has_fallback else AGENT_DEADLINE_MS
+def default_agent_deadline_ms(
+    *, has_fallback: bool, rate_limit_budget_seconds: float = 0.0
+) -> int:
+    """Presupuesto por intento, que debe cubrir TODO lo que ocurre dentro de
+    `asyncio.wait_for`: la llamada, el resguardo si lo hay, y la espera del
+    rate limit si se autorizó esperarlo.
+
+    `rate_limit_budget_seconds` existe por un fallo medido: con reintentos de
+    429 activados, Groq pedía esperar 13-17 s y esa espera ocurría dentro de
+    un deadline de 5 s, así que se cancelaba antes de completarse. El
+    resultado era un `DATA_INTEGRITY_FAILURE` por timeout — el sistema
+    parecía fallar clínicamente cuando en realidad estaba respetando
+    correctamente la cuota del proveedor."""
+    base = AGENT_DEADLINE_WITH_FALLBACK_MS if has_fallback else AGENT_DEADLINE_MS
+    return base + int(rate_limit_budget_seconds * 1000)
 
 _URGENT_SCREEN_QUESTION = (
     "Entiendo que se siente muy mal. Para saber si necesita atención inmediata: "
