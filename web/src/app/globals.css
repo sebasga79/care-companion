@@ -1785,8 +1785,14 @@ footer {
   /* Reposicionada arriba de todo, pero SIN peso visual extra — mismo
      tamaño/forma que el resto de tarjetas `.card` de la página, como
      pidió el usuario ("igual a como estaba antes"). La jerarquía la da
-     el ORDEN (va primera), no un borde ni una sombra distinta. */
-  flex: 1 1 auto;
+     el ORDEN (va primera), no un borde ni una sombra distinta.
+     Bug real de la vuelta anterior: `flex: 1 1 auto` la estiraba a
+     ocupar TODO el ancho restante de la fila — antes vivía en un
+     `.two-col` (`minmax(0, 1.1fr) minmax(320px, 0.9fr)`, ~45% del ancho
+     junto a "Versión activa"), no a ancho completo. `flex: 0 1 680px`
+     reproduce ese tamaño aproximado sin volver a un grid de dos
+     columnas forzado. */
+  flex: 0 1 680px;
   min-width: 0;
 }
 

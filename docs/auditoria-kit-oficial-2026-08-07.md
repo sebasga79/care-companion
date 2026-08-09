@@ -1527,3 +1527,23 @@ tarjeta tenga su alto natural.
 
 tsc + eslint limpios, build de Next OK, `--space-5:20px` verificado en el bundle CSS
 servido. 409 passed / 3 skipped (sin cambios de backend).
+
+## 9.31 La caja de carga seguía demasiado grande — le faltaba el límite de ancho
+
+Feedback en vivo tras §9.30: el borde/sombra ya se había quitado, pero la caja seguía
+ocupando casi todo el ancho de la fila — el usuario pidió "dejarlo donde está [primera en
+la página], pero más pequeño [el tamaño que tenía antes]".
+
+Causa: `flex: 1 1 auto` (agregado en §9.29) estira el elemento para llenar TODO el espacio
+disponible de la fila flex. Antes del rediseño, la tarjeta vivía en un `.two-col`
+(`grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr)`) junto a "Versión activa" —
+ocupaba ~45% del ancho del contenedor, no el 100%.
+
+Fix: `flex: 0 1 680px` — no crece más allá de 680px (aproxima el ancho que tenía en el
+`0.9fr` del grid anterior), sí se encoge en pantallas angostas. Mantiene la posición (primer
+elemento de la página, fuera del grid de dos columnas) sin heredar el tamaño de "ocupar
+todo lo que sobre".
+
+Build OK, `flex:0 680px` verificado en el bundle CSS servido (normalizado por el
+minificador, equivalente a `flex: 0 1 680px`). 409 passed / 3 skipped (sin cambios de
+backend).
