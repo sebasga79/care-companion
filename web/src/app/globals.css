@@ -697,11 +697,17 @@ footer {
 
 .patient-card-grid {
   display: grid;
-  max-height: 320px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  /* La llamada vive ahora en un modal, así que la lista ya no tiene que
+     encogerse para dejarle sitio debajo: antes estaba fijada a 320px y
+     mostraba ~6 pacientes con media pantalla vacía. */
+  max-height: min(62vh, 680px);
+  /* Adaptable al ancho en vez de 3 columnas fijas: en pantallas grandes
+     entran 4-5 tarjetas por fila. */
+  grid-template-columns: repeat(auto-fill, minmax(clamp(260px, 24vw, 340px), 1fr));
+  gap: var(--space-3);
   padding: 2px 4px 2px 2px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .patient-card {
@@ -1162,82 +1168,19 @@ footer {
 /* ---------------------------------------------------------------------
    Cuerpo de la tarjeta de voz DENTRO DEL MODAL.
 
-   Rediseño tras la primera versión, que quedó mal: se partió en columnas
-   (transcripción | orbe) sin repensar la jerarquía, así que competían tres
-   columnas a la vez, el orbe quedaba encajonado y sobraba un hueco blanco
-   abajo a la izquierda. Además, el wrapper que añadí se llamaba
-   `.voice-stage`, la MISMA clase que `VoiceOrb` usa internamente, así que
-   los estilos del contenedor se aplicaban también dentro del orbe.
-
-   Modelo correcto para una llamada en curso: los controles son una BARRA
-   horizontal compacta y la conversación ocupa todo el ancho debajo. La
-   transcripción es lo que se está mirando; el orbe sólo tiene que estar
-   siempre a mano.
+   Transcripción a la IZQUIERDA, llamada y micrófono a la DERECHA. El
+   protagonismo es de la llamada: la transcripción es el registro de lo que
+   pasó, no la acción en curso, así que va en cuerpo más pequeño y sin
+   negrita mientras el micrófono conserva su peso visual.
    ------------------------------------------------------------------- */
 
 .voice-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.78fr);
+  gap: var(--space-5);
+  align-items: start;
   margin-top: var(--space-4);
   min-width: 0;
-}
-
-/* Barra de controles: orbe compacto a la izquierda, botones a la derecha. */
-.call-voice-panel .voice-stage {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas:
-    "mic status"
-    "mic copy";
-  align-items: center;
-  gap: 2px var(--space-4);
-  padding: var(--space-4);
-  border: 1px solid var(--border, #e2e8f0);
-  border-radius: 16px;
-  background: var(--surface-subtle, #f8fafc);
-}
-
-.call-voice-panel .waveform {
-  display: none; /* decorativo; en el modal roba altura sin aportar */
-}
-
-.call-voice-panel .mic-button {
-  grid-area: mic;
-  width: 64px;
-  height: 64px;
-  margin: 0;
-}
-
-.call-voice-panel .voice-status-text {
-  grid-area: status;
-  font-size: 17px;
-  text-align: left;
-}
-
-.call-voice-panel .voice-status-copy {
-  grid-area: copy;
-  margin: 0;
-  font-size: 13px;
-  text-align: left;
-  opacity: 0.75;
-}
-
-.call-modal-panel .call-controls {
-  margin-top: var(--space-3);
-  justify-content: flex-start;
-}
-
-/* El título de portada no aporta nada en una llamada en curso y se comía
-   una franja entera del modal; el contexto ya está en la cabecera. */
-.call-modal-panel .voice-card-head h1,
-.call-modal-panel .voice-card-head .eyebrow {
-  display: none;
-}
-
-.call-modal-panel .voice-card-head {
-  justify-content: flex-end;
-  margin-bottom: 0;
 }
 
 .voice-transcript {
@@ -1249,27 +1192,107 @@ footer {
 
 .voice-transcript-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #64748b);
 }
 
-/* La transcripción crece y luego scrollea sola: los controles de arriba
-   nunca se salen de la vista al acumularse turnos. */
 .voice-transcript .transcript {
-  max-height: min(52vh, 520px);
+  max-height: min(56vh, 560px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: var(--space-2);
 }
 
-/* Las burbujas no deben ocupar todo el ancho disponible: a pantalla
-   completa una frase corta se estiraba de borde a borde. */
-.voice-transcript .transcript > * {
-  max-width: min(70ch, 100%);
+/* Menos peso tipográfico: la transcripción acompaña, no compite. */
+.voice-transcript .transcript .message p {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.voice-transcript .transcript .speaker-label {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.voice-transcript .transcript .speaker-icon {
+  width: 30px;
+  height: 30px;
+  font-size: 11px;
+}
+
+/* --- Columna derecha: la llamada --- */
+
+.call-voice-panel {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.call-voice-panel .voice-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-4);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 16px;
+  background: var(--surface-subtle, #f8fafc);
+  text-align: center;
+}
+
+.call-voice-panel .waveform {
+  display: none; /* decorativo; robaba altura sin aportar */
+}
+
+.call-voice-panel .mic-button {
+  width: 96px;
+  height: 96px;
+  margin: 0;
+}
+
+.call-voice-panel .voice-status-text {
+  font-size: 18px;
+}
+
+.call-voice-panel .voice-status-copy {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.call-modal-panel .call-controls {
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* El título de portada no aporta en una llamada en curso: el contexto ya
+   está en la cabecera del modal. */
+.call-modal-panel .voice-card-head h1,
+.call-modal-panel .voice-card-head .eyebrow {
+  display: none;
+}
+
+.call-modal-panel .voice-card-head {
+  justify-content: flex-end;
+  margin-bottom: 0;
 }
 
 @media (max-width: 1100px) {
-  .call-voice-panel .voice-stage {
-    grid-template-columns: auto minmax(0, 1fr);
+  .voice-card-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* En vertical la acción va primero. */
+  .call-voice-panel {
+    order: -1;
+    position: static;
   }
   .voice-transcript .transcript {
     max-height: none;

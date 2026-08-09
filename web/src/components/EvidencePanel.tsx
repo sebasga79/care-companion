@@ -12,7 +12,7 @@ export function EvidencePanel({ citations }: EvidencePanelProps) {
       <EmptyState
         icon="≡"
         title="Sin evidencia recuperada todavía"
-        detail="Cuando el Retrieval Agent encuentre fuentes vigentes para esta conversación, cada cita mostrará documento, sección y versión."
+        detail="Cuando se encuentren fuentes vigentes para esta conversación, cada cita mostrará documento, sección y versión."
       />
     );
   }

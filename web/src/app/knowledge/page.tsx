@@ -358,10 +358,10 @@ export default function KnowledgePage() {
               <p className="eyebrow">Versión activa</p>
               <h2 id="version-heading">
                 {listLoading
-                  ? "Consultando el backend…"
+                  ? "Consultando el servidor…"
                   : knowledgeVersion !== null
                     ? `Versión de conocimiento v${knowledgeVersion}`
-                    : "Sin conexión al backend"}
+                    : "Sin conexión al servidor"}
               </h2>
             </div>
             {knowledgeVersion !== null ? <span className="status-orbit">v{knowledgeVersion}</span> : null}
@@ -369,7 +369,7 @@ export default function KnowledgePage() {
           <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>
             {knowledgeVersion !== null
               ? `${activeDocuments.length} documentos activos: ${officialCount} oficiales protegidos y ${testCount} de prueba. Los borrados quedan como trazabilidad.`
-              : "El inventario de conocimiento (documentos, versión y prueba canaria) aparecerá aquí cuando el backend esté disponible."}
+              : "El inventario de conocimiento (documentos, versión y prueba canaria) aparecerá aquí cuando el servidor esté disponible."}
           </p>
         </section>
 
@@ -501,7 +501,7 @@ export default function KnowledgePage() {
         </div>
 
         {listLoading ? (
-          <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>Consultando el backend…</p>
+          <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>Consultando el servidor…</p>
         ) : documents.length === 0 ? (
           <EmptyState
             icon="≡"
@@ -730,7 +730,7 @@ export default function KnowledgePage() {
         {searchError ? <StatusBanner message={searchError} onRetry={() => runSearch(searchQuery)} /> : null}
 
         {searching ? (
-          <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>Consultando el backend…</p>
+          <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>Consultando el servidor…</p>
         ) : searchResult === null ? (
           <EmptyState
             icon="⌕"
@@ -795,7 +795,7 @@ export default function KnowledgePage() {
                 — nunca queda un borrado a medias.
               </p>
               {pendingDelete.loadingVerify ? (
-                <p className="dialog-verify-query">Cargando una consulta de verificación real desde el backend…</p>
+                <p className="dialog-verify-query">Cargando una consulta de verificación real desde el servidor…</p>
               ) : pendingDelete.verifyQuery ? (
                 <p className="dialog-verify-query">
                   Tras confirmar, se ejecutará automáticamente esta consulta de verificación: “

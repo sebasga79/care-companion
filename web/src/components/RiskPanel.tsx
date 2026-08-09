@@ -46,14 +46,14 @@ export function RiskPanel({ riskLevel, handoffCreated }: RiskPanelProps) {
           </span>
           <div>
             <strong>Sin evaluación de riesgo todavía</strong>
-            <small>Aparecerá cuando exista una llamada activa conectada al backend.</small>
+            <small>Aparecerá cuando exista una llamada activa conectada al servidor.</small>
           </div>
         </div>
       )}
 
       <div className="escalation-card" data-alerted={handoffCreated}>
         <p style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 800, color: handoffCreated ? "var(--lime-deep)" : "var(--coral-deep)" }}>
-          {handoffCreated ? "Handoff automático registrado" : "Handoff automático activo"}
+          {handoffCreated ? "Derivación registrada" : "Derivación automática activa"}
         </p>
         <p>
           {handoffCreated

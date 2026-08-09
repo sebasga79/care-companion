@@ -37,9 +37,9 @@ function useBackendReadiness(): ReadinessStatus {
 }
 
 const READINESS_COPY: Record<ReadinessStatus, string> = {
-  checking: "Backend: verificando…",
-  ready: "Backend: listo",
-  error: "Backend: no disponible",
+  checking: "Servidor: verificando…",
+  ready: "Servidor: listo",
+  error: "Servidor: no disponible",
 };
 
 export function AppShell({ children }: { children: React.ReactNode }) {

@@ -146,7 +146,7 @@ export default function AuditPage() {
           </p>
         </div>
         <div className="hero-actions">
-          <span className="chip chip-simulation">{rows.length} sesiones visibles · datos del backend</span>
+          <span className="chip chip-simulation">{rows.length} sesiones visibles · datos del servidor</span>
         </div>
       </div>
 
@@ -241,7 +241,7 @@ export default function AuditPage() {
         {error ? <StatusBanner message={error} onRetry={() => runSearch(filters)} /> : null}
 
         {loading ? (
-          <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>Consultando el backend…</p>
+          <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>Consultando el servidor…</p>
         ) : rows.length === 0 ? (
           <EmptyState
             icon="◷"
@@ -327,7 +327,7 @@ export default function AuditPage() {
           <div className="section-heading">
             <div>
               <p className="eyebrow">Secuencia verificable</p>
-              <h2 id="timeline-heading">Línea de tiempo del handoff</h2>
+              <h2 id="timeline-heading">Línea de tiempo de la derivación</h2>
             </div>
           </div>
           {traceError ? <StatusBanner message={traceError} onRetry={() => selectSession(selectedId!)} /> : null}
@@ -335,7 +335,7 @@ export default function AuditPage() {
             <EmptyState
               icon="→"
               title="Sin línea de tiempo todavía"
-              detail="Selecciona una sesión de la tabla para ver la secuencia correlacionada: eventos instrumentados, decisiones y handoff."
+              detail="Selecciona una sesión de la tabla para ver la secuencia correlacionada: eventos instrumentados, decisiones y derivación."
             />
           ) : !trace ? (
             <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>Cargando traza…</p>

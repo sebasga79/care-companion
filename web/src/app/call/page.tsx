@@ -534,6 +534,11 @@ export default function CallPage() {
           </div>
 
           <div className="voice-card-body">
+          <div className="voice-transcript">
+            <h2 className="voice-transcript-title">Transcripción</h2>
+            <TranscriptPanel turns={turns} patientAlias={patientAlias} />
+          </div>
+
           <div className="call-voice-panel">
           <VoiceOrb
             state={displayVoiceState}
@@ -609,11 +614,6 @@ export default function CallPage() {
             </form>
           ) : null}
 
-          </div>
-
-          <div className="voice-transcript">
-            <h2 className="voice-transcript-title">Transcripción</h2>
-            <TranscriptPanel turns={turns} patientAlias={patientAlias} />
           </div>
           </div>
         </section>

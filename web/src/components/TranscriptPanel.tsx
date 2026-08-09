@@ -12,7 +12,7 @@ export function TranscriptPanel({ turns, patientAlias }: TranscriptPanelProps) {
       <EmptyState
         icon="…"
         title="Aún no hay transcripción"
-        detail="Los turnos de la conversación aparecerán aquí en cuanto la llamada esté conectada al backend. Ningún dato de paciente se precarga."
+        detail="Los turnos de la conversación aparecerán aquí en cuanto la llamada esté conectada al servidor. Ningún dato de paciente se precarga."
       />
     );
   }
