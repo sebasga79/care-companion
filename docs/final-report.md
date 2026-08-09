@@ -207,23 +207,24 @@ ejecución.
     Docker (imágenes base, dependencias) — esa parte depende de la
     velocidad de red del jurado y no se puede medir desde aquí; el margen
     hasta los 15 minutos es amplio incluso así.
-- **Latencia voz-a-voz (spec.md §1.5) instrumentada y persistida, sin
-  muestra real todavía.** `CallModal.tsx` mide en el navegador, por
-  llamada, desde que el paciente termina de hablar hasta que empieza a
-  sonar el audio del agente — la definición exacta de la rúbrica §5 — la
-  muestra en vivo junto al micrófono y la reporta a
-  `POST /api/v1/sessions/{id}/voice-latency`, que la persiste como evento
-  auditable (`client.voice_latency_reported`). `GET /api/v1/metrics`
-  expone el resultado (`latency_voice`, P50/P95) y `/audit` lo muestra
-  como tarjeta propia — el jurado puede corroborarlo sin depender de que
-  alguien le pase un número a mano. Lo que falta no es instrumentación ni
-  persistencia: STT y TTS corren enteramente en el navegador (Web Speech
-  API), así que la única forma de producir una muestra real es una llamada
-  real con micrófono; no hay script ni proceso de servidor que pueda
-  generarla. Lo medido hasta ahora (`groq-latency.json`,
-  `capa1-groq*.json`) sigue siendo el mejor proxy de servidor (sin
-  tránsito WS ni arranque real del motor de TTS) — ver §9.20, §9.34 y
-  §9.35 de la auditoría.
+- **Latencia voz-a-voz (spec.md §1.5), primeras muestras reales: P50
+  6.154 ms / P95 6.507 ms (n=3, navegador real, 9 ago) — por encima del
+  objetivo interno de ≤2,5s (NFR-002).** `CallModal.tsx` mide en el
+  navegador, por llamada, desde que el paciente termina de hablar hasta
+  que empieza a sonar el audio del agente — la definición exacta de la
+  rúbrica §5 — y la reporta a `POST /api/v1/sessions/{id}/voice-latency`,
+  persistida como evento auditable (`client.voice_latency_reported`).
+  `GET /api/v1/metrics` y `/audit` la exponen sin depender de que alguien
+  pase un número a mano. Con n=3 el número es preliminar, no una
+  distribución estable, y queda declarado como tal — no se espera a tener
+  más muestras para reportarlo, un real chico es mejor que "pendiente".
+  El turno más lento de las 3 encadenó entrevista → RAG con embeddings
+  reales → triage → respuesta (4 llamadas al modelo/embeddings en un
+  único turno): el proxy de servidor de §4 (`turn.response_sent`, sin
+  tránsito WS ni arranque real de TTS) subestima la experiencia real de
+  punta a punta en ese escenario — diferencia honesta, no oculta. Detalle
+  completo en el [README §Métricas](../README.md#métricas-rúbrica-5) y
+  auditoría §9.20, §9.34, §9.35, §9.40.
 - Filtros server-side de auditoría, reranker adicional y responsive móvil
   quedan como mejoras no bloqueantes.
 

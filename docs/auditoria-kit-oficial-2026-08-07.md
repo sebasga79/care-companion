@@ -2065,3 +2065,39 @@ nuevo y `correlationId`. Backend sin cambios de código — ruff + pytest limpio
 Contenedores de la prueba de arranque limpio del usuario (`care-companion-*`) tuvieron que
 quedar detenidos, no reiniciados — mismos puertos que el entorno de desarrollo, no pueden
 coexistir; están intactos, solo apagados.
+
+## 9.40 Primeras muestras reales de latencia voz-a-voz — el usuario pegó un log, no era solo para mostrar
+
+El usuario compartió una captura de `./levantar_app.sh --logs` corrida contra el entorno de
+desarrollo de esta sesión (que en ese momento ya tenía el fix de `correlation_id` — el
+mensaje anterior le había sugerido explorar `/audit` ahí). El log mostraba, entre otras
+cosas, dos `POST .../voice-latency` con `204 No Content` — la instrumentación de §9.35/§9.36
+funcionando con una llamada de voz **real**, la primera de toda la sesión (nadie más que un
+navegador con micrófono puede generarla; ningún script de esta sesión pudo producirla nunca).
+
+**No se tomó el agregado de `/api/v1/metrics` al pie de la letra.** Antes de reportar nada,
+se consultó la tabla `events` directamente (`docker exec ... sqlite3`) para separar las 4
+muestras que el endpoint acumulaba: una (`2150.0`, exactamente redonda) era la prueba manual
+propia por curl de §9.35 al verificar el endpoint — no una llamada real. Las otras tres
+(`1186.0`, `6153.7`, `6507.1`, con la precisión decimal típica de `performance.now()` en
+JavaScript, no algo que se escriba a mano) se verificaron una por una contra
+`GET /api/v1/audit/sessions/{id}/trace`: las tres muestran la cadena completa de un turno
+real (`agent.interview.completed` → a veces `rag.retrieval.completed`/`agent.triage.completed`/
+`agent.response.completed` → `turn.response_sent` → `client.voice_latency_reported`), con el
+proxy de servidor (`turn.response_sent`) y la medición real del navegador
+(`client.voice_latency_reported`) separadas por sólo 38-150 ms — la diferencia esperada de
+tránsito WS + arranque de TTS, ni una milésima parte de una contaminación. Confirmado: 3
+muestras reales, 1 sintética propia, excluida del reporte.
+
+**P50 6.154 ms / P95 6.507 ms (n=3)** — reportado en README y `final-report.md` con la
+muestra chica declarada explícitamente, no escondida. El hallazgo honesto que trae: está por
+encima del objetivo interno de ≤2,5s (NFR-002) y también por encima del proxy de servidor de
+`capa1-groq-70b.json` (~3,8s P50) — el turno más lento de las 3 encadenó RAG con embeddings
+reales (llamada real a Ollama vista en el log: `POST http://host.docker.internal:11434/v1/
+embeddings`) además de los 3 agentes, algo que el proxy de servidor no captura con la misma
+fidelidad que el navegador real (tránsito de WebSocket, arranque del motor de TTS). No se
+suavizó el número para que se viera mejor.
+
+Verificación: sin cambios de código en esta entrada — sólo lectura de la base real (`sqlite3`
+vía `docker exec`) y actualización de README/`final-report.md`/esta auditoría con los números
+verificados.

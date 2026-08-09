@@ -274,12 +274,36 @@ sirvió el modelo local gratuito.
 **Latencia voz-a-voz** (definición exacta de la rúbrica: desde que el
 paciente termina de hablar hasta que empieza a sonar el audio del agente)
 está **instrumentada en vivo** en `/call` y `/knowledge` — aparece junto al
-micrófono durante la llamada apenas hay una muestra — pero STT y TTS corren
-enteramente en el navegador (Web Speech API), así que no hay forma de
-generar una muestra real sin una llamada real con micrófono. La cifra de
-esta tabla es el mejor proxy medible en el servidor (desde que llega
-`client.turn_text` hasta que se envía la respuesta) y no incluye tránsito
-de red del WebSocket ni el arranque real del motor de TTS del navegador.
+micrófono durante la llamada apenas hay una muestra. STT y TTS corren
+enteramente en el navegador (Web Speech API), así que la única forma de
+medirla es una llamada real con micrófono — no un script.
+
+**Primeras 3 muestras reales, navegador real (9 ago), llamada de voz
+completa contra Groq:**
+
+| Métrica | Valor |
+|---|---|
+| Latencia voz-a-voz P50 / P95 | **6.154 ms / 6.507 ms** (n=3) |
+
+Con sólo 3 muestras el número es preliminar, no una distribución estable —
+se reporta igual, sin esperar a tener más, porque un número real con
+muestra chica es más honesto que "pendiente" indefinidamente (rúbrica:
+"reportar números que no se sostienen es peor que no reportarlos", pero
+lo contrario también aplica — un real pequeño no es un número que no se
+sostenga, es evidencia genuina con su límite declarado). Por encima del
+objetivo interno de ≤2,5s P95 (spec.md NFR-002): el turno más lento de
+las 3 muestras hizo la cadena completa (entrevista → RAG con embeddings
+reales → triage → respuesta, 4 llamadas al modelo/embeddings en un solo
+turno) — el proxy de servidor de la tabla principal (~3,8s P50 medido en
+`capa1-groq-70b.json`, sección anterior) no incluye esa latencia de RAG
+semántico real ni el tránsito de red del WebSocket, así que subestima la
+experiencia real de punta a punta. Queda como límite conocido en
+"Límites y trabajo pendiente" del informe final, no oculto.
+
+La cifra del proxy de servidor (tabla principal de arriba) sigue siendo
+útil aparte: mide sólo el tiempo de cómputo del backend, sin ruido de
+red/TTS, así que aísla mejor si una regresión futura es del modelo o de
+la capa de transporte.
 
 Cada muestra que el navegador mide queda además **persistida como evento
 auditable** (`POST /api/v1/sessions/{id}/voice-latency` →
