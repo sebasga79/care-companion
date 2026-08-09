@@ -1858,3 +1858,51 @@ priorizar el diagrama primero; estos quedan para una siguiente pasada.
 Verificación: sin cambios en `api/app`, `api/tests` ni `web/src` (solo `docs/` y
 `web/README.md`) — no aplica rebuild de Docker ni reejecutar la suite completa; se confirmó
 con `git status` que el cambio queda acotado a documentación.
+
+## 9.37 README: el comando de arranque pasa a ser lo primero, con URL real y sin `fake` como default
+
+Pedido explícito: la URL real del repo en vez de `<repo-url>`, el comando de un solo paso
+primero en el documento ("es lo más importante... súper sencillo de ejecutar"), la key de
+Groq justo después, y quitar el adapter `fake` como camino recomendado ("eso complica las
+cosas") — todo lo demás pasa a ser lectura adicional para cuando el jurado tenga tiempo.
+
+**URL real:** `https://github.com/sebasga79/care-companion.git` (confirmada con
+`git remote -v`, no de memoria).
+
+**Orden nuevo:** "Qué hace" (contexto de 10 segundos) → **"Arranque en un solo comando"**
+(movido de la línea 142 a la línea 25, justo después del contexto) → "Arquitectura" →
+separador → todo lo demás bajo "información adicional para cuando el jurado tenga tiempo".
+
+**Por qué la key de Groq queda "después" del comando pero técnicamente hay que configurarla
+antes de correrlo la primera vez** — tensión real entre lo pedido literalmente y la
+corrección funcional, resuelta así: `api/.env` nunca puede traer una key real de fábrica (es
+un secreto, no se commitea), así que no existe versión del "un solo comando" que hable con
+Groq sin que alguien pegue su propia key en algún momento. La resolución: el comando aparece
+primero y grande (satisface "aparece de primero, es lo más importante"), inmediatamente
+debajo — no en una sección aparte más abajo — están los 2 pasos para la key, enmarcados como
+"antes de correrlo por primera vez". Se agregó además la instrucción de `--rebuild` para
+quien corra el comando antes de configurar la key: `docker compose up -d` sin `--build`
+no relee `api/.env` si los contenedores ya estaban arriba (`env_file` se inyecta al crear el
+contenedor, no en un simple restart de uno ya existente) — sin este aviso, alguien que agrega
+la key después se quedaría preguntándose por qué sigue en modo de prueba.
+
+**No se tocó `api/.env.example`.** Se consideró cambiar su default de `LLM_PROVIDER=fake` a
+`groq` para que baste editar una sola línea (la key) en vez de dos. Se descartó: con
+`LLM_PROVIDER=groq` y `LLM_API_KEY=changeme` (el placeholder que trae el ejemplo), `Settings`
+**rechaza el arranque** (`test_groq_rejects_changeme_api_key`) — quien olvide reemplazar la
+key no vería el sistema en modo de prueba, vería la aplicación caerse. Mantener `fake` como
+default de `.env.example` es justamente lo que evita que un olvido se convierta en un
+arranque roto; el README ahora sólo dice que hay que editar las dos líneas juntas.
+
+**Otras correcciones de paso:** la sección de resguardo local decía `ollama pull phi3.5` —
+el resguardo real desde el 8 de agosto es `llama3.2:3b` (mismo error de nombre de modelo que
+apareció y se corrigió en `final-report.md`/`docs/prompt-config-appendix.md`/`CLAUDE.md` en
+tareas anteriores; este era un cuarto lugar con el dato viejo, no encontrado hasta ahora
+porque nadie había grepeado "phi3.5" específicamente en `README.md`). Se separó además la
+sección de "Probar con el modelo real" del original en dos: la key de Groq (ahora en el
+arranque) y el resguardo Ollama (que sigue siendo opcional, movido a la sección de detalles).
+
+Verificación: sin `<repo-url>` residual, sin menciones de `fake`/`phi3.5` fuera de contexto
+técnico correcto (grep explícito de ambos), 14 fences de código (7 pares, balanceado), 
+estructura de encabezados revisada. Sin cambios en `api/app`/`api/tests`/`web/src` — solo
+`README.md`.

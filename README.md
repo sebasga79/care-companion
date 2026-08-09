@@ -20,60 +20,96 @@ Tres vistas: **`/call`** (llamada en vivo), **`/knowledge`** (conocimiento vivo
 con aprendizaje/olvido demostrable) y **`/audit`** (traza de decisiones,
 fuentes y métricas).
 
-## Arquitectura (resumen)
+---
 
-Monolito modular: un backend **FastAPI + SQLite (WAL)** y un frontend
-**Next.js/React/TypeScript**. La orquestación es una **máquina de estados
-tipada** que coordina agentes de responsabilidad única (`Interview`, `Triage`,
-`Response`) — los agentes nunca se llaman entre sí. RAG híbrido (**FTS5 + coseno
-+ RRF**) con evidence gate. Todo proveedor externo (LLM, STT, TTS, embeddings,
-datos) entra por **puertos/adaptadores**; hoy corren adapters `fake`
-deterministas para pruebas, **Groq/Llama 3.3 70B Versatile** como opción
-competitiva primaria y **Ollama/Llama 3.2 3B** como resguardo local, sin tocar
-el dominio (ver `docs/adr/ADR-001`).
+## Arranque en un solo comando
 
-Detalle en [`docs/architecture.md`](docs/architecture.md).
+```bash
+git clone https://github.com/sebasga79/care-companion.git && cd care-companion
+./levantar_app.sh
+```
 
-## Requisitos
+Requiere **Docker Desktop** instalado y corriendo. El comando construye las
+imágenes, descarga el dataset y corpus oficial del reto (~127 MB, solo la
+primera vez), los indexa, levanta backend y frontend, y abre `/call` en el
+navegador — nada manual de por medio. Primera vez toma unos minutos
+(descarga + indexado); ejecuciones siguientes son casi instantáneas.
 
-Ruta recomendada para el jurado:
+**Antes de correrlo por primera vez**, para que el agente hable con el
+modelo real del concurso — Groq — en vez de quedarse en un modo de prueba
+sin red:
 
-- **Docker + Docker Compose**.
-- conexión a internet en la primera ejecución para descargar el kit público (~127 MB).
-
-Ruta local alternativa, útil para desarrollo:
-
-- **Python 3.11 o 3.12 + [uv](https://docs.astral.sh/uv/)**;
-- **Node 22 + pnpm**.
-
-No se necesitan credenciales para correr el prototipo: usa el proveedor LLM
-`fake` determinista. No hay secretos en el repositorio.
-
-> **Puertos:** el proyecto usa puertos altos e inusuales para no chocar con
-> otros servicios locales — backend **49317**, frontend **49318**.
-
-### Probar con el modelo real (Groq)
-
-Por defecto todo corre con `fake` (determinista, sin red). Para hablar de
-verdad con **Llama 3.3 70B Versatile (`llama-3.3-70b-versatile`) vía Groq** —
-el modelo declarado para la compuerta G3, ver
-[`docs/final-report.md` §2.1](docs/final-report.md) para la familia permitida
-y por qué esta variante:
-
-1. Crea una API key gratis en <https://console.groq.com/keys>.
+1. Crea una API key gratis en [console.groq.com/keys](https://console.groq.com/keys) — sin tarjeta, menos de un minuto.
 2. `cp api/.env.example api/.env` y edita dos líneas:
    ```bash
    LLM_PROVIDER=groq
    LLM_API_KEY=gsk_tu_api_key_real
    ```
-   `LLM_BASE_URL`/`LLM_MODEL` se completan solos con los defaults de Groq
-   (`app/core/config.py`) — no hace falta tocarlos.
-3. (Opcional) resguardo local con [Ollama](https://ollama.com/): instala,
-   `ollama pull phi3.5`, y agrega `LLM_FALLBACK_PROVIDER=ollama` al `.env` —
-   si Groq falla/no responde, el turno sigue con el modelo local en vez de
-   quedarse sin respuesta.
-4. Reinicia el backend (`./levantar_app.sh --reinstall` o `uv run uvicorn
-   app.main:app --port 49317` si corres manual).
+
+Si ya corriste `./levantar_app.sh` una vez sin la key, agrégala y vuelve a
+correr con `./levantar_app.sh --rebuild` (el simple no reconstruye
+contenedores ya levantados).
+
+- Frontend: <http://localhost:49318> (redirige a `/call`)
+- API + OpenAPI: <http://localhost:49317/docs>
+- Health: <http://localhost:49317/health>
+
+Comandos disponibles:
+
+```bash
+./levantar_app.sh --stop       # detener sin borrar datos
+./levantar_app.sh --logs       # ver logs
+./levantar_app.sh --rebuild    # aplicar cambios de código/dependencias/api/.env
+./levantar_app.sh --no-open    # levantar sin abrir el navegador
+./levantar_app.sh --local      # desarrollo sin Docker, con hot reload
+```
+
+---
+
+## Arquitectura (resumen)
+
+Monolito modular: un backend **FastAPI + SQLite (WAL)** y un frontend
+**Next.js/React/TypeScript**. La orquestación es una **máquina de estados
+tipada** que coordina agentes de responsabilidad única (`Interview`, `Triage`,
+`Response`) — los agentes nunca se llaman entre sí. RAG híbrido (**FTS5 + coseno + RRF**) con evidence gate. Todo proveedor externo (LLM, STT, TTS, embeddings,
+datos) entra por **puertos/adaptadores**: **Groq/Llama 3.3 70B Versatile**
+como modelo primario del concurso, **Ollama/Llama 3.2 3B** como resguardo
+local si Groq falla, y un adapter `fake` determinista reservado para tests
+automatizados — sin tocar el dominio (ver `docs/adr/ADR-001`).
+
+Detalle en [`docs/architecture.md`](docs/architecture.md) y el diagrama en
+[`docs/architecture-diagram.md`](docs/architecture-diagram.md).
+
+---
+
+Todo lo que sigue es información adicional — detalle para leer con más
+tiempo, no hace falta para levantar el sistema.
+
+## Requisitos y detalles del arranque
+
+- **Docker + Docker Compose** (ruta recomendada, ver arriba).
+- Conexión a internet en la primera ejecución para descargar el kit público
+  (~127 MB) y, si configuras Groq, para las llamadas al modelo.
+
+Ruta local alternativa, útil para desarrollo (sin Docker):
+
+- **Python 3.11 o 3.12 + [uv](https://docs.astral.sh/uv/)**;
+- **Node 22 + pnpm**.
+
+> **Puertos:** el proyecto usa puertos altos e inusuales para no chocar con
+> otros servicios locales — backend **49317**, frontend **49318**.
+
+Nunca commitees `api/.env` (ya está en `.gitignore`); la key real solo vive
+ahí, en tu máquina. No hay secretos en el repositorio.
+
+### Resguardo local opcional (Ollama)
+
+Si quieres que la llamada siga funcionando aunque Groq falle o no responda
+durante la sesión de evaluación, en vez de quedarse sin respuesta:
+
+1. Instala [Ollama](https://ollama.com/) y corre `ollama pull llama3.2:3b`.
+2. Agrega `LLM_FALLBACK_PROVIDER=ollama` a `api/.env`.
+3. `./levantar_app.sh --rebuild`.
 
 ### Embeddings reales para el RAG (Ollama + BGE-M3)
 
@@ -89,12 +125,9 @@ regionalismos). Para embeddings semánticos de verdad:
    ```
    `EMBEDDINGS_BASE_URL`/`EMBEDDINGS_MODEL` se completan solos
    (`http://localhost:11434/v1` / `bge-m3`).
-3. Reinicia el backend. **Si ya habías cargado documentos con `fake`**, los
-   vectores viejos quedan en otra dimensión — borra la base
-   (`./levantar_app.sh --clean`) y vuelve a cargar el conocimiento.
-
-Nunca commitees `api/.env` (ya está en `.gitignore`); la key real solo vive
-ahí, en tu máquina.
+3. `./levantar_app.sh --rebuild`. **Si ya habías cargado documentos con
+   embeddings `fake`**, los vectores viejos quedan en otra dimensión — borra
+   la base (`./levantar_app.sh --clean`) y vuelve a cargar el conocimiento.
 
 ### Dataset y corpus clínico real del reto
 
@@ -140,52 +173,19 @@ curso, no de los otros cuatro.
 `fetch_dataset.py --no-textos` descarga solo los `.xlsx` (rápido) si no
 necesitas el corpus PDF todavía.
 
-## Arranque recomendado: un solo comando
-
-```bash
-git clone <repo-url> care-companion && cd care-companion
-./levantar_app.sh
-```
-
-El launcher detecta el estado automáticamente:
-
-- primera ejecución: construye las imágenes, instala dependencias, descarga el kit oficial
-  e indexa el corpus dentro del volumen Docker (puede tardar varios minutos);
-- ejecuciones posteriores: inicia los contenedores existentes sin reinstalar;
-- si la aplicación ya está funcionando: únicamente abre la página;
-- siempre espera el health-check antes de abrir el navegador.
-
-Comandos disponibles:
-
-```bash
-./levantar_app.sh --stop       # detener sin borrar datos
-./levantar_app.sh --logs       # ver logs
-./levantar_app.sh --rebuild    # aplicar cambios de código/dependencias
-./levantar_app.sh --no-open    # levantar sin abrir el navegador
-./levantar_app.sh --local      # desarrollo sin Docker, con hot reload
-```
-
-- Frontend: <http://localhost:49318> (redirige a `/call`)
-- API + OpenAPI: <http://localhost:49317/docs>
-- Health: <http://localhost:49317/health>
-
 ### Equivalente manual con Docker Compose
 
 ```bash
 docker compose up -d --build
 ```
 
-Mismos puertos host (49318 frontend, 49317 API). El comando anterior usa el adapter
-determinista `fake` para comprobar instalación y flujo sin secretos. Para ejecutar con el
-modelo permitido elegido para el concurso:
-
-```bash
-LLM_PROVIDER=groq LLM_API_KEY=gsk_tu_api_key_real ./levantar_app.sh --rebuild
-```
+Mismos puertos host (49318 frontend, 49317 API). Lee `api/.env` igual que
+`./levantar_app.sh` — configúralo primero (ver arriba) para correr con Groq
+en vez del adapter `fake` reservado para tests.
 
 No se debe publicar una API key en el repositorio.
 
-## Arranque local manual (sin script ni Docker)
+### Arranque local manual (sin script ni Docker)
 
 ```bash
 # Backend
