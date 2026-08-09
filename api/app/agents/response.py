@@ -106,6 +106,18 @@ class ResponseTurnInput(BaseModel):
     # explícitamente "cómo abre, conduce y cierra el agente la conversación"
     # y "si indaga antes de decidir".
     next_question: str | None = None
+    # Bug real visto en vivo (auditoría §9.23, 9 ago): el agente volvía a
+    # saludar/presentarse a mitad de una llamada ya abierta ("¡Hola
+    # Camila!", "Es un gusto hablar contigo de nuevo"). Causa: este prompt
+    # nunca le decía al modelo que la llamada YA tenía un saludo — desde
+    # su perspectiva, cada turno podía parecer el primero.
+    #
+    # `already_greeted` es contexto EFÍMERO: se deriva de `len(existing_
+    # turns)` en cada llamada a `handle_turn` (call_cycle.py), no de una
+    # tabla nueva — la tabla `turns` ya existe y ya se lee para eso mismo.
+    # Nada se persiste aquí que no estuviera persistido antes; sólo se le
+    # pasa al LLM un dato que el orquestador ya tenía.
+    already_greeted: bool = False
 
 
 class ResponseAgent:
@@ -245,7 +257,17 @@ def _system_prompt_for(intent: Intent) -> str:
 
 
 def _build_user_prompt(intent: Intent, turn_input: ResponseTurnInput) -> str:
-    lines = ["## Contexto conocido del caso (no es un síntoma actual)"]
+    lines: list[str] = []
+    if turn_input.already_greeted:
+        lines.append(
+            "## Ya estás en medio de esta llamada\n"
+            "Ya saludaste y te presentaste al abrir la llamada. NO vuelvas a saludar "
+            "('hola', 'buenas tardes'), NO te presentes de nuevo, y NO digas frases como "
+            "'es un gusto hablar contigo de nuevo' o 'qué bueno saber de ti otra vez' — "
+            "para el paciente esto es la MISMA conversación continua, no una llamada "
+            "nueva. Responde directo, como quien ya lleva un rato al teléfono."
+        )
+    lines.append("## Contexto conocido del caso (no es un síntoma actual)")
     lines.append(str(turn_input.case_context) if turn_input.case_context else "(sin contexto)")
     lines.append("\n## Seguimientos anteriores (no asumir vigencia hoy)")
     if turn_input.prior_followups:

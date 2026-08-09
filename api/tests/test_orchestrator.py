@@ -494,6 +494,83 @@ async def test_two_genuinely_different_clarifications_are_both_asked(db_path: st
     ]
 
 
+async def test_skip_interview_checklist_case_does_not_push_next_question(db_path: str) -> None:
+    """Bug real visto en vivo (auditoría §9.23): tras responder una pregunta
+    ad-hoc en el caso dedicado a "Probar en una llamada" de /knowledge, el
+    agente seguía empujando el checklist clínico (dolor, líquidos,
+    movilidad) como si fuera un paciente real. `demo-case-quicktest` tiene
+    `skip_interview_checklist=True` precisamente para esto: el prompt del
+    `ResponseAgent` no debe recibir ninguna "SIGUIENTE PREGUNTA"."""
+    _init_db(db_path)
+    session_id = SessionRepository(db_path).create(
+        case_id="demo-case-quicktest",
+        state=SessionState.CREATED.value,
+        knowledge_version=get_current_knowledge_version(db_path),
+    )["id"]
+    llm = ScriptedFakeLLM(default="placeholder")
+    orchestrator = _orchestrator(db_path, llm)
+
+    _script(
+        llm,
+        interview_json=_interview_json(
+            observations=[
+                {
+                    "code": "PAIN",
+                    "label": "dolor",
+                    "certainty": "confirmed",
+                    "value": False,
+                    "original_text": "no me duele",
+                    "normalized_text": None,
+                }
+            ],
+        ),
+        triage_json=_triage_json(model_level="ROUTINE_FOLLOW_UP"),
+        response_text="Con gusto te cuento sobre eso.",
+    )
+
+    await orchestrator.handle_turn(session_id, "¿hay algún programa de cuidado de cicatrices?")
+
+    # El texto exacto del encabezado condicional (`_build_user_prompt`),
+    # no la mención general que ya vive en el system prompt como
+    # explicación del concepto — esa sí aparece siempre.
+    user_message = llm.calls[-1][-1].content
+    assert "## SIGUIENTE PREGUNTA DEL SEGUIMIENTO" not in user_message
+
+
+async def test_regular_synthetic_case_still_pushes_next_question(db_path: str) -> None:
+    """Contrapeso: Camila (`demo-case-001`, `is_synthetic_demo=True` pero
+    `skip_interview_checklist=False`) debe seguir conduciendo el checklist
+    normalmente — es la base de `test_gates.py`. Confirma que el nuevo
+    flag no se coló accidentalmente a los tres casos originales."""
+    _init_db(db_path)
+    session_id = _new_session(db_path)  # demo-case-001 = Camila
+    llm = ScriptedFakeLLM(default="placeholder")
+    orchestrator = _orchestrator(db_path, llm)
+
+    _script(
+        llm,
+        interview_json=_interview_json(
+            observations=[
+                {
+                    "code": "PAIN",
+                    "label": "dolor",
+                    "certainty": "confirmed",
+                    "value": False,
+                    "original_text": "no me duele",
+                    "normalized_text": None,
+                }
+            ],
+        ),
+        triage_json=_triage_json(model_level="ROUTINE_FOLLOW_UP"),
+        response_text="Con gusto te cuento sobre eso.",
+    )
+
+    await orchestrator.handle_turn(session_id, "bien")
+
+    user_message = llm.calls[-1][-1].content
+    assert "## SIGUIENTE PREGUNTA DEL SEGUIMIENTO" in user_message
+
+
 async def test_routine_cycle_covers_objectives_and_closes_automatically(db_path: str) -> None:
     _init_db(db_path)
     session_id = _new_session(db_path)
@@ -916,6 +993,18 @@ def test_strip_redundant_greeting_removes_midcall_hello() -> None:
     assert _strip_redundant_greeting(
         "Buenas tardes, Jean. ¿En qué parte siente el dolor?"
     ) == "¿En qué parte siente el dolor?"
+
+
+def test_strip_redundant_greeting_handles_opening_exclamation_mark() -> None:
+    """Bug real con Llama 3.3 70B (auditoría §9.23, transcripción de
+    Camila): "¡Hola Camila!" con el signo de apertura ANTES del saludo no
+    se quitaba — `^\\s*` no consume "¡" porque no es espacio en blanco, así
+    que el saludo redundante se colaba intacto pese al fix anterior."""
+    from app.orchestrator.call_cycle import _strip_redundant_greeting
+
+    assert _strip_redundant_greeting(
+        "¡Hola Camila! Me alegra saber que has podido tolerar líquidos."
+    ) == "Me alegra saber que has podido tolerar líquidos."
 
 
 def test_strip_redundant_greeting_preserves_normal_messages() -> None:

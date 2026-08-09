@@ -570,6 +570,48 @@ async def test_response_agent_grounded_prompt_never_leaks_into_abstain_or_handof
     assert "contenido oculto" not in sent_prompt
 
 
+async def test_response_agent_tells_model_not_to_greet_again_mid_call() -> None:
+    """Bug real visto en vivo (auditoría §9.23): a mitad de una llamada ya
+    abierta, el modelo volvía a saludar ("¡Hola Camila!", "es un gusto
+    hablar contigo de nuevo"). Causa: nada en el prompt le decía que la
+    llamada ya tenía un saludo. `already_greeted=True` debe agregar esa
+    instrucción explícita al prompt."""
+    llm = ScriptedFakeLLM(default="respuesta")
+    agent = ResponseAgent(llm)
+    await agent.run(
+        _request(
+            ResponseTurnInput(
+                evidence_sufficient=False,
+                should_escalate=False,
+                patient_question_or_context="sí",
+                already_greeted=True,
+            ).model_dump()
+        )
+    )
+    sent_prompt = "\n".join(m.content for m in llm.calls[-1])
+    assert "no vuelvas a saludar" in sent_prompt.lower()
+
+
+async def test_response_agent_omits_greeting_instruction_on_opening_turn() -> None:
+    """Contrapeso: en el turno de apertura (`already_greeted=False`, valor
+    por defecto) no debe aparecer la instrucción — no tiene sentido
+    decirle al modelo "no saludes de nuevo" cuando todavía no ha saludado
+    ni una vez."""
+    llm = ScriptedFakeLLM(default="respuesta")
+    agent = ResponseAgent(llm)
+    await agent.run(
+        _request(
+            ResponseTurnInput(
+                evidence_sufficient=False,
+                should_escalate=False,
+                patient_question_or_context="hola",
+            ).model_dump()
+        )
+    )
+    sent_prompt = "\n".join(m.content for m in llm.calls[-1])
+    assert "no vuelvas a saludar" not in sent_prompt.lower()
+
+
 async def test_response_agent_returns_error_when_llm_output_is_empty() -> None:
     llm = ScriptedFakeLLM(default="   ")
     agent = ResponseAgent(llm)

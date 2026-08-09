@@ -261,7 +261,11 @@ def _references_known_history(text: str) -> bool:
 # — es una regla determinista, no una instrucción que valga la pena poner
 # en el prompt y esperar que el modelo respete cada vez.
 _REDUNDANT_GREETING_RE = re.compile(
-    r"^\s*(?:hola|buen(?:os|as)\s+(?:d[ií]as|tardes|noches)|qu[eé]\s+tal|saludos)"
+    # `[\s¡]*` al inicio, no sólo `\s*`: el español abre exclamación con "¡"
+    # ANTES del saludo ("¡Hola Camila!") y ese signo no es espacio en
+    # blanco — sin esto, `^\s*(?:hola|...)` nunca matcheaba esa forma y el
+    # saludo redundante se colaba intacto (visto en vivo, auditoría §9.23).
+    r"^[\s¡]*(?:hola|buen(?:os|as)\s+(?:d[ií]as|tardes|noches)|qu[eé]\s+tal|saludos)"
     r"[\s,.!¡]*(?:[A-ZÁÉÍÓÚÑ][\wáéíóúñ]*(?:\s+[A-ZÁÉÍÓÚÑ][\wáéíóúñ]*)?)?"
     r"[\s,.!¡]*",
     re.IGNORECASE,
@@ -1021,7 +1025,21 @@ class CallCycleOrchestrator:
             )
 
         all_observations = existing_observations + new_observations
-        next_question = _resolve_next_question(interview_result.output, all_observations)
+        # `skip_interview_checklist` (ver auditoría §9.23) — NO
+        # `is_synthetic_demo`: los tres casos sintéticos originales
+        # (Camila/Julián/Sofía) también son "de prueba" pero SÍ deben
+        # forzar el checklist completo (son la base de test_gates.py).
+        # Sólo el caso dedicado al botón "Probar en una llamada" de
+        # `/knowledge` activa esto. Bug real visto en vivo: tras responder
+        # sobre un documento recién subido, el agente seguía preguntando
+        # dolor/líquidos/movilidad como si fuera una entrevista real —
+        # correcto para los 40 pacientes reales, ruidoso e indeseado para
+        # una prueba ad-hoc.
+        next_question = (
+            None
+            if case.skip_interview_checklist
+            else _resolve_next_question(interview_result.output, all_observations)
+        )
         covered_after = _covered_objective_codes(all_observations)
         objectives_pending = any(code not in covered_after for code, _ in INTERVIEW_OBJECTIVES)
         rule_result = evaluate_rules(all_observations)
@@ -1226,6 +1244,11 @@ class CallCycleOrchestrator:
                     # solo se usaba como consulta de retrieval y se
                     # descartaba, así que el agente nunca preguntaba nada.
                     next_question=next_question,
+                    # Contexto efímero, no persistido aparte: `existing_turns`
+                    # ya se leyó de la tabla `turns` para construir el
+                    # historial de este mismo turno (línea ~786). Si ya hay
+                    # turnos previos, la llamada ya se abrió con un saludo.
+                    already_greeted=len(existing_turns) >= 1,
                 ).model_dump(),
                 deadline_ms=self._agent_deadline_ms,
             )

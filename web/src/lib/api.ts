@@ -170,6 +170,11 @@ export interface CaseSummary {
    * el protocolo completo de un paciente longitudinal. `/call` los
    * excluye de su selector; `/knowledge` los usa para su llamada rápida. */
   isSyntheticDemo: boolean;
+  /** `true` sólo en el caso dedicado al botón "Probar en una llamada" de
+   * /knowledge (auditoría §9.23) — a diferencia de Camila/Julián/Sofía,
+   * este caso NO conduce el checklist clínico: responde lo que se le
+   * pregunte y nada más. */
+  skipInterviewChecklist: boolean;
 }
 
 export interface HistoricalFollowup {
@@ -208,6 +213,7 @@ interface RawCase {
   surgery_date?: string | null;
   followup_days?: number[];
   is_synthetic_demo?: boolean;
+  skip_interview_checklist?: boolean;
   historical_followups?: {
     day: number;
     archetype: string;
@@ -242,6 +248,7 @@ function mapCase(raw: RawCase): CaseSummary {
     surgeryDate: raw.surgery_date ?? null,
     followupDays: raw.followup_days ?? [],
     isSyntheticDemo: raw.is_synthetic_demo ?? false,
+    skipInterviewChecklist: raw.skip_interview_checklist ?? false,
     historicalFollowups: (raw.historical_followups ?? []).map((item) => ({
       day: item.day,
       archetype: item.archetype,

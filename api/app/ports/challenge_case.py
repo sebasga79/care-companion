@@ -58,12 +58,20 @@ class CaseSummary(BaseModel):
     surgery_date: date | None = None
     followup_days: list[int] = Field(default_factory=list)
     historical_followups: list[HistoricalFollowup] = Field(default_factory=list)
-    # `True` solo para los 3 casos de `FixtureCaseAdapter` (Camila/Julián/
-    # Sofía): sin historial real, pensados para pruebas rápidas (G5,
-    # smoke-test de voz) que no deben forzar el protocolo completo de un
-    # paciente longitudinal. El selector de `/call` los excluye a propósito
-    # — viven aparte, en `/knowledge`, junto al flujo de aprender/olvidar.
+    # `True` solo para los casos de `FixtureCaseAdapter` (Camila/Julián/
+    # Sofía + el de prueba rápida): sin historial real. El selector de
+    # `/call` los excluye a propósito — viven aparte, en `/knowledge`,
+    # junto al flujo de aprender/olvidar.
     is_synthetic_demo: bool = False
+    # Deliberadamente SEPARADO de `is_synthetic_demo`: Camila/Julián/Sofía
+    # también son sintéticos pero SÍ deben forzar el checklist clínico
+    # completo — son la base de `test_gates.py`, escrito antes de que
+    # existiera el botón "Probar en una llamada" de `/knowledge`. Sólo el
+    # caso dedicado a esa prueba rápida (auditoría §9.23) activa esto: sin
+    # esta separación, "es un caso de prueba" y "no debe forzar el
+    # checklist" quedaban indebidamente acoplados, y activar uno rompía
+    # los tests del otro.
+    skip_interview_checklist: bool = False
 
 
 class ReferenceTrajectory(BaseModel):
@@ -111,6 +119,7 @@ class ChallengeCase(BaseModel):
     historical_followups: list[HistoricalFollowup] = Field(default_factory=list)
     reference_trajectory: ReferenceTrajectory | None = None
     is_synthetic_demo: bool = False
+    skip_interview_checklist: bool = False
 
 
 class ChallengeCasePort(Protocol):

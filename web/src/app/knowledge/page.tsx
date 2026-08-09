@@ -120,7 +120,15 @@ export default function KnowledgePage() {
     api
       .listCases()
       .then((all) => {
-        if (!cancelled) setDemoCases(all.filter((item) => item.isSyntheticDemo));
+        // El caso dedicado a esta prueba (skipInterviewChecklist) no
+        // conduce el checklist clínico. Si por lo que sea no existiera,
+        // se cae a cualquier caso sintético antes que no ofrecer nada —
+        // sigue siendo mejor que forzar el protocolo completo de un
+        // paciente real para una prueba ad-hoc.
+        if (cancelled) return;
+        const quickTest = all.find((item) => item.skipInterviewChecklist);
+        const fallback = all.filter((item) => item.isSyntheticDemo);
+        setDemoCases(quickTest ? [quickTest, ...fallback.filter((c) => c.id !== quickTest.id)] : fallback);
       })
       .catch(() => {
         // Silencioso a propósito: si esto falla, el botón de abajo

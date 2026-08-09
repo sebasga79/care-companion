@@ -1240,3 +1240,67 @@ camino de retrieval es idéntico al de un paciente real — sólo cambia qué ca
 llamada.
 
 398 passed / 3 skipped (backend), tsc + eslint + build de Next limpios.
+
+## 9.23 Dos bugs reales de la llamada de prueba, encontrados por el usuario en vivo
+
+Transcripción real con `demo-case-001` (Camila) desde el nuevo botón "Probar en una
+llamada": el agente sí respondió bien sobre el documento de prueba G5 (Programa Cicatriz
+Segura, con cita), pero (1) siguió empujando el checklist clínico completo (dolor,
+líquidos, movilidad) después de la respuesta ad-hoc, y (2) volvió a saludar dos veces a
+mitad de la llamada ("¡Hola Camila!", "es un gusto hablar contigo de nuevo").
+
+### Bug 1 — el checklist se activaba también en la llamada de prueba
+
+`next_question` (lo que empuja al `ResponseAgent` a conducir el checklist) se calculaba
+siempre, sin condición — correcto para los 40 pacientes reales, pero indeseado para una
+prueba ad-hoc pensada sólo para verificar RAG/G5.
+
+**Intento fallido, corregido antes de commitear:** atarlo a `is_synthetic_demo` rompió 5
+tests de `test_gates.py`, que usan `demo-case-001` (Camila) como vehículo por defecto para
+probar el checklist completo desde antes de que existiera el botón de `/knowledge`. Los
+tres casos originales (Camila/Julián/Sofía) son "sintéticos" pero SÍ deben conducir el
+checklist. `is_synthetic_demo` (identidad: "¿es uno de los pacientes de prueba?") y
+"¿debe forzar el checklist?" son preguntas distintas — mezclarlas rompía un propósito para
+arreglar otro.
+
+**Fix real:** un cuarto caso dedicado, `demo-case-quicktest` ("Paciente de prueba"), con un
+flag nuevo y separado, `skip_interview_checklist=True`. Camila/Julián/Sofía quedan
+exactamente como estaban (`skip_interview_checklist=False` por default) — `test_gates.py`
+no se tocó. `/knowledge` ahora busca específicamente ese caso (con fallback al primer
+sintético si no aparece) en vez de tomar "el primero que sea sintético".
+
+### Bug 2 — el agente volvía a saludar a mitad de la llamada
+
+Causa raíz, confirmada leyendo `response.py`: `ResponseTurnInput` no tenía NINGÚN campo que
+le dijera al modelo "esto ya es un turno intermedio" — ni número de turno, ni un flag de
+"ya saludaste". Desde la perspectiva del LLM, cada turno podía parecer el primero. Con
+Llama 3.3 70B (más conversacional que el 8B) eso se manifestó como re-saludos espontáneos
+en formas que el regex de la sesión anterior (`_strip_redundant_greeting`) no cubría
+("es un gusto hablar contigo de nuevo" no empieza con ninguna palabra de saludo conocida).
+
+**Fix de raíz, no sólo el parche determinista:** `ResponseTurnInput.already_greeted: bool`,
+nuevo. Contexto **efímero**, como pidió explícitamente el usuario ("no crear una base de
+datos persistente... sería sobre ingeniería") — se deriva de `len(existing_turns) >= 1`
+dentro de `handle_turn`, leyendo la tabla `turns` que YA existe y YA se consulta para el
+historial de ese mismo turno (línea ~786 de `call_cycle.py`). No se agregó ninguna tabla ni
+columna nueva. Cuando es `True`, `_build_user_prompt` antepone una instrucción explícita:
+"ya saludaste, no vuelvas a saludar ni a presentarte".
+
+**Bug adicional encontrado revisando el parche anterior:** `_strip_redundant_greeting`
+tampoco atrapaba "¡Hola Camila!" — el signo de apertura "¡" va ANTES de la palabra de
+saludo en español, y `^\s*(?:hola|...)` nunca consumía ese carácter (no es espacio en
+blanco), así que el saludo redundante se colaba intacto pese al fix de la sesión anterior.
+Corregido (`^[\s¡]*`), y se mantiene como respaldo determinista — el fix de raíz (el
+prompt) es la defensa principal contra frases nuevas que un regex no puede anticipar.
+
+Cinco tests nuevos: instrucción "no saludes" presente/ausente según `already_greeted`
+(agentes.py); regex con "¡Hola" al inicio (orchestrator); checklist suprimido en
+`demo-case-quicktest` vs. conducido normalmente en Camila, ambos verificando el prompt
+real que llega al `ResponseAgent`, no sólo el mensaje final.
+
+Verificado de punta a punta reproduciendo la transcripción real del usuario contra Docker
+reconstruido: 3 turnos, sin re-saludo ni una vez, sin ninguna pregunta de dolor/líquidos/
+movilidad — el agente se queda en el tema (Programa Cicatriz Segura) hasta que el usuario
+cierra la llamada manualmente.
+
+403 passed / 3 skipped (backend), tsc + eslint + build de Next limpios.

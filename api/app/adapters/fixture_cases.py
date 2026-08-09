@@ -65,6 +65,28 @@ _FIXTURE_CASES: dict[str, ChallengeCase] = {
         notes="Caso sintético de demostración pensado para ejercitar el camino de escalamiento.",
         is_synthetic_demo=True,
     ),
+    # Dedicado al botón "Probar en una llamada" de `/knowledge` (auditoría
+    # §9.23, 9 ago). Deliberadamente un 4º caso, no reutiliza Camila/Julián/
+    # Sofía: esos tres alimentan `test_gates.py`, que SÍ necesita el
+    # checklist clínico completo activo. Mezclar ambos propósitos en el
+    # mismo `is_synthetic_demo` rompía esos tests la primera vez que se
+    # intentó.
+    "demo-case-quicktest": ChallengeCase(
+        case_id="demo-case-quicktest",
+        patient_id="demo-patient-quicktest",
+        patient_display_name="Paciente de prueba",
+        procedure=_GENERIC_PROCEDURE_LABEL,
+        procedure_category=_GENERIC_PROCEDURE_CATEGORY,
+        phase="post_discharge_day_1",
+        days_since_procedure=1,
+        caregiver_role="paciente",
+        notes=(
+            "Caso dedicado a pruebas ad-hoc (G5, smoke-test de voz) desde /knowledge. "
+            "No conduce el checklist clínico: responde lo que se le pregunte y nada más."
+        ),
+        is_synthetic_demo=True,
+        skip_interview_checklist=True,
+    ),
 }
 
 
@@ -83,6 +105,7 @@ class FixtureCaseAdapter(ChallengeCasePort):
                 phase=case.phase,
                 days_since_procedure=case.days_since_procedure,
                 is_synthetic_demo=case.is_synthetic_demo,
+                skip_interview_checklist=case.skip_interview_checklist,
             )
             for case in cases
         ]
