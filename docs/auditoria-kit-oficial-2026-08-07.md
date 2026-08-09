@@ -1906,3 +1906,94 @@ Verificación: sin `<repo-url>` residual, sin menciones de `fake`/`phi3.5` fuera
 técnico correcto (grep explícito de ambos), 14 fences de código (7 pares, balanceado), 
 estructura de encabezados revisada. Sin cambios en `api/app`/`api/tests`/`web/src` — solo
 `README.md`.
+
+## 9.38 G2 realmente roto: un clon limpio de verdad no arrancaba — dos bugs, no uno
+
+**Cómo se encontró.** El usuario corrió el comando exacto del README en su propia terminal
+(`git clone ... && ./levantar_app.sh`) y reportó que terminó "rapidísimo", preguntando si de
+verdad se instaló todo. La respuesta correcta no era confiar en la salida — fue confirmar
+contra estado real: `docker ps` mostró que los contenedores de **esta misma sesión de
+trabajo** (`source-meridian-agent-api-1`/`web-1`) seguían ocupando los puertos 49317/49318
+desde hacía 10 minutos. El script de su clon nuevo hizo `curl` a esos puertos, los encontró
+sanos, y dijo "ya está en ejecución" — **nunca tocó el clon nuevo**. Puertos son globales al
+host, no por carpeta. El resultado "rápido" no validó nada; fue un falso positivo causado por
+el propio entorno de desarrollo de esta sesión.
+
+**La prueba real exigió reproducirla de verdad**, no confiar en el reporte del usuario ni en
+una corrida aparentemente exitosa: se detuvieron los contenedores propios (liberando los
+puertos) y se clonó el repo en un directorio nuevo bajo control directo, cronometrado. Esa
+prueba **también falló**, y encontró dos bugs reales, distintos, que un jurado con una
+máquina limpia habría encontrado exactamente igual — G2 (arranque ≤15 min) estaba roto de
+verdad, no solo el reporte del usuario había sido un falso positivo:
+
+**Bug 1 — `docker compose` exige `api/.env`, que nunca existe en un clon nuevo.**
+`docker-compose.yml` declara `env_file: ./api/.env`; Compose trata un `env_file`
+declarado-pero-ausente como error **fatal** para *cualquier* subcomando (`ps`, `images`,
+`up`), no solo como "sin variables extra". Como `api/.env` está en `.gitignore` (es donde
+vive la API key real, nunca se commitea), **todo clon nuevo lo dispara**. Sin el fix, el
+comando del README moría en menos de un segundo con `env file .../api/.env not found`, un
+mensaje que ni siquiera llega a imprimirse en el log del launcher (Compose lo escribe antes
+de que el script pueda capturarlo con su propio manejo de errores).
+
+Fix de dos capas:
+- `levantar_app.sh`: si `api/.env` no existe, lo copia automáticamente desde
+  `api/.env.example` (que ya trae el proveedor `fake`, seguro, sin credenciales) antes de
+  llamar a cualquier `docker compose`. Restaura la promesa real de "un solo comando" sin
+  exigir un paso manual antes de la primera corrida.
+- `docker-compose.yml`: `env_file` pasa a `- path: ./api/.env` con `required: false`
+  (sintaxis soportada desde Compose ~2.24; verificada contra v2.40.3 instalada). Cubre a
+  quien use `docker compose up` directo — la ruta manual que el propio README documenta y
+  que no pasa por el launcher.
+
+**Bug 2 — `web/public/` está vacío desde el 23 de julio y por eso nunca quedó en git.**
+Git no rastrea directorios vacíos — sólo blobs. Cuando se eliminó una imagen sin licencia de
+`web/public/` en la fase de preparación (`CLAUDE.md`: "imagen sin licencia eliminada"), el
+directorio quedó vacío y **git dejó de rastrearlo por completo**, sin ningún error ni aviso.
+En el disco de esta sesión de trabajo el directorio vacío sigue existiendo (el filesystem no
+borra directorios vacíos solo), así que **todas las corridas de Docker de esta sesión
+funcionaron sin problema** — el bug era invisible desde la propia máquina de desarrollo.
+Un clon nuevo, en cambio, no recibe `web/public/` en absoluto: `web/Dockerfile` hace
+`COPY --from=builder /app/public ./public` en la etapa final de la imagen `web`, y esa copia
+falla con `"/app/public": not found` porque el directorio fuente no existe — la imagen `web`
+completa no se puede construir. Este es el hallazgo más serio de los dos: sin él, *ningún*
+clon nuevo del repositorio público podía levantar el frontend, sin importar si `api/.env`
+estaba bien configurado o no.
+
+Fix: `web/public/.gitkeep` (archivo vacío, convención estándar para forzar a git a rastrear
+un directorio sin contenido real).
+
+**Depuración de la prueba misma, documentada porque llevó a un callejón sin salida real:**
+la primera reconstrucción del bug, con `bash -x`, mostraba la traza deteniéndose justo
+después de calcular `running_count=0`, sin error visible ni línea siguiente — parecía que el
+propio conteo de contenedores/imágenes existentes fallaba bajo `set -euo pipefail`. Varias
+reproducciones manuales de esa lógica exacta (incluida una réplica exacta de la función con
+`local` + los mismos comandos `docker compose ps/images` bajo bash 3.2, la versión que trae
+macOS por defecto) funcionaron perfectamente, sin reproducir el fallo — lo cual, en
+retrospectiva, era la pista correcta: si la lógica en sí nunca fallaba aislada, el problema
+tenía que estar en otro lado. Insertar `echo`/exit-code explícitos línea por línea en una
+copia real del script (no una reproducción) finalmente lo mostró: el intento de depuración
+inicial había copiado el script fuera del directorio del proyecto, rompiendo la resolución de
+`$ROOT_DIR` (que depende de `dirname "${BASH_SOURCE[0]}"`) — un error de metodología de
+prueba, no un bug del script. Corregido el placement, la instrumentación mostró la ejecución
+real llegando limpiamente hasta `docker compose up -d --build`, que fue cuando apareció el
+Bug 2 (`web/public` faltante) por primera vez de forma reproducible.
+
+**Verificación final, de punta a punta, con los dos fixes aplicados:** clon fresco → build
+completo (`api` con caché de capas de Docker de esta sesión — un juez con máquina 100%
+virgen tardaría más aquí, la descarga de dataset/corpus no se ve afectada por esto; `web`
+sin caché desde `COPY . .` en adelante, por el archivo nuevo) → volumen
+`care-companion-clean-test_care_companion_data` genuinamente nuevo (nombre de proyecto
+Compose distinto al de esta sesión, cero superposición) → bootstrap del dataset+corpus
+oficial completo, ~110-120s (mismo rango medido en corridas anteriores de esta auditoría) →
+`GET /health` 200, **107 documentos indexados** (corpus oficial completo) y **44 casos**
+(40 pacientes reales + 4 sintéticos de prueba) — confirmado contra el sistema recién
+construido, no asumido. Contenedores y volumen de prueba destruidos al terminar; el stack de
+desarrollo de esta sesión, restaurado.
+
+**Alcance de lo verificado vs. lo no verificado:** esta prueba confirma que el clon público
+arranca y sirve datos reales de punta a punta. No mide el tiempo de descarga de las imágenes
+base (`python:3.11-slim`, `node:22-slim`) ni de `apt-get`/`uv sync`/`pnpm install` sin ningún
+caché de Docker — eso depende de la velocidad de red del jurado y no se puede medir desde
+esta máquina. El presupuesto de 15 minutos de G2 tiene margen amplio incluso así: build
+completo sin caché documentado en corridas anteriores del orden de minutos, no de la ventana
+completa.

@@ -17,8 +17,18 @@ services:
     # en vivo era la señal correcta de que Groq no se estaba usando.
     # `env_file` carga TODO `api/.env` automáticamente — variables nuevas
     # ya no requieren tocar este archivo.
+    #
+    # `required: false`: sin esto, un `api/.env` ausente (el estado normal
+    # de un clon nuevo — el archivo está en .gitignore) hace que Compose
+    # falle TODO comando (`ps`, `images`, `up`) con "env file not found",
+    # antes de construir nada. Encontrado en vivo probando un clon limpio
+    # de verdad (auditoría §9.38); `levantar_app.sh` ahora copia
+    # `.env.example` automáticamente si falta, pero quien use
+    # `docker compose up` directo (documentado en el README como ruta
+    # manual) se salta ese paso — esta línea cubre ese camino también.
     env_file:
-      - ./api/.env
+      - path: ./api/.env
+        required: false
     environment:
       - APP_ENV=development
       # Los tres siguientes SOBREESCRIBEN cualquier valor de api/.env: son

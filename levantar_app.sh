@@ -136,6 +136,21 @@ run_docker_launcher() {
     return 1
   fi
 
+  # `docker-compose.yml` declara `env_file: ./api/.env` — Docker Compose
+  # trata un env_file declarado-pero-ausente como error FATAL (no como
+  # "sin variables extra"), así que TODO comando de compose (`ps`, `images`,
+  # `up`) fallaba de inmediato en un clon nuevo, antes de construir nada.
+  # Encontrado en vivo: un clon fresco con puertos libres moría en <1s con
+  # "env file .../api/.env not found", sin log legible para quien lo corre
+  # (auditoría §9.38). El .env.example por defecto ya usa el proveedor
+  # `fake` (seguro, sin credenciales) — copiarlo automáticamente restaura
+  # la promesa real de "un solo comando" sin exigir un paso manual previo.
+  if [ ! -f "$API_DIR/.env" ]; then
+    log "No existe api/.env — copiando api/.env.example (modo de prueba sin credenciales)…"
+    cp "$API_DIR/.env.example" "$API_DIR/.env"
+    echo "  ${DIM}Para hablar con el modelo real: edita api/.env (LLM_PROVIDER/LLM_API_KEY) y corre --rebuild.${RESET}"
+  fi
+
   if ! docker info >/dev/null 2>&1; then
     if [ "$(uname -s)" = "Darwin" ] && open -Ra Docker >/dev/null 2>&1; then
       log "Iniciando Docker Desktop…"
