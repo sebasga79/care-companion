@@ -1997,3 +1997,15 @@ caché de Docker — eso depende de la velocidad de red del jurado y no se puede
 esta máquina. El presupuesto de 15 minutos de G2 tiene margen amplio incluso así: build
 completo sin caché documentado en corridas anteriores del orden de minutos, no de la ventana
 completa.
+
+**Confirmación independiente, en la máquina del usuario (no la de esta sesión).** Con los
+fixes ya en `main`, el usuario repitió el experimento en su propia terminal, cronometrado con
+`time`: `git clone ... && cd care-companion && ./levantar_app.sh` → **1 min 44,85 s** de
+punta a punta (clon + build + bootstrap completo + health-check listo). El build mostró
+`CACHED` en las 11 capas de `api` y las 10 de `web`, incluida
+`[web runner 5/5] COPY --from=builder /app/public ./public` — confirma que el fix de
+`web/public/.gitkeep` resuelve el Bug 2 también fuera de esta máquina, no sólo en la prueba
+propia. Configuración por defecto (LLM y embeddings `fake`) — distinto del `9 min 50 s`
+histórico de §9.19, que medía con embeddings reales (BGE-M3) configurados a mano; no son
+la misma medición y `docs/final-report.md` ahora reporta ambas por separado, sin que una
+reemplace a la otra.

@@ -174,9 +174,27 @@ reportado) — ver commit `app/domain/safety_signals.py::_is_hypothetical_worry`
   ver `docs/auditoria-kit-oficial-2026-08-07.md` §9.19).
 - **No es un producto clínico:** prototipo, sin EHR, sin diagnóstico ni
   prescripción, solo datos sintéticos.
-- **Clean-install ≤15 min (NFR-004):** cronometrado — 9 min 50 s de punta a
-  punta (`docker compose down -v && up -d --build`, dataset + corpus +
-  embeddings reales incluidos), ver §9.19 de la auditoría.
+- **Clean-install ≤15 min (NFR-004):** cronometrado dos veces, en dos
+  configuraciones distintas — ambas cómodas dentro del límite:
+  - **1 min 45 s** con el flujo real de un solo comando (`git clone` +
+    `./levantar_app.sh`) y configuración por defecto (LLM y embeddings
+    `fake`, cero pasos manuales) — clon público, máquina del usuario, no
+    un ensayo interno. Sólo posible tras corregir dos bugs que antes lo
+    impedían por completo en cualquier clon nuevo: `docker-compose.yml`
+    exigía un `api/.env` que nunca existe en un clon fresco (Compose lo
+    trata como error fatal, no como "sin variables extra"), y
+    `web/public/` llevaba vacío desde el 23 de julio — git no rastrea
+    directorios vacíos, así que la imagen `web` no podía construirse en
+    ningún clon público. Ver §9.38 de la auditoría.
+  - **9 min 50 s** con `docker compose down -v && up -d --build` y
+    embeddings semánticos reales (BGE-M3 vía Ollama) configurados a mano
+    — generar 9.296 vectores de embedding por inferencia real es más
+    costoso que el hash determinista de `FakeEmbeddings`. Ver §9.19 de la
+    auditoría.
+  - Ninguna de las dos corridas mide una máquina con cero caché de capas
+    Docker (imágenes base, dependencias) — esa parte depende de la
+    velocidad de red del jurado y no se puede medir desde aquí; el margen
+    hasta los 15 minutos es amplio incluso así.
 - **Latencia voz-a-voz (spec.md §1.5) instrumentada y persistida, sin
   muestra real todavía.** `CallModal.tsx` mide en el navegador, por
   llamada, desde que el paciente termina de hablar hasta que empieza a
