@@ -248,6 +248,36 @@ def _references_known_history(text: str) -> bool:
     return bool(_HISTORY_REFERENCE_RE.search(normalize_spanish(text)))
 
 
+# Bug real visto en vivo (transcripción del jurado, GENERAL_STATE): el
+# paciente contestó "que ya no tengo dolor, la herida está muchísimo
+# mejor..." — información real, sólo que no sobre "ánimo" — y el
+# `InterviewAgent` volvió a proponer la MISMA `clarification_question` casi
+# palabra por palabra dos veces más, incluso después de que el paciente
+# respondiera "ya le dije". El objetivo en sí puede seguir sin resolverse,
+# pero repetir la pregunta idéntica es peor que aceptar lo que hay y seguir
+# — un paciente real no lo tolera.
+_QUESTION_REPETITION_WORD_OVERLAP_THRESHOLD = 0.7
+
+
+def _is_near_duplicate_question(a: str, b: str) -> bool:
+    """Compara dos preguntas por solapamiento de palabras (no exige texto
+    idéntico: el modelo suele reordenar/partir la frase entre intentos, como
+    en el caso real de arriba)."""
+    words_a = set(normalize_spanish(a).split())
+    words_b = set(normalize_spanish(b).split())
+    if not words_a or not words_b:
+        return False
+    overlap = len(words_a & words_b) / min(len(words_a), len(words_b))
+    return overlap >= _QUESTION_REPETITION_WORD_OVERLAP_THRESHOLD
+
+
+def _last_agent_turn_text(existing_turns: list[dict[str, Any]]) -> str | None:
+    for turn in reversed(existing_turns):
+        if turn.get("speaker") == "agent":
+            return turn.get("text")
+    return None
+
+
 def _history_aware_pain_question(case: ChallengeCase, observations: list[Observation]) -> str:
     severity = next(
         (
@@ -839,6 +869,50 @@ class CallCycleOrchestrator:
                     )
                 },
             )
+
+        # Bug real visto en vivo: el modelo puede proponer, dos turnos
+        # seguidos, prácticamente la MISMA `clarification_question` aunque
+        # el paciente ya haya respondido con información real (solo que no
+        # exactamente lo que la pregunta pedía). Repetir la pregunta
+        # idéntica es peor que aceptar lo que hay: se registra el objetivo
+        # como `uncertain` (no se inventa un valor) y la entrevista avanza
+        # en vez de trabarse.
+        if needs_clarification:
+            proposed_text = clarification_question or ""
+            last_agent_text = _last_agent_turn_text(existing_turns)
+            if last_agent_text and _is_near_duplicate_question(proposed_text, last_agent_text):
+                needs_clarification = False
+                covered_so_far = _covered_objective_codes(existing_observations + new_observations)
+                stuck_code = interview_result.output.get("next_objective_code")
+                if stuck_code not in dict(INTERVIEW_OBJECTIVES) or stuck_code in covered_so_far:
+                    stuck_code = next(
+                        (code for code, _ in INTERVIEW_OBJECTIVES if code not in covered_so_far),
+                        None,
+                    )
+                self._log_event(
+                    session_id=session_id,
+                    correlation_id=correlation_id,
+                    event_type="interview.clarification_repetition_avoided",
+                    payload={"objective_code": stuck_code, "discarded_question": proposed_text},
+                )
+                if stuck_code is not None:
+                    # El loop que persiste `new_observations` ya corrió (línea
+                    # arriba) — se persiste aparte para no reordenar la
+                    # secuencia existente de señales de seguridad.
+                    repetition_observation = Observation(
+                        code=stuck_code,
+                        label=f"{stuck_code} — sin precisión adicional tras aclaración repetida",
+                        value=None,
+                        certainty="uncertain",
+                        source_turn_id=patient_turn["id"],
+                        original_text=patient_text,
+                        normalized_text="aclaración repetida sin nueva información; se avanza",
+                        normalized_by="repetition-guard-v1",
+                    )
+                    new_observations = [*new_observations, repetition_observation]
+                    self._observation_repo.add(
+                        session_id=session_id, observation=repetition_observation
+                    )
 
         if needs_clarification:
             clarification_text = (

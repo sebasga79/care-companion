@@ -140,8 +140,15 @@ por temor hipotético, no por síntoma reportado) — ver commit
   ver `docs/auditoria-kit-oficial-2026-08-07.md` §9.19).
 - **No es un producto clínico:** prototipo, sin EHR, sin diagnóstico ni
   prescripción, solo datos sintéticos.
-- **Clean-install ≤15 min:** el stack Docker está listo; falta cronometrarlo
-  una vez en hardware limpio (REL-001).
+- **Clean-install ≤15 min (NFR-004):** cronometrado — 9 min 50 s de punta a
+  punta (`docker compose down -v && up -d --build`, dataset + corpus +
+  embeddings reales incluidos), ver §9.19 de la auditoría.
+- **Latencia voz-a-voz (spec.md §1.5) sin medir todavía.** Lo medido hasta
+  ahora (`groq-latency.json`, `capa1-groq.json`) es latencia de texto
+  LLM-a-LLM, sin STT ni TTS. El README oficial exige la métrica desde que
+  el paciente termina de hablar hasta que **empieza a sonar** el audio del
+  agente — falta instrumentarla del lado del navegador durante una llamada
+  real (ver §9.20 de la auditoría).
 - Filtros server-side de auditoría, reranker adicional y responsive móvil
   quedan como mejoras no bloqueantes.
 

@@ -73,6 +73,7 @@ def _interview_json(
     needs_clarification: bool = False,
     clarification_question: str | None = None,
     next_question: str | None = None,
+    next_objective_code: str | None = None,
     observations: list[dict] | None = None,
 ) -> str:
     return json.dumps(
@@ -80,6 +81,7 @@ def _interview_json(
             "needs_clarification": needs_clarification,
             "clarification_question": clarification_question,
             "next_question": next_question,
+            "next_objective_code": next_objective_code,
             "observations": observations or [],
         }
     )
@@ -378,6 +380,118 @@ async def test_clarify_loop_keeps_session_in_interviewing(db_path: str) -> None:
 
     session_after = SessionRepository(db_path).get(session_id)
     assert session_after["state"] == "interviewing"
+
+
+async def test_repeated_near_duplicate_clarification_is_not_asked_twice(db_path: str) -> None:
+    """Bug real visto en vivo (transcripción del jurado, caso Jean León
+    Sepúlveda): el paciente contestó "que ya no tengo dolor, la herida está
+    muchísimo mejor..." — información real, sólo que no sobre "ánimo" — y
+    el modelo volvió a proponer casi la MISMA `clarification_question`.
+    Repetirla una segunda vez es peor que aceptar lo que hay: el guard debe
+    forzar `needs_clarification=False` y dejar que la entrevista avance."""
+    _init_db(db_path)
+    session_id = _new_session(db_path)
+    llm = ScriptedFakeLLM(default="placeholder")
+    orchestrator = _orchestrator(db_path, llm)
+
+    repeated_question = (
+        "¿Qué significa exactamente que ha mejorado un 10% en comparación "
+        "con el último seguimiento y cómo se refiere a su estado general y ánimo?"
+    )
+
+    _script(
+        llm,
+        interview_json=_interview_json(
+            needs_clarification=True,
+            clarification_question=repeated_question,
+            next_objective_code="GENERAL_STATE",
+            observations=[],
+        ),
+        triage_json=_triage_json(model_level="ROUTINE_FOLLOW_UP"),
+        response_text="no debería usarse",
+    )
+    first = await orchestrator.handle_turn(session_id, "bien he mejorado un 10%")
+    assert first.needs_clarification is True
+    assert first.agent_message == repeated_question
+
+    # El modelo insiste con (casi) la misma pregunta, pese a que el
+    # paciente ya respondió con síntomas concretos.
+    _script(
+        llm,
+        interview_json=_interview_json(
+            needs_clarification=True,
+            clarification_question=(
+                "¿Qué significa exactamente que ha mejorado un 10%? "
+                "¿En qué aspectos se describe su estado general y ánimo?"
+            ),
+            next_objective_code="GENERAL_STATE",
+            observations=[],
+        ),
+        triage_json=_triage_json(model_level="ROUTINE_FOLLOW_UP"),
+        response_text="Gracias por contarme. Seguimos con el resto del seguimiento.",
+    )
+    second = await orchestrator.handle_turn(
+        session_id,
+        "que ya no tengo dolor la herida está muchísimo mejor, "
+        "ya está menos inflamado y menos roja",
+    )
+
+    assert second.needs_clarification is False
+    assert second.agent_message != repeated_question
+
+    events = EventRepository(db_path).list_for_session(session_id)
+    repetition_events = [
+        e for e in events if e["event_type"] == "interview.clarification_repetition_avoided"
+    ]
+    assert len(repetition_events) == 1
+    payload = json.loads(repetition_events[0]["payload"])
+    assert payload["objective_code"] == "GENERAL_STATE"
+
+
+async def test_two_genuinely_different_clarifications_are_both_asked(db_path: str) -> None:
+    """Contrapeso del test anterior: el guard sólo debe frenar preguntas
+    casi idénticas. Dos aclaraciones legítimamente distintas seguidas (una
+    sobre dolor, otra sobre la herida) deben hacerse las dos — no basta con
+    que el turno anterior también fuera una aclaración."""
+    _init_db(db_path)
+    session_id = _new_session(db_path)
+    llm = ScriptedFakeLLM(default="placeholder")
+    orchestrator = _orchestrator(db_path, llm)
+
+    _script(
+        llm,
+        interview_json=_interview_json(
+            needs_clarification=True,
+            clarification_question="¿El dolor apareció de repente o fue aumentando poco a poco?",
+            next_objective_code="PAIN_EVOLUTION",
+            observations=[],
+        ),
+        triage_json=_triage_json(model_level="ROUTINE_FOLLOW_UP"),
+        response_text="no debería usarse",
+    )
+    first = await orchestrator.handle_turn(session_id, "me duele desde ayer")
+    assert first.needs_clarification is True
+
+    _script(
+        llm,
+        interview_json=_interview_json(
+            needs_clarification=True,
+            clarification_question="¿La herida tiene algún cambio de color o hinchazón?",
+            next_objective_code="WOUND_APPEARANCE",
+            observations=[],
+        ),
+        triage_json=_triage_json(model_level="ROUTINE_FOLLOW_UP"),
+        response_text="no debería usarse",
+    )
+    second = await orchestrator.handle_turn(session_id, "fue aumentando poco a poco")
+
+    assert second.needs_clarification is True
+    assert "herida" in (second.agent_message or "").lower()
+
+    events = EventRepository(db_path).list_for_session(session_id)
+    assert not [
+        e for e in events if e["event_type"] == "interview.clarification_repetition_avoided"
+    ]
 
 
 async def test_routine_cycle_covers_objectives_and_closes_automatically(db_path: str) -> None:

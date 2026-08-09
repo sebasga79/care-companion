@@ -1133,3 +1133,55 @@ Verificación: 383 passed / 3 skipped, ruff verde. El contenedor se reinició so
 la verificación (exit code 0, sin OOM — atribuible a Docker Desktop, no a la app); los datos
 sobrevivieron porque viven en el volumen nombrado `care_companion_data`, no en la capa del
 contenedor.
+
+## 9.20 Cuota diaria de Groq (TPD) es ventana móvil, no reset a medianoche
+
+Varias corridas del benchmark el mismo día agotaron el límite diario de Groq (`tokens per day
+(TPD): Limit 500000`). Supuesto inicial equivocado: que resetea a medianoche UTC. Prueba
+directa que lo refuta — una llamada mínima a las 00:03 UTC funcionó ("cuota restablecida"),
+pero a las 00:07 UTC (4 minutos después) `Used 498653` volvió a rechazar la siguiente llamada
+real. Es una **ventana móvil de 24 h**: el consumo de hace 24 h exactas es lo único que libera
+cupo, no un reloj fijo. Consecuencia práctica: correr el benchmark de decisión completo varias
+veces el mismo día no es viable — cada corrida completa (~12 casos × ~6 turnos × ~2.000 tokens)
+consume una fracción significativa del cupo diario, y reintentarlo agota lo que queda sin
+avisar con antelación (el único aviso es el propio 429).
+
+Decisión: no perseguir más corridas completas de decisión el mismo día. `groq-latency.json`
+(5 llamadas aisladas, medidas *antes* de que la cuota se acercara al límite) sigue siendo la
+medición de latencia vigente. Pendiente real, sin resolver todavía: el número que exige el README
+oficial no es latencia LLM-a-LLM sino **voz a voz** — desde que el paciente termina de hablar
+hasta que **empieza a sonar** el audio del agente (fin de STT → inicio de TTS), spec.md §1.5.
+Ni `groq-latency.json` ni `capa1-groq.json` miden eso: ambos miden texto de punta a punta,
+sin STT ni TTS. Falta instrumentar esa métrica del lado del cliente (browser) durante una
+llamada real.
+
+## 9.21 Pregunta de aclaración repetida palabra por palabra — hallazgo en vivo del jurado
+
+Transcripción real compartida por el usuario (paciente "Jean León Sepúlveda", colecistectomía):
+el paciente contestó "que ya no tengo dolor, la herida está muchísimo mejor, ya está menos
+inflamado y menos roja" — información real — y el agente volvió a preguntar **casi la misma
+pregunta sobre "ánimo"** dos veces más, incluso después de que el paciente respondiera "ya le
+dije".
+
+Causa: `GENERAL_STATE` (ánimo) es un objetivo legítimo que el paciente nunca contestó
+directamente (describió síntomas físicos, no estado de ánimo), así que `_covered_objective_codes`
+nunca lo marcaba cubierto y `InterviewAgent` seguía proponiendo `clarification_question` sobre
+lo mismo turno tras turno — sin que nada comparara la pregunta nueva contra la última realmente
+formulada. Repetir la pregunta idéntica es peor que aceptar lo que hay: un paciente real no lo
+tolera, y pesa directamente en el criterio "Comprensión y diseño de conversación" (15 pts).
+
+Fix genérico (no específico a `GENERAL_STATE`, cubre cualquier objetivo donde esto pueda
+repetirse): `_is_near_duplicate_question` compara por solapamiento de palabras (no exige texto
+idéntico — el modelo reordena/parte la frase entre intentos, visto en la transcripción real) la
+`clarification_question` propuesta contra el último turno del agente. Si hay solapamiento
+≥70%, se descarta la repetición: `needs_clarification` se fuerza a `False`, se registra una
+observación `uncertain` para el objetivo atascado (no se inventa un valor — spec.md §11.2) y
+la entrevista avanza al siguiente objetivo pendiente. Evento nuevo
+`interview.clarification_repetition_avoided` para auditoría.
+
+Dos tests de regresión con el texto real de la transcripción: uno confirma que la segunda
+aclaración casi idéntica se bloquea y la entrevista avanza; el contrapeso confirma que dos
+aclaraciones **legítimamente distintas** seguidas (dolor, luego herida) se hacen las dos —
+mismo patrón de verificación que los fixes de `safety_signals.py` de esta sesión.
+
+388 passed / 3 skipped, ruff verde.
