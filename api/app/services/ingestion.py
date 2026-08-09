@@ -319,6 +319,16 @@ def _pick_canary_query(text: str) -> str:
 
 
 def _find_remaining_chunk_rows(conn: sqlite3.Connection, chunk_ids: list[str]) -> list[str]:
+    """Filas que siguen siendo un borrado incompleto tras la purga.
+
+    Desde el fix de chunks citados (auditoría §9.27,
+    `DocumentChunkRepository.delete_for_document`), un chunk sigue vivo en
+    `document_chunks` A PROPÓSITO cuando una cita lo referencia — pero con
+    el texto vaciado. Eso NO cuenta como remanente: `text != ''` es la
+    señal real de un borrado incompleto (un chunk con contenido que
+    sobrevivió), no la mera existencia de la fila. FTS sigue siendo
+    absoluto: cualquier chunk todavía indexado ahí sí es un borrado
+    incompleto, tombstoned o no — seguiría siendo buscable."""
     if not chunk_ids:
         return []
     placeholders = ",".join("?" for _ in chunk_ids)
@@ -328,7 +338,7 @@ def _find_remaining_chunk_rows(conn: sqlite3.Connection, chunk_ids: list[str]) -
     # tupla del segundo argumento — no hay interpolación de datos externos
     # en el SQL. S608 no distingue esto de una concatenación insegura.
     rows = conn.execute(
-        f"SELECT id FROM document_chunks WHERE id IN ({placeholders})",  # noqa: S608
+        f"SELECT id FROM document_chunks WHERE id IN ({placeholders}) AND text != ''",  # noqa: S608
         chunk_ids,
     ).fetchall()
     remaining.extend(row["id"] for row in rows)
@@ -336,7 +346,7 @@ def _find_remaining_chunk_rows(conn: sqlite3.Connection, chunk_ids: list[str]) -
         f"SELECT chunk_id FROM document_chunks_fts WHERE chunk_id IN ({placeholders})",  # noqa: S608
         chunk_ids,
     ).fetchall()
-    remaining.extend(row["chunk_id"] for row in fts_rows)
+    remaining.extend(row["chunk_id"] for row in fts_rows if row["chunk_id"] not in remaining)
     return remaining
 
 

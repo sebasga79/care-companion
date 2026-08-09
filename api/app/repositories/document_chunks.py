@@ -73,12 +73,48 @@ class DocumentChunkRepository:
 
     def delete_for_document(self, conn: sqlite3.Connection, document_id: str) -> list[dict]:
         """Purga chunks + espejo FTS de `document_id`. Devuelve las filas
-        (incluyendo texto) que existían antes del borrado, para que el
+        (incluyendo el texto ORIGINAL, previo al borrado) para que el
         llamador pueda desalojar el caché de embeddings y para dejar
-        evidencia del borrado en la respuesta de la API si hace falta."""
+        evidencia del borrado en la respuesta de la API si hace falta.
+
+        Bug real visto en vivo (auditoría §9.27): un chunk ya CITADO en una
+        conversación real no se puede borrar sin más — `citations.chunk_id`
+        lo referencia (RAG-007, deliberadamente sin `ON DELETE CASCADE`:
+        "una cita ya registrada es un hecho histórico de auditoría, no debe
+        desaparecer si el documento se borra después", ver
+        `CitationRepository`). Sin este chequeo, `DELETE FROM
+        document_chunks` lanzaba `sqlite3.IntegrityError: FOREIGN KEY
+        constraint failed` en cuanto el documento de prueba de G5 se usaba
+        de verdad en una llamada antes de "olvidarlo" — exactamente el
+        recorrido que el propio reto pide hacer.
+
+        SQLite no permite relajar un FK existente sin reconstruir la tabla
+        completa (no hay `ALTER TABLE ... ALTER COLUMN`); en vez de ese
+        riesgo, los chunks CITADOS se dejan como tombstone: texto y
+        embedding vaciados (el contenido real SÍ se purga, RAG-009) pero la
+        fila sobrevive para que la cita siga resolviendo. Los chunks sin
+        ninguna cita — el caso común — se siguen borrando por completo,
+        sin cambio de comportamiento. Todo chunk sale de FTS sin excepción:
+        tombstoned o borrado, deja de ser buscable, que es lo único que le
+        importa al RAG."""
         purged = self.list_for_document(conn, document_id)
         conn.execute("DELETE FROM document_chunks_fts WHERE document_id = ?", (document_id,))
-        conn.execute("DELETE FROM document_chunks WHERE document_id = ?", (document_id,))
+
+        cited_chunk_ids = {
+            row["chunk_id"]
+            for row in conn.execute(
+                "SELECT DISTINCT chunk_id FROM citations WHERE document_id = ?", (document_id,)
+            )
+        }
+        for row in purged:
+            if row["id"] in cited_chunk_ids:
+                conn.execute(
+                    "UPDATE document_chunks "
+                    "SET text = '', embedding = NULL, embedding_dim = 0 WHERE id = ?",
+                    (row["id"],),
+                )
+            else:
+                conn.execute("DELETE FROM document_chunks WHERE id = ?", (row["id"],))
         return purged
 
     @staticmethod

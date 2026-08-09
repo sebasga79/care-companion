@@ -7,13 +7,19 @@ AC-E2E-005/006 (spec.md §10)."""
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from app.adapters.fake_embeddings import FakeEmbeddings
 from app.core.config import Settings
+from app.domain.models import CitationRef
+from app.repositories.citations import CitationRepository
 from app.repositories.db import apply_schema, get_connection
 from app.repositories.documents import DocumentRepository
 from app.repositories.knowledge import get_current_knowledge_version
+from app.repositories.sessions import SessionRepository
+from app.repositories.turns import TurnRepository
 from app.services.embeddings_cache import EmbeddingsCache
 from app.services.ingestion import (
     DocumentAlreadyDeletedError,
@@ -179,6 +185,119 @@ async def test_forget_e2e_negative_canary_reaches_deleted(db_path: str) -> None:
             top_k=5,
         )
         assert all(r.document_id != document_id for r in found_old_session)
+    finally:
+        conn.close()
+
+
+async def test_forget_succeeds_when_a_chunk_was_already_cited(db_path: str) -> None:
+    """Bug real visto en vivo (auditoría §9.27): un documento usado de
+    verdad en una llamada real (con una cita emitida) no se podía olvidar
+    — `DELETE FROM document_chunks` violaba el FK que `citations.chunk_id`
+    mantiene a propósito (RAG-007: una cita ya registrada nunca
+    desaparece). Es exactamente el recorrido que G5 exige: cargar, usar en
+    una llamada, eliminar.
+
+    El test anterior de "las citas sobreviven al borrado"
+    (`test_citations.py::test_citation_persists_even_after_source_
+    document_is_deleted`) simulaba el borrado con un `UPDATE documents SET
+    status='deleted'` directo — nunca pasaba por `DELETE FROM
+    document_chunks`, así que nunca ejercitó el camino real donde el FK
+    revienta. Este sí llama a `svc.forget()` de verdad."""
+    _init_db(db_path)
+    svc, cache, _settings = _service(db_path)
+
+    learn_result = await svc.learn(raw_filename="guia_alta.md", content=_CONTENT, applicability={})
+    document_id = learn_result.document["id"]
+
+    conn = get_connection(db_path)
+    try:
+        chunk_id = conn.execute(
+            "SELECT id FROM document_chunks WHERE document_id = ? LIMIT 1", (document_id,)
+        ).fetchone()["id"]
+        session = SessionRepository(db_path).create(
+            case_id="demo-case-001",
+            state="responding",
+            knowledge_version=learn_result.knowledge_version,
+        )
+        turn = TurnRepository(db_path).add(
+            session_id=session["id"], speaker="agent", text="respuesta citando la guía", sequence=1
+        )
+        CitationRepository().record(
+            conn,
+            turn_id=turn["id"],
+            citation=CitationRef(
+                citation_id=str(uuid.uuid4()),
+                document_id=document_id,
+                document_version=learn_result.knowledge_version,
+                chunk_id=chunk_id,
+                title="Guía de alta postoperatoria",
+                knowledge_version=learn_result.knowledge_version,
+            ),
+            created_at="2026-01-01T00:00:00Z",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Antes del fix: sqlite3.IntegrityError (FOREIGN KEY constraint failed),
+    # el 500 real que se vio en vivo al intentar eliminar desde /knowledge.
+    forget_result = await svc.forget(document_id)
+    assert forget_result.document["status"] == "deleted"
+
+    conn = get_connection(db_path)
+    try:
+        # El chunk citado sobrevive como tombstone: fila viva, contenido
+        # purgado — no un borrado silenciosamente incompleto.
+        tombstoned = conn.execute(
+            "SELECT text, embedding FROM document_chunks WHERE id = ?", (chunk_id,)
+        ).fetchone()
+        assert tombstoned is not None
+        assert tombstoned["text"] == ""
+        assert tombstoned["embedding"] is None
+
+        # Pero ya no es buscable ni recuperable — "olvidar" sigue cumplido.
+        still_in_fts = conn.execute(
+            "SELECT COUNT(*) AS n FROM document_chunks_fts WHERE chunk_id = ?", (chunk_id,)
+        ).fetchone()["n"]
+        assert still_in_fts == 0
+        found_after = await hybrid_search(
+            conn,
+            "calor en la herida quirurgica fiebre alarma",
+            embeddings=cache,
+            session_knowledge_version=forget_result.knowledge_version,
+            top_k=5,
+        )
+        assert all(r.document_id != document_id for r in found_after)
+
+        # Y la cita histórica sigue intacta — el hecho de auditoría no
+        # desapareció.
+        citation_rows = CitationRepository().list_for_turn(conn, turn["id"])
+        assert len(citation_rows) == 1
+        assert citation_rows[0]["chunk_id"] == chunk_id
+    finally:
+        conn.close()
+
+
+async def test_forget_still_fully_deletes_chunks_with_no_citations(db_path: str) -> None:
+    """Contrapeso obligatorio: el caso común (documento nunca citado, la
+    inmensa mayoría de los borrados reales) no debe quedar con tombstones
+    de sobra — sigue siendo un borrado completo, byte a byte, como antes
+    del fix."""
+    _init_db(db_path)
+    svc, _cache, _settings = _service(db_path)
+    learn_result = await svc.learn(
+        raw_filename="guia_sin_citar.md", content=_CONTENT, applicability={}
+    )
+    document_id = learn_result.document["id"]
+
+    await svc.forget(document_id)
+
+    conn = get_connection(db_path)
+    try:
+        remaining = conn.execute(
+            "SELECT COUNT(*) AS n FROM document_chunks WHERE document_id = ?", (document_id,)
+        ).fetchone()["n"]
+        assert remaining == 0
     finally:
         conn.close()
 

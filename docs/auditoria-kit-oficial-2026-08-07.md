@@ -1408,3 +1408,49 @@ antes de saltar al paso 3, así que la tabla queda reducida a los documentos de 
 normalmente uno solo; y el scroll pasa a `block: "start"`, al inicio de la sección, no al
 centro. El cambio de filtro se espera un frame (`requestAnimationFrame`) antes de medir la
 posición de scroll, para no calcularla contra el DOM todavía sin filtrar.
+
+## 9.27 "Olvidar" fallaba con 500 en el documento que de verdad se había usado
+
+Hallazgo en vivo, el más grave de esta ronda porque bloquea G5 (compuerta eliminatoria)
+exactamente en el recorrido que el reto pide hacer: cargar un documento, usarlo en una
+llamada real, eliminarlo. El primer intento de eliminar `prueba-g5-conocimiento-vivo.txt`
+—el mismo documento usado en decenas de llamadas de prueba de toda la sesión— devolvía 500.
+
+Traceback real:
+```
+sqlite3.IntegrityError: FOREIGN KEY constraint failed
+  at document_chunks.py:81, DELETE FROM document_chunks WHERE document_id = ?
+```
+
+Causa: `citations.chunk_id REFERENCES document_chunks(id)` sin `ON DELETE CASCADE` — a
+propósito, según el propio docstring de `CitationRepository`: "una cita ya registrada es
+un hecho histórico de auditoría, no debe desaparecer si el documento se borra después".
+Pero `delete_for_document` sí hacía `DELETE FROM document_chunks` sin condición, así que en
+cuanto un chunk tenía una cita real apuntándolo, SQLite (con `foreign_keys=ON`) rechazaba
+el borrado — el código y el comentario decían una cosa, el `DELETE` hacía otra.
+
+**Hallazgo aparte, sobre por qué esto no se atrapó antes**: ya existía un test
+(`test_citations.py::test_citation_persists_even_after_source_document_is_deleted`) con el
+nombre exacto de esta garantía — pero simulaba el borrado con `UPDATE documents SET
+status='deleted'` directo, sin pasar nunca por `DELETE FROM document_chunks`. Validaba el
+docstring, no el código que lo rompía. El test nuevo (`test_ingestion.py`) llama a
+`svc.forget()` de verdad.
+
+Fix, sin tocar el esquema (SQLite no permite relajar un FK existente sin reconstruir la
+tabla completa — riesgo innecesario a un día del plazo): los chunks CITADOS se dejan como
+**tombstone** en `delete_for_document` — `text`/`embedding` vaciados (el contenido real se
+purga, cumpliendo RAG-009) pero la fila sobrevive para que la cita siga resolviendo. Los
+chunks sin ninguna cita — el caso común — se siguen borrando por completo, sin cambio de
+comportamiento. `_find_remaining_chunk_rows` (el chequeo de canaria que confirma un borrado
+completo) se actualizó en paralelo: un chunk cuenta como "aún presente" por `text != ''`,
+no por la mera existencia de la fila — y sigue exigiendo ausencia total en FTS.
+
+Dos tests nuevos en `test_ingestion.py`: el caso real (chunk citado, `svc.forget()` no
+debe lanzar, la cita sobrevive, el chunk deja de ser buscable) y el contrapeso obligatorio
+(documento nunca citado, sigue siendo un borrado completo byte a byte, sin tombstones de
+sobra). 409 passed / 3 skipped, ruff verde.
+
+Verificado contra el caso real que falló en pantalla, no sólo con tests: `DELETE
+/api/v1/knowledge/documents/7b1c767b-...` (el documento exacto de la captura) devuelve 200
+tras el fix. Las 21 citas acumuladas de toda la sesión sobre ese documento siguen intactas;
+ambos chunks quedaron con `text=''`, `embedding=NULL`.
