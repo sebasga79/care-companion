@@ -76,6 +76,28 @@ _AMBIGUOUS_PATTERN_EXAMPLES: tuple[str, ...] = (
     "no se le quita lo llorón/llorona",
 )
 
+# Qué NO va en este prompt, y por qué (revisado 9 ago tras la prueba en vivo
+# del jurado): toda regla que el orquestador ya impone de forma determinista
+# se elimina de aquí. No es sólo ahorro de tokens — el orquestador
+# SOBREESCRIBE la decisión del modelo en esos puntos, así que pedirle que
+# razone sobre ellos gasta atención en algo que después se descarta, y con un
+# modelo pequeño ese gasto se notaba en preguntas básicas mal manejadas.
+#
+# Movido a código (no repetir aquí):
+#   - elegir el siguiente objetivo / no repetir lo ya respondido
+#     -> `_resolve_next_question` valida el objetivo propuesto contra las
+#        observaciones reales y lo reemplaza si no corresponde.
+#   - no repetir una aclaración casi idéntica
+#     -> `_is_near_duplicate_question` en el orquestador.
+#   - "ya tienes mis registros" no es una respuesta clínica
+#     -> `_references_known_history` intercepta antes y descarta lo que el
+#        modelo hubiera extraído en ese turno.
+#   - priorizar lugar/intensidad/evolución cuando hay dolor sin caracterizar
+#     -> `_resolve_next_question` lo hace explícitamente.
+#
+# Lo que SÍ se queda: conocimiento de dominio que sólo el modelo aplica
+# (glosario coloquial, contradicciones entre turnos, silencio != negación) y
+# el contrato de salida JSON.
 _SYSTEM_PROMPT = (
     "Eres el asistente de entrevista de seguimiento postoperatorio de Care "
     "Companion. Hablas en español, tono cálido y breve. Tu única función es "
@@ -103,17 +125,10 @@ _SYSTEM_PROMPT = (
     "objetivo y NO crea observaciones. Responde al saludo con naturalidad y "
     "continúa con el primer objetivo pendiente.\n"
     "5. Extrae TODA la información explícita del último turno, aunque no "
-    "corresponda a la pregunta anterior. Elige como siguiente objetivo uno "
-    "que siga pendiente después de esas observaciones; no repitas algo que "
-    "el paciente acaba de responder. Si reporta dolor sin localizarlo ni "
-    "caracterizarlo, prioriza preguntar lugar exacto, intensidad de 0 a 10 "
-    "y evolución antes de volver al checklist general.\n"
-    "6. Usa los seguimientos anteriores para reconocer la evolución, evitar "
-    "que el paciente repita antecedentes ya registrados y priorizar cambios "
-    "o pendientes. Si el paciente dice que ya tienes sus registros, NO marques "
-    "esa objeción como respuesta confirmada: reconoce la línea base disponible, "
-    "explica qué cambió y pregunta solo por lo que sucede hoy. Nunca presentes "
-    "los antecedentes como síntomas actuales ni contestes por el paciente.\n"
+    "corresponda a la pregunta anterior.\n"
+    "6. Usa los seguimientos anteriores para reconocer la evolución y no "
+    "hacer repetir antecedentes ya registrados. Nunca presentes un "
+    "antecedente como síntoma actual ni contestes por el paciente.\n"
     "7. Responde EXCLUSIVAMENTE con un objeto JSON válido con esta forma: "
     '{"needs_clarification": bool, "clarification_question": str|null, '
     '"next_objective_code": str|null, "next_question": str|null, "observations": '

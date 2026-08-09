@@ -385,9 +385,46 @@ def _covered_objective_codes(observations: list[Observation]) -> set[str]:
         covered.add("WOUND_APPEARANCE")
     if "VOMITING" in covered or "ORAL_INTAKE_INTOLERANCE" in covered:
         covered.add("INTAKE")
+    # "No hay dolor" llega en al menos tres formas distintas según cómo el
+    # modelo decida expresarlo, y las tres significan lo mismo (medido en
+    # vivo, 9 ago, mismo turno "ya no tengo dolor"):
+    #   PAIN denied · PAIN confirmed value=false · PAIN_SEVERITY confirmed=0
+    # El código las normaliza en vez de exigirle al modelo una convención
+    # exacta: si de eso depende no hacer una pregunta absurda ("¿en qué
+    # parte exacta le duele?" a quien acaba de decir que no le duele), la
+    # regla tiene que ser determinista y no una instrucción del prompt.
     pain_observation = latest_by_code.get("PAIN")
-    if pain_observation is not None and pain_observation.certainty == "denied":
-        covered.update({"PAIN_LOCATION", "PAIN_SEVERITY", "PAIN_EVOLUTION"})
+    pain_absent = pain_observation is not None and (
+        pain_observation.certainty == "denied"
+        or (
+            pain_observation.certainty == "confirmed"
+            # `value=None` queda FUERA a propósito: significa "no se extrajo
+            # un valor", no "no hay dolor". Incluirlo suprimía la pregunta
+            # de localización ante un dolor presente sin caracterizar — un
+            # falso negativo conversacional que atraparon test_gates.py.
+            and pain_observation.value is not None
+            and str(pain_observation.value).strip().lower() in {"false", "no"}
+        )
+    )
+    if pain_absent:
+        covered.update({"PAIN", "PAIN_LOCATION", "PAIN_SEVERITY", "PAIN_EVOLUTION"})
+
+    # Un dolor confirmado en 0/10 no tiene ubicación ni evolución que
+    # preguntar. Regla en código, no en el prompt (revisión 9 ago): en la
+    # prueba en vivo el paciente dijo "ya no tengo dolor", el modelo lo
+    # entendió bien y registró PAIN_SEVERITY=0 confirmado — pero dejó PAIN
+    # en 'uncertain' en vez de 'denied', así que la rama de arriba no
+    # aplicaba y el agente siguió preguntando "¿en qué parte exacta le
+    # duele?" tres turnos seguidos. Depender de que el modelo elija la
+    # `certainty` exacta para no hacer una pregunta absurda es frágil; el
+    # valor numérico confirmado es la señal fiable.
+    severity_observation = latest_by_code.get("PAIN_SEVERITY")
+    if severity_observation is not None and severity_observation.certainty == "confirmed":
+        severity_nrs = parse_pain_nrs(
+            severity_observation.value, severity_observation.original_text
+        )
+        if severity_nrs == 0:
+            covered.update({"PAIN", "PAIN_LOCATION", "PAIN_EVOLUTION"})
     return covered
 
 

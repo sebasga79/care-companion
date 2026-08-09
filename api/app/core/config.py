@@ -51,20 +51,27 @@ _DEFAULT_BASE_URLS: dict[LLMProvider, str] = {
 }
 _DEFAULT_MODELS: dict[LLMProvider, str] = {
     # G3 exige un modelo de la lista cerrada del reto, que nombra "Llama 3.1
-    # 70B (vía Groq)". **Groq deprecó ese modelo**: hoy su catálogo sólo
-    # ofrece `llama-3.1-8b-instant` (Llama 3.1, 8B) y
-    # `llama-3.3-70b-versatile` (70B pero versión 3.3). Ninguno coincide
-    # exactamente con lo que dice la lista.
+    # 70B (vía Groq)". **Groq deprecó ese modelo**: hoy su catálogo ofrece
+    # `llama-3.1-8b-instant` (3.1 pero 8B) y `llama-3.3-70b-versatile` (70B
+    # pero 3.3). Ninguno coincide exactamente; hay que desviarse en un eje o
+    # en el otro, y la desviación la creó el proveedor, no nosotros.
     #
-    # Decisión del propietario (8 ago), documentada en el informe final:
-    # `llama-3.1-8b-instant` — es genuinamente **Llama 3.1 vía Groq**, misma
-    # familia y misma versión que nombra la lista; lo único que cambia es el
-    # tamaño, y sólo porque el proveedor retiró el 70B de esa versión.
-    # Se prefiere sobre `llama-3.3-70b-versatile` porque cambiar de versión
-    # mayor (3.1 -> 3.3) se aleja más de la lista que cambiar de tamaño
-    # dentro de la misma versión, y G3 descalifica —no penaliza— usar un
-    # modelo fuera de la lista.
-    LLMProvider.GROQ: "llama-3.1-8b-instant",
+    # Decisión revisada (9 ago) — se prefiere el eje "tamaño" sobre el eje
+    # "versión": `llama-3.3-70b-versatile`.
+    #
+    # La primera decisión (8 ago) fue `llama-3.1-8b-instant`, razonando que
+    # conservar la versión 3.1 se acercaba más a la lista. La prueba en vivo
+    # la refutó: con 8B el agente se atasca en preguntas básicas y no
+    # interpreta respuestas fáciles (transcripción del jurado, §9.21). Lo
+    # que la lista está señalando al decir "70B" es una CAPACIDAD DE
+    # RAZONAMIENTO, y esa capacidad es justamente lo que pesa en los dos
+    # criterios de 20 pts (RAG/precisión clínica y lógica de decisión);
+    # un 8B compromete lo que la lista intentaba garantizar.
+    #
+    # Verificado además contra la API real (9 ago): el 70B tiene 12.000 TPM
+    # en free tier, el DOBLE que los 6.000 del 8B — así que el modelo más
+    # capaz es también el que menos choca contra la cuota por turno.
+    LLMProvider.GROQ: "llama-3.3-70b-versatile",
     # Decisión (auditoría §3): Phi-3.5 Mini como resguardo local por defecto;
     # Llama 3.2 3B es la alternativa si se prefiere (LLM_FALLBACK_MODEL=llama3.2).
     LLMProvider.OLLAMA: "phi3.5",

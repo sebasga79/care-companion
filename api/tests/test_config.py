@@ -42,18 +42,24 @@ def test_groq_applies_known_defaults_with_only_api_key_set(
     (G2): con `LLM_API_KEY` alcanza, `base_url`/`model` se completan con
     los defaults conocidos de Groq.
 
-    El modelo por defecto es `llama-3.1-8b-instant`, NO `llama-3.1-70b-
-    versatile`: Groq retiró ese último de su catálogo, así que un default
-    apuntando ahí daba 404 en la primera llamada real. La justificación
-    frente a la lista permitida (G3) está en `docs/final-report.md` §2.1 —
-    este assert es el que impide que el nombre se cambie sin pasar por esa
-    decisión."""
+    El modelo por defecto es `llama-3.3-70b-versatile`, NO
+    `llama-3.1-70b-versatile` (Groq lo retiró; un default apuntando ahí daba
+    404 en la primera llamada real) y ya NO `llama-3.1-8b-instant`.
+
+    Ninguno de los dos disponibles coincide exactamente con lo que nombra la
+    lista permitida ("Llama 3.1 70B vía Groq"), así que hay que desviarse en
+    la versión o en el tamaño. Se elige desviarse en la VERSIÓN y conservar
+    los 70B: la prueba en vivo mostró que con 8B el agente se atasca en
+    preguntas básicas, y lo que la lista señala al decir "70B" es capacidad
+    de razonamiento — justo lo que pesa en los dos criterios de 20 pts.
+    Justificación completa en `docs/final-report.md` §2.1; este assert es el
+    que impide que el nombre se cambie sin pasar por esa decisión."""
     monkeypatch.setenv("LLM_PROVIDER", "groq")
     monkeypatch.setenv("LLM_API_KEY", "gsk_" + "a" * 52)
     settings = get_settings()
     assert settings.llm_provider == LLMProvider.GROQ
     assert settings.llm_base_url == "https://api.groq.com/openai/v1"
-    assert settings.llm_model == "llama-3.1-8b-instant"
+    assert settings.llm_model == "llama-3.3-70b-versatile"
 
 
 def test_ollama_does_not_require_api_key(clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:

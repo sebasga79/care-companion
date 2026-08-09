@@ -807,3 +807,99 @@ async def test_retrieval_is_scoped_to_case_procedure_via_applicability(db_path: 
     assert len(retrieval_events) == 1
     payload = json.loads(retrieval_events[0]["payload"])
     assert payload["applicability_filter"] == {"procedure": "cirugia_ambulatoria_general_x"}
+
+
+def test_zero_pain_covers_location_and_evolution_objectives() -> None:
+    """Regla en código, no en el prompt: un dolor confirmado en 0/10 no
+    tiene ubicación ni evolución que preguntar.
+
+    Visto en vivo (9 ago): el paciente dijo "ya no tengo dolor", el modelo
+    registró PAIN_SEVERITY=0 confirmado — correcto — pero dejó PAIN en
+    'uncertain' en vez de 'denied'. El agente siguió preguntando "¿en qué
+    parte exacta le duele?" tres turnos seguidos."""
+    from app.orchestrator.call_cycle import _covered_objective_codes
+
+    observations = [
+        Observation(
+            code="PAIN_SEVERITY",
+            label="intensidad",
+            value=0,
+            certainty="confirmed",
+            source_turn_id="t1",
+            original_text="que ya no tengo dolor",
+            normalized_text=None,
+        ),
+        Observation(
+            code="PAIN",
+            label="dolor",
+            value=None,
+            certainty="uncertain",
+            source_turn_id="t1",
+            original_text="mejor, como le digo mejorado un 10%",
+            normalized_text=None,
+        ),
+    ]
+    covered = _covered_objective_codes(observations)
+    assert {"PAIN", "PAIN_LOCATION", "PAIN_EVOLUTION"} <= covered
+
+
+def test_nonzero_pain_still_asks_for_location() -> None:
+    """Contrapeso: con dolor real (6/10) la ubicación sigue pendiente."""
+    from app.orchestrator.call_cycle import _covered_objective_codes
+
+    observations = [
+        Observation(
+            code="PAIN_SEVERITY",
+            label="intensidad",
+            value=6,
+            certainty="confirmed",
+            source_turn_id="t1",
+            original_text="como un seis",
+            normalized_text=None,
+        )
+    ]
+    covered = _covered_objective_codes(observations)
+    assert "PAIN_LOCATION" not in covered
+
+
+def test_pain_absence_expressed_as_confirmed_false_covers_pain_objectives() -> None:
+    """Tercera forma de decir "no hay dolor", medida en vivo con el 70B:
+    `PAIN certainty=confirmed value=false` (en vez de `denied`). Las tres
+    formas significan lo mismo y el código las normaliza."""
+    from app.orchestrator.call_cycle import _covered_objective_codes
+
+    covered = _covered_objective_codes(
+        [
+            Observation(
+                code="PAIN",
+                label="dolor",
+                value=False,
+                certainty="confirmed",
+                source_turn_id="t1",
+                original_text="que ya no tengo dolor",
+                normalized_text=None,
+            )
+        ]
+    )
+    assert {"PAIN", "PAIN_LOCATION", "PAIN_SEVERITY", "PAIN_EVOLUTION"} <= covered
+
+
+def test_pain_present_as_confirmed_true_still_asks_location() -> None:
+    """Contrapeso: `PAIN confirmed value=true` es dolor PRESENTE — la
+    ubicación sigue pendiente y debe preguntarse."""
+    from app.orchestrator.call_cycle import _covered_objective_codes
+
+    covered = _covered_objective_codes(
+        [
+            Observation(
+                code="PAIN",
+                label="dolor",
+                value=True,
+                certainty="confirmed",
+                source_turn_id="t1",
+                original_text="sí me duele",
+                normalized_text=None,
+            )
+        ]
+    )
+    assert "PAIN_LOCATION" not in covered
