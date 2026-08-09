@@ -60,6 +60,14 @@ const DEFAULT_METRICS: { label: string; metric: MetricValue }[] = [
     metric: { status: "objetivo", value: "< 2.5 s", detail: "Extremo a extremo" },
   },
   {
+    label: "Latencia voz-a-voz",
+    metric: {
+      status: "objetivo",
+      value: "< 2.5 s",
+      detail: "Fin de habla del paciente → inicio de audio del agente",
+    },
+  },
+  {
     label: "Tokens",
     metric: { status: "pendiente", value: "Por turno", detail: "Trazados, pendientes de medición" },
   },
@@ -84,6 +92,7 @@ export function MetricsBand() {
         setMetrics([
           { label: "Latencia P50", metric: snapshot.latencyP50 },
           { label: "Latencia P95", metric: snapshot.latencyP95 },
+          { label: "Latencia voz-a-voz", metric: snapshot.latencyVoice },
           { label: "Tokens", metric: snapshot.tokens },
           { label: "Costo", metric: snapshot.cost },
         ]);

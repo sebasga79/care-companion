@@ -51,25 +51,48 @@ async def get_metrics(
     settings: Settings = Depends(get_settings_dep),
 ) -> dict[str, Any]:
     latency = audit_repo.latency_percentiles()
+    voice_latency = audit_repo.voice_latency_percentiles()
     usage = audit_repo.usage_summary()
     measured_latency = latency["sample_size"] > 0
     measured_usage = usage["sample_size"] > 0
 
-    def latency_metric(value: float | None, unit: str) -> dict[str, Any]:
+    def latency_metric(value: float | None, unit: str, *, sample_size: int) -> dict[str, Any]:
         if value is None:
             return {"status": "pendiente", "value": "—", "detail": "Sin muestras instrumentadas"}
         return {
             "status": "medido",
             "value": f"{value:.0f} {unit}",
-            "detail": f"n={latency['sample_size']}",
+            "detail": f"n={sample_size}",
         }
 
     return {
-        "latency_p50": latency_metric(latency["p50"], "ms"),
-        "latency_p95": latency_metric(latency["p95"], "ms"),
+        "latency_p50": latency_metric(latency["p50"], "ms", sample_size=latency["sample_size"]),
+        "latency_p95": latency_metric(latency["p95"], "ms", sample_size=latency["sample_size"]),
+        "latency_voice": _voice_latency_metric(voice_latency),
         "tokens": _tokens_metric(usage, measured_usage),
         "cost": _cost_metric(usage, measured_usage, settings),
         "measured": measured_latency and measured_usage,
+    }
+
+
+def _voice_latency_metric(voice_latency: dict[str, Any]) -> dict[str, Any]:
+    """Rúbrica §5, definición literal (ver `AuditRepository.voice_latency_percentiles`):
+    medida real en el navegador, alimentada por
+    `POST /sessions/{id}/voice-latency` — distinta del proxy de servidor en
+    `latency_p50`/`latency_p95`."""
+    if voice_latency["sample_size"] == 0:
+        return {
+            "status": "pendiente",
+            "value": "—",
+            "detail": "Requiere una llamada real con micrófono — STT/TTS son del navegador",
+        }
+    return {
+        "status": "medido",
+        "value": f"{voice_latency['p50']:.0f} ms P50",
+        "detail": (
+            f"P95 {voice_latency['p95']:.0f} ms · n={voice_latency['sample_size']} · "
+            "fin de habla del paciente → inicio de audio del agente"
+        ),
     }
 
 
@@ -102,7 +125,15 @@ def _cost_metric(usage: dict[str, Any], measured: bool, settings: Settings) -> d
     """Rúbrica §5: costo estimado por llamada; si corre local, extrapolar a
     precios de producción con el cálculo explicado. Sin precio configurado
     (`LLM_COST_PER_MILLION_*_TOKENS`) se reporta "pendiente" — un número
-    fabricado es peor que uno ausente (rúbrica §5, in extenso)."""
+    fabricado es peor que uno ausente (rúbrica §5, in extenso).
+
+    Usa sólo `usage["by_provider"][settings.llm_provider]` — NO el total
+    combinado. Hallazgo real (auditoría §9.34): cuando `FallbackLLM`
+    degrada una llamada individual al resguardo local (cuota agotada, 429,
+    etc.), esos tokens los sirvió gratis un modelo distinto al configurado
+    — cobrarlos al precio del proveedor primario sobreestima el costo real
+    y es exactamente el tipo de número que "no se sostiene" frente a los
+    logs que la rúbrica penaliza."""
     if not measured:
         return {
             "status": "pendiente",
@@ -117,16 +148,25 @@ def _cost_metric(usage: dict[str, Any], measured: bool, settings: Settings) -> d
             "value": "No configurado",
             "detail": ("Hay tokens medidos; faltan las tarifas de entrada y salida del modelo."),
         }
+    primary_bucket = usage["by_provider"].get(
+        settings.llm_provider.value, {"input_tokens": 0, "output_tokens": 0}
+    )
+    primary_in = primary_bucket["input_tokens"]
+    primary_out = primary_bucket["output_tokens"]
     calls = max(usage["session_count"], 1)
-    total_cost = (
-        usage["input_tokens_total"] / 1_000_000 * price_in
-        + usage["output_tokens_total"] / 1_000_000 * price_out
+    total_cost = primary_in / 1_000_000 * price_in + primary_out / 1_000_000 * price_out
+    fallback_in = usage["input_tokens_total"] - primary_in
+    fallback_out = usage["output_tokens_total"] - primary_out
+    fallback_note = (
+        f" ({fallback_in + fallback_out} tokens de resguardo excluidos, sin costo real)"
+        if (fallback_in + fallback_out) > 0
+        else ""
     )
     return {
         "status": "medido",
         "value": f"${total_cost / calls:.4f} USD/llamada",
         "detail": (
-            f"({usage['input_tokens_total']} in + {usage['output_tokens_total']} out tokens) "
-            f"× (${price_in}/1M in, ${price_out}/1M out) ÷ {calls} llamadas"
+            f"({primary_in} in + {primary_out} out tokens de {settings.llm_provider.value}) "
+            f"× (${price_in}/1M in, ${price_out}/1M out) ÷ {calls} llamadas{fallback_note}"
         ),
     }

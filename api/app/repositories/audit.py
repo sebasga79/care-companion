@@ -29,6 +29,23 @@ _LLM_CALL_EVENT_TYPES = (
 )
 
 
+def _percentile_stats(values: list[float]) -> dict[str, float | None]:
+    """P50/P95 por percentil-por-rango (nearest-rank), compartido entre
+    `latency_percentiles()` (proxy de servidor) y `voice_latency_percentiles()`
+    (medición real del navegador) — misma fórmula, distinta fuente de
+    `event_type`. Devuelve `None`/`sample_size=0` sin muestras: el llamador
+    reporta "pendiente", nunca inventa un número."""
+    if not values:
+        return {"p50": None, "p95": None, "sample_size": 0}
+    values = sorted(values)
+
+    def pct(p: float) -> float:
+        k = max(0, min(len(values) - 1, int(round(p * (len(values) - 1)))))
+        return values[k]
+
+    return {"p50": pct(0.50), "p95": pct(0.95), "sample_size": len(values)}
+
+
 def _normalize_followup_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Proyecta registros v1.1 existentes al vocabulario clínico actual.
 
@@ -212,15 +229,34 @@ class AuditRepository:
                     "WHERE event_type = 'turn.response_sent' AND latency_ms IS NOT NULL"
                 ).fetchall()
             ]
-        if not values:
-            return {"p50": None, "p95": None, "sample_size": 0}
-        values.sort()
+        return _percentile_stats(values)
 
-        def pct(p: float) -> float:
-            k = max(0, min(len(values) - 1, int(round(p * (len(values) - 1)))))
-            return values[k]
+    def voice_latency_percentiles(self) -> dict[str, float | None]:
+        """P50/P95 de la latencia voz-a-voz **real**, medida en el
+        navegador (rúbrica §5, definición literal: "desde que el paciente
+        termina de hablar hasta que empieza a sonar el audio del agente").
 
-        return {"p50": pct(0.50), "p95": pct(0.95), "sample_size": len(values)}
+        A diferencia de `latency_percentiles()` (proxy del lado del
+        servidor: desde que llega `client.turn_text` hasta que se envía la
+        respuesta, sin tránsito de red ni arranque real del motor de TTS),
+        ésta es la medición completa de punta a punta. STT y TTS corren
+        enteramente en el navegador (Web Speech API) — no hay forma de
+        producirla desde el servidor ni desde un script. Se alimenta de
+        `POST /sessions/{id}/voice-latency`, que `CallModal.tsx` llama
+        automáticamente después de cada turno hablado.
+
+        Devuelve None si no hay muestras — el llamador reporta 'pendiente'
+        hasta que exista al menos una llamada real con micrófono."""
+        with session_scope(self._database_path) as conn:
+            values = [
+                r["latency_ms"]
+                for r in conn.execute(
+                    "SELECT latency_ms FROM events "
+                    "WHERE event_type = 'client.voice_latency_reported' "
+                    "AND latency_ms IS NOT NULL"
+                ).fetchall()
+            ]
+        return _percentile_stats(values)
 
     def usage_summary(self) -> dict[str, Any]:
         """Agrega tokens/invocaciones LLM/consultas RAG desde `events`
@@ -228,11 +264,25 @@ class AuditRepository:
         invocaciones al modelo por turno, consultas al RAG por llamada").
 
         Cada `agent.*.completed` ya trae `usage.model_dump()` como payload
-        (`app/orchestrator/call_cycle.py`); cada `rag.retrieval.completed`
-        se loguea una vez por turno. Ninguna cifra se inventa: si no hay
-        eventos instrumentados todavía (p. ej. `LLM_PROVIDER=fake` recién
-        arrancado sin sesiones), se devuelve `sample_size=0` y el caller
-        reporta "pendiente" — mismo patrón que `latency_percentiles`."""
+        (`app/orchestrator/call_cycle.py`), incluido `provider` — clave para
+        `by_provider` (ver abajo). Cada `rag.retrieval.completed` se loguea
+        una vez por turno. Ninguna cifra se inventa: si no hay eventos
+        instrumentados todavía (p. ej. `LLM_PROVIDER=fake` recién arrancado
+        sin sesiones), se devuelve `sample_size=0` y el caller reporta
+        "pendiente" — mismo patrón que `latency_percentiles`.
+
+        `by_provider`: desglose de tokens por proveedor real de cada
+        llamada (`groq`, `ollama`, ...). Existe porque `FallbackLLM` puede
+        degradar una llamada individual al resguardo local sin que la
+        sesión se entere — un caso real, no hipotético: durante la corrida
+        de benchmark del 9 de agosto, la cuota diaria de Groq se agotó a
+        mitad de una conversación y 3 de 36 invocaciones cayeron a Ollama
+        (gratis). Sin este desglose, `_cost_metric` habría cobrado precio
+        de Groq por tokens que en realidad sirvió gratis el modelo local —
+        exactamente el tipo de número que "no se sostiene" que la rúbrica
+        penaliza. `input_tokens_total`/`output_tokens_total` siguen siendo
+        el total real (incluye resguardo) para las cifras de consumo; sólo
+        el costo debe mirar `by_provider`."""
         placeholders = ",".join("?" for _ in _LLM_CALL_EVENT_TYPES)
         with session_scope(self._database_path) as conn:
             llm_rows = conn.execute(
@@ -256,14 +306,22 @@ class AuditRepository:
                 "rag_queries_total": 0,
                 "turn_count": turn_count,
                 "session_count": session_count,
+                "by_provider": {},
             }
 
         input_tokens_total = 0
         output_tokens_total = 0
+        by_provider: dict[str, dict[str, int]] = {}
         for row in llm_rows:
             payload = json.loads(row["payload"]) if row["payload"] else {}
-            input_tokens_total += int(payload.get("input_tokens", 0))
-            output_tokens_total += int(payload.get("output_tokens", 0))
+            tokens_in = int(payload.get("input_tokens", 0))
+            tokens_out = int(payload.get("output_tokens", 0))
+            input_tokens_total += tokens_in
+            output_tokens_total += tokens_out
+            provider = str(payload.get("provider") or "desconocido")
+            bucket = by_provider.setdefault(provider, {"input_tokens": 0, "output_tokens": 0})
+            bucket["input_tokens"] += tokens_in
+            bucket["output_tokens"] += tokens_out
 
         return {
             "sample_size": len(llm_rows),
@@ -273,4 +331,5 @@ class AuditRepository:
             "rag_queries_total": rag_call_count,
             "turn_count": turn_count,
             "session_count": session_count,
+            "by_provider": by_provider,
         }

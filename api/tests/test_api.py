@@ -104,6 +104,44 @@ def test_finish_missing_session_returns_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_report_voice_latency_persists_event_and_returns_204(client: TestClient) -> None:
+    """Rúbrica §5: latencia voz-a-voz real, medida en el navegador
+    (`CallModal.tsx`) y persistida aquí como evento auditable — antes vivía
+    sólo en memoria del navegador (auditoría §9.34)."""
+    created = client.post("/api/v1/sessions", json={"case_id": "demo-case-001"}).json()
+
+    response = client.post(
+        f"/api/v1/sessions/{created['id']}/voice-latency", json={"latency_ms": 1200}
+    )
+    assert response.status_code == 204
+    assert response.content == b""
+
+    metrics = client.get("/api/v1/metrics").json()
+    assert metrics["latency_voice"]["status"] == "medido"
+    assert metrics["latency_voice"]["value"] == "1200 ms P50"
+    assert "n=1" in metrics["latency_voice"]["detail"]
+
+    trace = client.get(f"/api/v1/audit/sessions/{created['id']}/trace").json()
+    event_types = {e["event_type"] for e in trace["events"]}
+    assert "client.voice_latency_reported" in event_types
+
+
+def test_report_voice_latency_missing_session_returns_404(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/sessions/00000000-0000-0000-0000-000000000000/voice-latency",
+        json={"latency_ms": 900},
+    )
+    assert response.status_code == 404
+
+
+def test_report_voice_latency_rejects_non_positive_value(client: TestClient) -> None:
+    created = client.post("/api/v1/sessions", json={"case_id": "demo-case-001"}).json()
+    response = client.post(
+        f"/api/v1/sessions/{created['id']}/voice-latency", json={"latency_ms": 0}
+    )
+    assert response.status_code == 422
+
+
 def test_openapi_schema_is_served(client: TestClient) -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200

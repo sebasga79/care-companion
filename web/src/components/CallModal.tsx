@@ -333,12 +333,22 @@ export function CallModal({ patientCase, onClose }: CallModalProps) {
       const pct = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
       const stats = { p50: pct(0.5), p95: pct(0.95), n: sorted.length };
       setVoiceLatencyStats(stats);
-      // Lectura manual durante una llamada real de prueba; es el único
-      // lugar donde existe este dato (STT/TTS son ambos del navegador).
       console.info(
         `[latencia voz→voz] turno=${latencyMs.toFixed(0)}ms  ` +
           `P50=${stats.p50.toFixed(0)}ms P95=${stats.p95.toFixed(0)}ms n=${stats.n}`,
       );
+      // Persistida como evento auditable (rúbrica §5 — "se contrasta con
+      // tus logs"), no sólo en memoria del navegador (auditoría §9.34/
+      // §9.35). Fire-and-forget a propósito: telemetría secundaria: un
+      // fallo de red aquí nunca debe interrumpir la llamada en curso, así
+      // que el error se descarta en silencio en vez de propagarse.
+      const sid = sessionIdRef.current;
+      if (sid) {
+        api.reportVoiceLatency(sid, latencyMs).catch(() => {
+          // Best-effort: el readout en pantalla y la consola ya tienen el
+          // dato aunque el backend no lo haya podido persistir esta vez.
+        });
+      }
     }
     wasSpeakingRef.current = voice.speaking;
   }, [voice.speaking]);

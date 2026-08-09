@@ -388,6 +388,11 @@ export interface MetricValue {
 export interface MetricsSnapshot {
   latencyP50: MetricValue;
   latencyP95: MetricValue;
+  /** Rúbrica §5, definición literal: medida real en el navegador (fin de
+   * habla del paciente → inicio de audio del agente), a diferencia de
+   * `latencyP50`/`latencyP95` (proxy del servidor). Alimentada por
+   * `api.reportVoiceLatency`. */
+  latencyVoice: MetricValue;
   tokens: MetricValue;
   cost: MetricValue;
 }
@@ -587,16 +592,32 @@ export const api = {
     const raw = await request<{
       latency_p50: MetricValue;
       latency_p95: MetricValue;
+      latency_voice: MetricValue;
       tokens: MetricValue;
       cost: MetricValue;
     }>("/api/v1/metrics");
     return {
       latencyP50: raw.latency_p50,
       latencyP95: raw.latency_p95,
+      latencyVoice: raw.latency_voice,
       tokens: raw.tokens,
       cost: raw.cost,
     };
   },
+
+  /**
+   * Rúbrica §5: reporta una muestra de latencia voz-a-voz medida en el
+   * navegador (`CallModal.tsx`) para que quede persistida como evento
+   * auditable en vez de vivir sólo en memoria del navegador (auditoría
+   * §9.34/§9.35). Telemetría secundaria a propósito: el llamador debe
+   * envolver esto en su propio try/catch e ignorar el error — un fallo de
+   * red aquí nunca debe interrumpir la llamada en curso.
+   */
+  reportVoiceLatency: (sessionId: string, latencyMs: number) =>
+    request<void>(`/api/v1/sessions/${sessionId}/voice-latency`, {
+      method: "POST",
+      body: JSON.stringify({ latency_ms: latencyMs }),
+    }),
 
   getTrace: async (sessionId: string): Promise<SessionTrace> => {
     const raw = await request<RawTrace>(`/api/v1/audit/sessions/${sessionId}/trace`);

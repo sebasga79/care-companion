@@ -281,6 +281,21 @@ esta tabla es el mejor proxy medible en el servidor (desde que llega
 `client.turn_text` hasta que se envía la respuesta) y no incluye tránsito
 de red del WebSocket ni el arranque real del motor de TTS del navegador.
 
+Cada muestra que el navegador mide queda además **persistida como evento
+auditable** (`POST /api/v1/sessions/{id}/voice-latency` →
+`client.voice_latency_reported` en `events`), no sólo en memoria de la
+pestaña — el jurado puede corroborarlo por sus propios medios sin depender
+de que alguien le pase un número a mano: `GET /api/v1/metrics` expone
+`latency_voice` (P50/P95 reales, separados del proxy de servidor de arriba)
+y `/audit` lo muestra como quinta tarjeta junto a P50/P95/tokens/costo. El
+costo por llamada de esta sección se calcula igual: `LLM_COST_PER_MILLION_*`
+está configurado con el precio real de Groq, así que `/api/v1/metrics`
+también lo computa solo, en vivo, sobre datos reales — no un cálculo hecho
+una vez y pegado aquí. El costo cuenta sólo los tokens del proveedor
+primario (`by_provider` en `AuditRepository.usage_summary`): si una llamada
+cae al resguardo local por cuota agotada, esos tokens no se cobran al
+precio de Groq (auditoría §9.35).
+
 ## Tests y calidad
 
 ```bash

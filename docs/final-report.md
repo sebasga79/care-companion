@@ -134,6 +134,14 @@ hallazgo de que la cuota **diaria** (no sólo la de minuto) de Groq se agotó
 a mitad de la corrida y forzó una caída al resguardo local en 2 de 16
 turnos, en `docs/benchmarks/README.md`.
 
+El costo por llamada de la tabla ya no es un cálculo manual de una corrida
+puntual: `GET /api/v1/metrics` (y `/audit`) lo computa solo, en vivo, con
+`LLM_COST_PER_MILLION_*` configurado al precio real de Groq —
+`AuditRepository.usage_summary` desglosa tokens por proveedor
+(`by_provider`) para no cobrar precio de Groq por tokens que en realidad
+sirvió gratis el resguardo local, el mismo problema que contaminó la
+corrida corta de arriba (auditoría §9.35).
+
 El falso negativo de la corrida grande y su justificación están
 documentados en `docs/benchmarks/README.md` — es un caso de minimización
 verbal sostenida sin dato objetivo inequívoco, dejado como limitación
@@ -169,17 +177,23 @@ reportado) — ver commit `app/domain/safety_signals.py::_is_hypothetical_worry`
 - **Clean-install ≤15 min (NFR-004):** cronometrado — 9 min 50 s de punta a
   punta (`docker compose down -v && up -d --build`, dataset + corpus +
   embeddings reales incluidos), ver §9.19 de la auditoría.
-- **Latencia voz-a-voz (spec.md §1.5) instrumentada, sin muestra real
-  todavía.** `CallModal.tsx` mide en el navegador, por llamada, desde que
-  el paciente termina de hablar hasta que empieza a sonar el audio del
-  agente — la definición exacta de la rúbrica §5 — y la muestra en vivo
-  junto al micrófono. Lo que falta no es instrumentación: STT y TTS corren
-  enteramente en el navegador (Web Speech API), así que la única forma de
-  producir una muestra real es una llamada real con micrófono; no hay script
-  ni proceso de servidor que pueda generarla. Lo medido hasta ahora
-  (`groq-latency.json`, `capa1-groq*.json`) sigue siendo el mejor proxy de
-  servidor (sin tránsito WS ni arranque real del motor de TTS) — ver
-  §9.20 y §9.34 de la auditoría.
+- **Latencia voz-a-voz (spec.md §1.5) instrumentada y persistida, sin
+  muestra real todavía.** `CallModal.tsx` mide en el navegador, por
+  llamada, desde que el paciente termina de hablar hasta que empieza a
+  sonar el audio del agente — la definición exacta de la rúbrica §5 — la
+  muestra en vivo junto al micrófono y la reporta a
+  `POST /api/v1/sessions/{id}/voice-latency`, que la persiste como evento
+  auditable (`client.voice_latency_reported`). `GET /api/v1/metrics`
+  expone el resultado (`latency_voice`, P50/P95) y `/audit` lo muestra
+  como tarjeta propia — el jurado puede corroborarlo sin depender de que
+  alguien le pase un número a mano. Lo que falta no es instrumentación ni
+  persistencia: STT y TTS corren enteramente en el navegador (Web Speech
+  API), así que la única forma de producir una muestra real es una llamada
+  real con micrófono; no hay script ni proceso de servidor que pueda
+  generarla. Lo medido hasta ahora (`groq-latency.json`,
+  `capa1-groq*.json`) sigue siendo el mejor proxy de servidor (sin
+  tránsito WS ni arranque real del motor de TTS) — ver §9.20, §9.34 y
+  §9.35 de la auditoría.
 - Filtros server-side de auditoría, reranker adicional y responsive móvil
   quedan como mejoras no bloqueantes.
 

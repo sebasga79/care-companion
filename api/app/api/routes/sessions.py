@@ -29,7 +29,7 @@ from app.api.deps import (
     get_session_repo,
     get_settings_dep,
 )
-from app.api.schemas import SessionCreateRequest, SessionResponse
+from app.api.schemas import SessionCreateRequest, SessionResponse, VoiceLatencyRequest
 from app.core.config import Settings
 from app.core.correlation_id import get_correlation_id
 from app.domain.session_fsm import (
@@ -137,3 +137,34 @@ async def finish_session(
     )
 
     return await call_cycle_orchestrator.build_summary(str(session_id))
+
+
+@router.post("/{session_id}/voice-latency", status_code=status.HTTP_204_NO_CONTENT)
+async def report_voice_latency(
+    session_id: UUID,
+    body: VoiceLatencyRequest,
+    session_repo: SessionRepository = Depends(get_session_repo),
+    event_repo: EventRepository = Depends(get_event_repo),
+) -> None:
+    """Persiste una muestra de latencia voz-a-voz medida en el navegador
+    (rúbrica §5, definición literal — ver `VoiceLatencyRequest`).
+
+    A diferencia del resto de eventos de esta ruta, éste es puramente
+    telemetría secundaria: no participa de la FSM de la llamada ni de
+    ninguna decisión clínica. Igual se valida que la sesión exista (404 si
+    no) para no acumular eventos huérfanos, pero un fallo de ESTE endpoint
+    nunca debe tumbar la llamada en curso — por eso `CallModal.tsx` lo
+    llama sin esperar la respuesta ni propagar el error al usuario."""
+    record = session_repo.get(str(session_id))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+
+    correlation_id = get_correlation_id() or str(session_id)
+    event_repo.add_event(
+        session_id=str(session_id),
+        correlation_id=correlation_id,
+        component="voice",
+        event_type="client.voice_latency_reported",
+        payload={"source": "browser_stt_tts"},
+        latency_ms=body.latency_ms,
+    )

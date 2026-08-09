@@ -35,6 +35,17 @@ class SessionResponse(BaseModel):
     opening_message: str | None = None
 
 
+class VoiceLatencyRequest(BaseModel):
+    """Rúbrica §5, definición literal: latencia medida en el NAVEGADOR desde
+    que el paciente termina de hablar hasta que empieza a sonar el audio del
+    agente. STT y TTS son ambos del navegador (Web Speech API) — no hay
+    forma de medir esto desde el servidor, así que el cliente calcula el
+    valor (`CallModal.tsx`) y lo reporta aquí para que quede persistido como
+    evento auditable en vez de vivir sólo en memoria del navegador."""
+
+    latency_ms: float = Field(gt=0)
+
+
 # -- Conocimiento / RAG (RAG-010) --------------------------------------
 
 

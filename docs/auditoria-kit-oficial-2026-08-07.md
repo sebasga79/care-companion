@@ -1717,3 +1717,77 @@ ruff + pytest limpios (409 passed / 3 skipped) antes de la corrida del benchmark
 cambios de código de backend en esta tarea, sólo documentación y el script de medición ya
 existente. `docs/final-report.md` §2.1, §4 y §6 y `README.md` actualizados con cifras y
 modelo reales; `docs/benchmarks/README.md` con el detalle completo de la corrida nueva.
+
+## 9.35 Latencia voz-a-voz persistida como evento auditable, no sólo en memoria del navegador
+
+Pregunta del usuario tras §9.34: si hace una llamada, ¿queda "registrada"? Respuesta honesta
+en su momento: no — la instrumentación vivía en un `ref`/`state` de React dentro de
+`CallModal.tsx`, visible sólo mientras el modal estuviera abierto, sin tocar el backend. El
+usuario pidió explícitamente la opción robusta: "necesitamos este porque el jurado me
+imagino que debe corroborar por sus propios medios" — coherente con la rúbrica §5
+("se contrasta con lo que ocurre en la sesión... con tus logs").
+
+**Backend, reutilizando infraestructura ya existente en vez de inventar una nueva:**
+- `POST /api/v1/sessions/{id}/voice-latency` (`VoiceLatencyRequest{latency_ms: float, gt=0}`,
+  204 sin cuerpo) — valida que la sesión exista (404 si no) y persiste vía
+  `EventRepository.add_event(event_type="client.voice_latency_reported", latency_ms=...)`,
+  el mismo repositorio que ya usa `session.finished` y todo el resto de la traza.
+- `AuditRepository.voice_latency_percentiles()` — misma fórmula de percentil que
+  `latency_percentiles()` (extraída a un helper compartido, `_percentile_stats`, para no
+  duplicarla), filtrando `client.voice_latency_reported` en vez de `turn.response_sent`.
+  Devuelve `sample_size=0`/`None` sin muestras — nunca inventa un número.
+- `GET /api/v1/metrics` gana el campo `latency_voice`, separado de `latency_p50`/`latency_p95`
+  a propósito: son dos definiciones distintas (proxy de servidor vs. medición real de
+  navegador), mezclarlas habría sido engañoso.
+
+**Bug real encontrado de paso, no buscado:** al leer `usage_summary()` para decidir dónde
+enganchar esto, `_cost_metric` sumaba TODOS los tokens de `agent.*.completed` sin mirar el
+proveedor real de cada llamada. Con el hallazgo de §9.34 (cuota diaria de Groq agotada a
+mitad de una corrida, `FallbackLLM` degradando algunas llamadas a Ollama gratis) esto ya no
+era hipotético: cualquier sesión con al menos una llamada degradada infla el costo reportado
+cobrando precio de Groq por tokens que sirvió gratis el modelo local — exactamente el tipo de
+número que "no se sostiene" que la rúbrica penaliza explícitamente. `usage_summary()` ahora
+desglosa tokens por proveedor (`by_provider`, leído del `payload.provider` que cada
+`agent.*.completed` ya traía) y `_cost_metric` sólo cobra los del proveedor primario
+configurado (`settings.llm_provider`), reportando aparte cuántos tokens de resguardo quedaron
+excluidos. Verificado en producción, no sólo en test: `GET /api/v1/metrics` contra los datos
+reales acumulados de toda la sesión de desarrollo mostró `"33496 tokens de resguardo
+excluidos, sin costo real"` — la mezcla no era un caso de laboratorio, ya estaba pasando.
+
+**Config:** se activó el precio real de Groq (`LLM_COST_PER_MILLION_INPUT_TOKENS=0.59`,
+`OUTPUT_TOKENS=0.79`, verificado en §9.34) tanto en `api/.env` como en `.env.example` — antes
+estaba comentado con valores ilustrativos `0.00`, así que `/metrics` reportaba costo
+"pendiente" incluso con tokens medidos. Con esto, costo por llamada se calcula solo, en vivo,
+sin depender de que alguien lo compute a mano.
+
+**Frontend:** `CallModal.tsx` llama `api.reportVoiceLatency(sessionId, latencyMs)` justo
+después de calcular cada muestra (mismo punto que ya alimentaba el readout en pantalla y la
+consola) — *fire-and-forget*, con `.catch()` que descarta el error en silencio: es telemetría
+secundaria, un fallo de red aquí nunca debe interrumpir la llamada en curso, mismo criterio
+que `EventRepository` ya documentaba para sus propios llamadores. `MetricsBand.tsx` (la banda
+de métricas de `/audit`) gana una quinta tarjeta, "Latencia voz-a-voz", junto a P50/P95/
+Tokens/Costo — con lo que la grilla fija de 4 columnas dejaba una tarjeta sola en una segunda
+fila; cambiada a `repeat(auto-fit, minmax(200px, 1fr))` para que se acomode sola sin importar
+el conteo.
+
+**Tests nuevos (5), todos verificando comportamiento real, no sólo forma:**
+- `test_report_voice_latency_persists_event_and_returns_204` — round-trip completo: POST →
+  204 → aparece en `/api/v1/metrics` Y en la traza de la sesión.
+- `test_report_voice_latency_missing_session_returns_404` /
+  `..._rejects_non_positive_value` (422).
+- `test_metrics_voice_latency_percentiles_with_multiple_samples` — 5 muestras con P50≠P95
+  para probar la fórmula, no un caso trivial de una sola muestra.
+- `test_cost_only_counts_primary_provider_tokens_not_fallback` — la regresión del bug de
+  arriba: dos eventos en la misma sesión, uno `provider=groq` y otro `provider=ollama`, y se
+  verifica que sólo el primero entra al costo. Requirió construir un `TestClient(create_app())`
+  local dentro del test (en vez del fixture `client` compartido) porque `Settings` se lee al
+  crear la app — un `monkeypatch.setenv` dentro del cuerpo del test llega tarde si la app ya
+  se construyó en un fixture.
+
+Verificación: tsc + eslint + build limpios. Backend: ruff limpio, 414 passed / 3 skipped
+(409 anteriores + 5 nuevos). Contenedores reconstruidos (api y web); verificado en vivo contra
+el sistema real corriendo, no sólo contra tests: sesión real creada, `POST .../voice-latency`
+→ 204, `GET /api/v1/metrics` devolviendo `latency_voice` medido y `cost` medido con el
+desglose de resguardo excluido sobre datos reales acumulados. Confirmado en el bundle JS
+servido que `reportVoiceLatency` y la tarjeta "Latencia voz-a-voz" se emiten desde el
+componente.

@@ -2608,7 +2608,13 @@ footer {
 
 .metrics-band {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* `auto-fit`/`minmax` en vez de `repeat(4, 1fr)` fijo: con la 5ta tarjeta
+     de latencia voz-a-voz agregada, 4 columnas fijas dejaban una tarjeta
+     sola en una segunda fila, ocupando 1/4 del ancho con 3/4 vacío al
+     lado. Así se acomoda solo a 3-6 tarjetas sin depender de un conteo
+     exacto (los breakpoints de abajo lo siguen ajustando en pantallas
+     angostas sin cambios). */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 14px;
   margin-bottom: var(--space-6);
 }
