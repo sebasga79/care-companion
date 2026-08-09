@@ -36,7 +36,7 @@ export function RiskPanel({ riskLevel, handoffCreated }: RiskPanelProps) {
           </span>
           <div>
             <strong>{RISK_LABELS[riskLevel].label}</strong>
-            <small>Evaluado por el Triage Agent con reglas deterministas + evidencia.</small>
+            <small>Evaluado con reglas clínicas deterministas y evidencia citada.</small>
           </div>
         </div>
       ) : (
@@ -61,7 +61,8 @@ export function RiskPanel({ riskLevel, handoffCreated }: RiskPanelProps) {
             : "No requiere acción manual: si se detecta un riesgo, el sistema detiene el cuestionario y crea el registro de revisión humana."}
         </p>
         <p className="escalation-note">
-          El handoff conserva los hallazgos, la decisión y los teléfonos confirmados durante la conversación.
+          La derivación conserva los hallazgos, la decisión y los teléfonos confirmados durante
+          la conversación.
         </p>
       </div>
     </section>

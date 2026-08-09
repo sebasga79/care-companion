@@ -1454,3 +1454,20 @@ Verificado contra el caso real que falló en pantalla, no sólo con tests: `DELE
 /api/v1/knowledge/documents/7b1c767b-...` (el documento exacto de la captura) devuelve 200
 tras el fix. Las 21 citas acumuladas de toda la sesión sobre ese documento siguen intactas;
 ambos chunks quedaron con `text=''`, `embedding=NULL`.
+
+## 9.28 Restos de inglés que sobrevivieron a la limpieza anterior (§9.24)
+
+El barrido de §9.24 (grep sobre `Retrieval|Handoff|Backend`) no encontró estos tres porque
+el patrón exacto no calzaba: `RiskPanel.tsx` tenía "Evaluado por el **Triage Agent**..." y
+"El **handoff** conserva los hallazgos..." (minúscula, distinto del "Handoff" que sí se
+había cambiado antes en el mismo archivo); `knowledge/page.tsx` tenía "Consultando detalle
+en el **backend**…" en el diálogo de detalle de documento, un `<p>` que el grep anterior no
+cubrió. Los tres eran texto visible en pantalla, no identificadores internos.
+
+Corregidos: "Triage Agent" → "reglas clínicas deterministas y evidencia citada" (se quita
+la referencia al nombre interno del agente, no sólo se traduce); "el handoff conserva" →
+"la derivación conserva"; "backend" → "servidor". Barrido final con un patrón más amplio
+(`backend|Backend|handoff|Handoff|Agent\b`) sobre todo `src/app` y `src/components`: sin
+más coincidencias.
+
+tsc + eslint limpios, build de Next OK, verificado en el contenedor reconstruido.

@@ -711,7 +711,7 @@ export default function KnowledgePage() {
                           <td colSpan={8}>
                             <div className="document-detail-row">
                               {detailState.loading ? (
-                                <p style={{ margin: 0 }}>Consultando detalle en el backend…</p>
+                                <p style={{ margin: 0 }}>Consultando detalle en el servidor…</p>
                               ) : detailState.error ? (
                                 <StatusBanner
                                   message={detailState.error}
