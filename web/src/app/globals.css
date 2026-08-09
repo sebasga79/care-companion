@@ -1752,114 +1752,177 @@ footer {
    ------------------------------------------------------------------- */
 
 /* ---------------------------------------------------------------------
-   Fila superior de /knowledge (rediseño, pedido explícito del usuario,
-   segunda ronda): la carga de guía es LA acción principal de la página —
-   va primero, arriba de todo, con más jerarquía que el hero informativo
-   que sigue. La llamada de prueba es INDEPENDIENTE — su propia tarjeta,
-   no vive dentro de la de carga — con un botón redondo que reusa el
-   mismo ícono de micrófono de `VoiceOrb` (`.mic-button`/`.mic-symbol`)
-   en vez de un ícono nuevo inventado.
+   Tarjeta superior de /knowledge (rediseño según sketch aportado por el
+   usuario, tercera ronda): UNA sola tarjeta con tres columnas — texto
+   introductorio, zona de arrastrar-y-soltar real, y prueba en llamada —
+   en vez de dos tarjetas separadas con un botón redondo suelto. El
+   dropzone reemplaza el `<input type="file">` visible por una superficie
+   más grande y explícita; el input real sigue existiendo pero oculto
+   (`sr-only`), alimentado por clic o por soltar un archivo.
 
-   Versión anterior descartada: una barra ancha con fondo en gradiente y
-   texto blanco que, pegada al borde superior de la página, quedaba
-   debajo del `.topbar` (`position: sticky` + `backdrop-filter: blur
-   (18px)`) — el desenfoque del header caía sobre el texto y lo volvía
-   casi ilegible. Esta versión no depende de estar pegada al borde: tiene
-   su propio fondo sólido y suficiente margen para no solaparse.
+   Versiones anteriores descartadas, por si se vuelve a tocar esto:
+   1) barra ancha con gradiente y texto blanco pegada al borde superior:
+      el `backdrop-filter: blur(18px)` del `.topbar` sticky caía encima
+      y volvía el texto ilegible.
+   2) dos tarjetas (`.knowledge-top-row` + `.knowledge-call-fab-card`)
+      con un botón circular suelto para la llamada de prueba: el sketch
+      pide una sola superficie con la llamada como tercera columna, con
+      su propio botón de texto ("Iniciar prueba") en vez de que el ícono
+      mismo sea el control.
    ------------------------------------------------------------------- */
 
-.knowledge-top-row {
-  display: flex;
-  /* `align-items: stretch` (default) estiraba la tarjeta de llamada a la
-     altura completa de la de carga, empujándolas a tocarse visualmente
-     pese al gap; `flex-start` deja que cada una tenga su alto natural. */
-  align-items: flex-start;
-  /* Bug real: `--space-5` no existe en este archivo (sólo hay
-     --space-1..4, --space-6, --space-8) — sin fallback, el gap se
-     resolvía a nada y las dos tarjetas quedaban pegadas. */
-  gap: var(--space-6);
+.knowledge-upload-card {
   margin-bottom: var(--space-6);
 }
 
-.knowledge-upload-card {
-  /* Reposicionada arriba de todo, pero SIN peso visual extra — mismo
-     tamaño/forma que el resto de tarjetas `.card` de la página, como
-     pidió el usuario ("igual a como estaba antes"). La jerarquía la da
-     el ORDEN (va primera), no un borde ni una sombra distinta.
-     Bug real de la vuelta anterior: `flex: 1 1 auto` la estiraba a
-     ocupar TODO el ancho restante de la fila — antes vivía en un
-     `.two-col` (`minmax(0, 1.1fr) minmax(320px, 0.9fr)`, ~45% del ancho
-     junto a "Versión activa"), no a ancho completo. `flex: 0 1 680px`
-     reproduce ese tamaño aproximado sin volver a un grid de dos
-     columnas forzado. */
-  flex: 0 1 680px;
-  min-width: 0;
+.knowledge-upload-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.35fr) minmax(200px, 0.9fr);
+  gap: var(--space-6);
+  align-items: stretch;
+  margin-bottom: var(--space-5);
 }
 
-.knowledge-call-fab-card {
+.knowledge-upload-intro p {
+  margin-top: 8px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.knowledge-dropzone {
   display: flex;
-  flex: 0 0 220px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-6);
+  gap: 6px;
+  padding: var(--space-5) var(--space-4);
+  border: 2px dashed var(--line);
+  border-radius: var(--radius-md);
+  background: #fbfdfe;
+  color: var(--aqua-deep);
+  text-align: center;
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+
+.knowledge-dropzone[data-dragging="true"] {
+  border-color: var(--aqua-deep);
+  background: var(--aqua-soft);
+}
+
+.knowledge-dropzone-title {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.knowledge-dropzone-btn {
+  min-height: 40px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--aqua-deep);
+  color: white;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  transition: background var(--motion-fast) ease;
+}
+
+.knowledge-dropzone-btn:hover {
+  background: #066267;
+}
+
+.knowledge-dropzone-filename {
+  margin: 2px 0 0;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.knowledge-call-test {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: var(--space-4);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg, 20px);
+  border-radius: var(--radius-md);
   background: var(--aqua-soft);
   text-align: center;
 }
 
-/* Mismas medidas/colores que `.mic-button` de VoiceOrb — es a propósito
-   el mismo ícono de "llamada" en toda la app, no uno nuevo. */
-.knowledge-call-fab {
+/* Mismo ícono de micrófono que `VoiceOrb`/`.mic-button` en el resto de la
+   app (`.mic-symbol`, definido más arriba) — aquí sin el círculo blanco
+   grande, porque el control real es el botón de texto de abajo, no el
+   ícono en sí.
+
+   Bug real reportado en vivo: `.mic-symbol` declara una caja de 28px de
+   alto, pero su glifo (dibujado con ::before/::after posicionados en
+   absoluto — la "base" y el "pie" del micrófono) se sale de esa caja y
+   llega a ~44px reales. Con el ícono como hijo directo del flex column
+   y poco espacio, el texto de abajo quedaba montado sobre el pie del
+   micrófono. `.mic-button` (76px, el ícono solo, sin hermanos debajo)
+   nunca lo mostraba porque nada colisionaba con el desborde.
+   Fix: envolver el glifo en una insignia con alto fijo (mismo patrón que
+   `.context-icon`/`.speaker-icon`/`.risk-summary-icon` en el resto de la
+   app), suficientemente alta para contener el glifo completo — el gap
+   con el encabezado pasa a calcularse sobre la caja real, no sobre la
+   engañosa de 28px. */
+.knowledge-call-test-icon {
   display: grid;
-  width: 76px;
-  height: 76px;
+  width: 52px;
+  height: 52px;
   place-items: center;
-  border: 5px solid white;
-  border-radius: 50%;
-  background: linear-gradient(160deg, #ffffff, #eef9fa);
-  box-shadow: 0 0 0 2px rgba(34, 184, 188, 0.28), 0 12px 30px rgba(12, 116, 130, 0.14);
-  cursor: pointer;
-  transition: transform var(--motion-fast, 120ms ease);
 }
 
-.knowledge-call-fab:hover {
-  transform: translateY(-2px);
-}
-
-.knowledge-call-fab:focus-visible {
-  outline: 3px solid var(--aqua-deep);
-  outline-offset: 3px;
-}
-
-.knowledge-call-fab-label {
+.knowledge-call-test h3 {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--ink-muted);
 }
 
-.knowledge-call-fab-label strong {
+.knowledge-call-test p {
+  margin: 2px 0 10px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.knowledge-call-test-btn {
+  min-height: 40px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--aqua-deep);
+  color: white;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  transition: background var(--motion-fast) ease;
+}
+
+.knowledge-call-test-btn:hover {
+  background: #066267;
+}
+
+.knowledge-upload-advanced {
+  margin-bottom: var(--space-4);
+}
+
+.knowledge-upload-help {
   display: block;
-  margin-bottom: 2px;
-  color: var(--ink);
-  font-size: 14px;
+  margin-bottom: var(--space-3);
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.knowledge-upload-submit {
+  width: 100%;
 }
 
 @media (max-width: 860px) {
-  .knowledge-top-row {
-    flex-direction: column;
-  }
-  .knowledge-call-fab-card {
-    flex-basis: auto;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .knowledge-call-fab {
-    transition: none;
+  .knowledge-upload-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -2035,24 +2098,18 @@ footer {
   font-size: 10px;
 }
 
-.upload-zone {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border: 1px dashed var(--line);
-  border-radius: var(--radius-md);
-  background: #fbfdfe;
-}
-
-.upload-zone label {
+/* `.upload-zone` (caja punteada plana con <input type="file"> visible)
+   quedó sin uso tras el rediseño con dropzone — la reemplaza
+   `.knowledge-dropzone` arriba. Las reglas de abajo, que antes dependían
+   de vivir anidadas dentro de `.upload-zone`, quedan reapuntadas a
+   `.advanced-fields` (procedimiento/fase siguen usando esos mismos
+   controles, ahora fuera de esa caja). */
+.advanced-fields label {
   font-size: 12px;
   font-weight: 700;
 }
 
-.upload-zone input[type="file"],
-.upload-zone input[type="text"],
-.upload-zone select,
+.advanced-fields select,
 .filter-field input,
 .filter-field select {
   min-height: 44px;
@@ -2121,11 +2178,6 @@ footer {
   }
 }
 
-.upload-zone .field-help {
-  color: var(--ink-muted);
-  font-size: 11px;
-}
-
 .document-table {
   width: 100%;
   border-collapse: collapse;
@@ -2170,6 +2222,47 @@ footer {
   padding: 7px 9px;
   font-size: 10px;
   font-weight: 900;
+}
+
+/* Acciones de la tabla (rediseño según sketch): botones de solo ícono en
+   vez de texto ("Ver detalle" / "Eliminar"). El significado sigue
+   disponible para lectores de pantalla vía `aria-label`, y visualmente
+   vía `title` (tooltip nativo del navegador). */
+.document-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-btn {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: border-color var(--motion-fast) ease, color var(--motion-fast) ease,
+    background var(--motion-fast) ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  border-color: var(--aqua-deep);
+  color: var(--aqua-deep);
+  background: var(--aqua-soft);
+}
+
+.icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.icon-btn-danger:hover:not(:disabled) {
+  border-color: rgba(232, 95, 87, 0.5);
+  background: var(--coral-soft);
+  color: var(--coral-deep);
 }
 
 .inventory-toolbar {
@@ -2450,6 +2543,26 @@ footer {
   justify-content: flex-end;
   gap: var(--space-3);
   margin-top: var(--space-4);
+}
+
+/* ---------------------------------------------------------------------
+   Barra inferior de /knowledge — según el sketch: los dos chips de
+   versión/conteo que antes vivían junto al hero (`.hero-actions`) se
+   consolidan aquí, al final del contenido. No usa `position: fixed` a
+   propósito: esta página ya tiene un modal de llamada y un diálogo de
+   confirmación con su propio `z-index`; una barra fija sumaría una capa
+   más de solapamientos posibles sin necesidad real (es información de
+   apoyo, no una acción que deba estar siempre a la vista).
+   ------------------------------------------------------------------- */
+
+.knowledge-status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) 2px 0;
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--line);
 }
 
 /* ---------------------------------------------------------------------

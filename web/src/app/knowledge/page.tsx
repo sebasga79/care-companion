@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusBanner } from "@/components/StatusBanner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -53,6 +53,10 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleString("es");
 }
 
+function formatShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 function applicabilityEntries(applicability: Record<string, unknown>): [string, string][] {
   return Object.entries(applicability)
     .filter(([key]) => key !== "source")
@@ -62,6 +66,65 @@ function applicabilityEntries(applicability: Record<string, unknown>): [string, 
 
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Error desconocido.";
+}
+
+/* Íconos de línea, inline (sin librería ni emoji — mismo criterio que el
+   resto de la app: símbolos monocromos, no ilustraciones a color). */
+
+function CloudUploadIcon() {
+  return (
+    <svg
+      width="40"
+      height="40"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M7 18a4.5 4.5 0 0 1-.5-8.97A5.5 5.5 0 0 1 17.5 9.5 4 4 0 0 1 17 18H7Z" />
+      <path d="M12 12.5v6M9.3 15l2.7-2.5 2.7 2.5" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 12a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-12" />
+    </svg>
+  );
 }
 
 type DetailRowState = {
@@ -87,6 +150,15 @@ export default function KnowledgePage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
+
+  // Dropzone: arrastrar y soltar, además del selector clásico. El input
+  // real queda oculto (`sr-only`) pero sigue siendo el mismo <input
+  // type="file" name="file"> que `handleUpload` ya leía — al soltar un
+  // archivo se le asigna vía `DataTransfer`, así que el resto del flujo
+  // de carga (validación, submit) no cambia una línea.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const [openDetails, setOpenDetails] = useState<Record<string, DetailRowState>>({});
   const [knownQueries, setKnownQueries] = useState<Record<string, string>>({});
@@ -241,6 +313,41 @@ export default function KnowledgePage() {
     runSearch(searchQuery);
   }
 
+  function pickFile(file: File | null) {
+    setSelectedFile(file);
+  }
+
+  function handleDropzoneClick() {
+    fileInputRef.current?.click();
+  }
+
+  function handleDropzoneDragOver(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDropzoneDragLeave(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDragging(false);
+  }
+
+  function handleDropzoneDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDragging(false);
+    const file = event.dataTransfer.files?.[0];
+    const input = fileInputRef.current;
+    if (!file || !input) return;
+    // Un <input type="file"> no acepta asignar `.files` directo con un
+    // array — hay que construir un `DataTransfer` real. Así el resto del
+    // flujo (`handleUpload` lee `form.elements.namedItem("file")`) sigue
+    // funcionando exactamente igual, sin importar si el archivo llegó
+    // por clic o por arrastre.
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    pickFile(file);
+  }
+
   async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -256,6 +363,7 @@ export default function KnowledgePage() {
       form.reset();
       setProcedure("");
       setPhase("");
+      pickFile(null);
       setUploadNote(
         `"${result.document.filename}" quedó ${statusMeta(result.document.status).label.toLowerCase()} ` +
           `con ${result.chunkCount} fragmento(s). Versión de conocimiento ahora v${result.knowledgeVersion}.`,
@@ -377,121 +485,120 @@ export default function KnowledgePage() {
         {liveMessage}
       </p>
 
-      {/* Jerarquía deliberada (pedido explícito del usuario, dos rondas):
-          cargar un documento es LA acción principal de la página — va
-          primero, arriba de todo, con más peso visual que el hero
-          informativo que sigue. La llamada de prueba es independiente
-          (no vive dentro de la tarjeta de carga): un botón redondo con
-          el mismo ícono de micrófono que ya usa `VoiceOrb` en la llamada
-          real (`.mic-button`/`.mic-symbol`), no un ícono nuevo inventado.
-          "Recuperar" (paso 2, más abajo) consulta el índice directo, no
-          pasa por un agente conversando — es la prueba canaria del propio
-          sistema. Esto es distinto y complementario: una llamada real,
-          con el agente de voz completo, sin el selector de 160 pacientes
-          de `/call` ni su historial longitudinal. */}
-      <div className="knowledge-top-row">
-        <section className="card card-pad knowledge-upload-card" aria-labelledby="upload-heading">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Ingesta</p>
+      {/* Rediseño según sketch aportado por el usuario: una sola tarjeta
+          con tres columnas (intro / dropzone / prueba en llamada) en vez
+          de dos tarjetas separadas. El dropzone es funcional de verdad
+          (arrastrar y soltar), no sólo decorativo. */}
+      <section className="card card-pad knowledge-upload-card" aria-labelledby="upload-heading">
+        <form onSubmit={handleUpload}>
+          <div className="knowledge-upload-grid">
+            <div className="knowledge-upload-intro">
               <h2 id="upload-heading">Cargar guía clínica</h2>
+              <p>
+                Sube aquí un documento clínico que el agente <strong>no conozca</strong>. Al
+                cargarlo queda disponible de inmediato para las llamadas; al eliminarlo, el
+                agente deja de usarlo. Es la prueba de conocimiento vivo.
+              </p>
             </div>
-          </div>
 
-          <p className="upload-purpose">
-            Sube aquí un documento clínico que el agente <strong>no conozca</strong>. Al
-            cargarlo queda disponible de inmediato para las llamadas; al eliminarlo, el
-            agente deja de usarlo. Es la prueba de conocimiento vivo.
-          </p>
-
-          <form className="upload-zone" onSubmit={handleUpload}>
-            {/* Cada campo va en su propio contenedor con la etiqueta encima
-                del control. Antes los `label` y `select` eran hijos sueltos
-                del grid, así que "Fase" terminaba flotando al lado del
-                selector de "Procedimiento" y su propio selector caía en la
-                línea siguiente, desalineado. */}
-            <div className="upload-field">
-              <label htmlFor="knowledge-file">Documento (.txt, .md o .pdf)</label>
+            <div
+              className="knowledge-dropzone"
+              data-dragging={isDragging}
+              onDragOver={handleDropzoneDragOver}
+              onDragEnter={handleDropzoneDragOver}
+              onDragLeave={handleDropzoneDragLeave}
+              onDrop={handleDropzoneDrop}
+            >
+              <CloudUploadIcon />
+              <p className="knowledge-dropzone-title">Arrastra y suelta archivos aquí</p>
+              <button type="button" className="knowledge-dropzone-btn" onClick={handleDropzoneClick}>
+                Seleccionar archivo
+              </button>
+              <label htmlFor="knowledge-file" className="sr-only">
+                Documento (.txt, .md o .pdf)
+              </label>
               <input
+                ref={fileInputRef}
                 id="knowledge-file"
                 name="file"
                 type="file"
                 accept=".txt,.md,.pdf"
                 required
+                className="sr-only"
+                onChange={(event) => pickFile(event.target.files?.[0] ?? null)}
               />
+              <p className="knowledge-dropzone-filename">
+                {selectedFile ? selectedFile.name : "Sin archivo seleccionado — .txt, .md o .pdf"}
+              </p>
             </div>
 
-            <details className="advanced-fields">
-              <summary>Aplicabilidad clínica (opcional)</summary>
-              <p className="advanced-fields-help">
-                Acota a qué llamadas aplica. Si lo dejas sin especificar, el documento
-                sirve para cualquier procedimiento.
-              </p>
-              <div className="advanced-fields-grid">
-                <div className="upload-field">
-                  <label htmlFor="applicability-procedure">Procedimiento</label>
-                  <select
-                    id="applicability-procedure"
-                    value={procedure}
-                    onChange={(event) => setProcedure(event.target.value)}
-                  >
-                    {PROCEDURE_OPTIONS.map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="upload-field">
-                  <label htmlFor="applicability-phase">Fase</label>
-                  <select
-                    id="applicability-phase"
-                    value={phase}
-                    onChange={(event) => setPhase(event.target.value)}
-                  >
-                    <option value="">Todas las fases</option>
-                    <option value="postoperative">Posoperatorio</option>
-                    <option value="discharge">Alta</option>
-                    <option value="followup">Seguimiento</option>
-                  </select>
-                </div>
+            {demoCases.length > 0 ? (
+              <div className="knowledge-call-test">
+                <span className="knowledge-call-test-icon" aria-hidden="true">
+                  <span className="mic-symbol" />
+                </span>
+                <h3>Probar en una llamada</h3>
+                <p>Verifica lo que acabas de subir, sin historial previo.</p>
+                <button type="button" className="knowledge-call-test-btn" onClick={startTestCall}>
+                  Iniciar prueba
+                </button>
               </div>
-            </details>
-
-            <span className="field-help">
-              Se valida extensión, tamaño, contenido real y duplicados antes de indexar.
-              Un rechazo no deja el documento a medias.
-            </span>
-
-            <button type="submit" className="btn btn-primary" disabled={uploading}>
-              {uploading ? "Cargando…" : "Cargar documento"}
-            </button>
-
-            {uploadError ? <StatusBanner message={uploadError} /> : null}
-            {uploadNote ? (
-              <p role="status" style={{ fontSize: 12, color: "var(--lime-deep)", fontWeight: 700 }}>
-                {uploadNote}
-              </p>
             ) : null}
-          </form>
-        </section>
-
-        {demoCases.length > 0 ? (
-          <div className="knowledge-call-fab-card">
-            <button
-              type="button"
-              className="knowledge-call-fab"
-              onClick={startTestCall}
-              aria-label="Probar en una llamada real lo que acabas de subir"
-            >
-              <span className="mic-symbol" aria-hidden="true" />
-            </button>
-            <p className="knowledge-call-fab-label">
-              <strong>Probar en una llamada</strong>
-              Verifica lo que acabas de subir, sin historial previo.
-            </p>
           </div>
-        ) : null}
-      </div>
+
+          <details className="advanced-fields knowledge-upload-advanced">
+            <summary>Aplicabilidad clínica (opcional)</summary>
+            <p className="advanced-fields-help">
+              Acota a qué llamadas aplica. Si lo dejas sin especificar, el documento sirve
+              para cualquier procedimiento.
+            </p>
+            <div className="advanced-fields-grid">
+              <div className="upload-field">
+                <label htmlFor="applicability-procedure">Procedimiento</label>
+                <select
+                  id="applicability-procedure"
+                  value={procedure}
+                  onChange={(event) => setProcedure(event.target.value)}
+                >
+                  {PROCEDURE_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="upload-field">
+                <label htmlFor="applicability-phase">Fase</label>
+                <select
+                  id="applicability-phase"
+                  value={phase}
+                  onChange={(event) => setPhase(event.target.value)}
+                >
+                  <option value="">Todas las fases</option>
+                  <option value="postoperative">Posoperatorio</option>
+                  <option value="discharge">Alta</option>
+                  <option value="followup">Seguimiento</option>
+                </select>
+              </div>
+            </div>
+          </details>
+
+          <span className="field-help knowledge-upload-help">
+            Se valida extensión, tamaño, contenido real y duplicados antes de indexar. Un
+            rechazo no deja el documento a medias.
+          </span>
+
+          <button type="submit" className="btn btn-primary knowledge-upload-submit" disabled={uploading}>
+            {uploading ? "Cargando…" : "Cargar documento"}
+          </button>
+
+          {uploadError ? <StatusBanner message={uploadError} /> : null}
+          {uploadNote ? (
+            <p role="status" style={{ fontSize: 12, color: "var(--lime-deep)", fontWeight: 700 }}>
+              {uploadNote}
+            </p>
+          ) : null}
+        </form>
+      </section>
 
       <div className="view-hero card">
         <div>
@@ -502,14 +609,6 @@ export default function KnowledgePage() {
             permanece protegido; los evaluadores pueden cargar una guía de prueba, recuperarla
             y eliminarla sin reiniciar el sistema.
           </p>
-        </div>
-        <div className="hero-actions">
-          <span className="chip chip-simulation">
-            {officialCount} guías oficiales protegidas · {testCount} de prueba
-          </span>
-          <span className="chip chip-info">
-            Versión de conocimiento: {knowledgeVersion !== null ? `v${knowledgeVersion}` : "…"}
-          </span>
         </div>
       </div>
 
@@ -539,27 +638,6 @@ export default function KnowledgePage() {
       </ol>
 
       {listError ? <StatusBanner message={listError} onRetry={reloadInventory} /> : null}
-
-      <section className="card card-pad" aria-labelledby="version-heading" style={{ marginBottom: 24 }}>
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Versión activa</p>
-              <h2 id="version-heading">
-                {listLoading
-                  ? "Consultando el servidor…"
-                  : knowledgeVersion !== null
-                    ? `Versión de conocimiento v${knowledgeVersion}`
-                    : "Sin conexión al servidor"}
-              </h2>
-            </div>
-            {knowledgeVersion !== null ? <span className="status-orbit">v{knowledgeVersion}</span> : null}
-          </div>
-          <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>
-            {knowledgeVersion !== null
-              ? `${activeDocuments.length} documentos activos: ${officialCount} oficiales protegidos y ${testCount} de prueba. Los borrados quedan como trazabilidad.`
-              : "El inventario de conocimiento (documentos, versión y prueba canaria) aparecerá aquí cuando el servidor esté disponible."}
-          </p>
-      </section>
 
       <section className="card card-pad" aria-labelledby="documents-heading" style={{ marginBottom: 24 }}>
         <div className="section-heading">
@@ -608,7 +686,7 @@ export default function KnowledgePage() {
           <EmptyState
             icon="≡"
             title="Sin documentos aún"
-            detail="Los documentos cargados aparecerán aquí con su versión, aplicabilidad, estado, checksum y acciones de inspección/eliminación."
+            detail="Los documentos cargados aparecerán aquí con su versión, estado y acciones de inspección/eliminación. Tamaño, aplicabilidad y checksum viven en “Ver detalle”."
           />
         ) : filteredDocuments.length === 0 ? (
           <EmptyState
@@ -621,16 +699,11 @@ export default function KnowledgePage() {
             <table className="document-table">
               <thead>
                 <tr>
-                  <th scope="col">Archivo</th>
-                  <th scope="col">Tamaño</th>
+                  <th scope="col">Nombre de la guía</th>
+                  <th scope="col">Versión</th>
                   <th scope="col">Estado</th>
-                  <th scope="col">Aplicabilidad</th>
-                  <th scope="col">v. agregada</th>
-                  <th scope="col">v. eliminada</th>
-                  <th scope="col">Checksum</th>
-                  <th scope="col">
-                    <span className="sr-only">Acciones</span>
-                  </th>
+                  <th scope="col">Fecha de subida</th>
+                  <th scope="col">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -648,53 +721,37 @@ export default function KnowledgePage() {
                             {doc.protected ? "Oficial · protegido" : "Prueba del evaluador"}
                           </span>
                         </td>
-                        <td>{formatBytes(doc.sizeBytes)}</td>
+                        <td>v{doc.knowledgeVersionAdded}</td>
                         <td>
                           <span className="document-status-badge" data-status={doc.status}>
                             <span aria-hidden="true">{meta.icon}</span> {meta.label}
                           </span>
                         </td>
+                        <td>{formatShortDate(doc.createdAt)}</td>
                         <td>
-                          {entries.length === 0 ? (
-                            "—"
-                          ) : (
-                            <div className="applicability-chips">
-                              {entries.map(([key, value]) => (
-                                <span key={key} className="chip chip-neutral">
-                                  {key}: {value}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td>v{doc.knowledgeVersionAdded}</td>
-                        <td>{doc.knowledgeVersionDeleted !== null ? `v${doc.knowledgeVersionDeleted}` : "—"}</td>
-                        <td>
-                          <code className="checksum-code" title={doc.checksum}>
-                            {truncateChecksum(doc.checksum)}
-                          </code>
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <div className="document-actions">
                             <button
                               type="button"
-                              className="btn btn-secondary"
-                              style={{ minHeight: 36, padding: "0 10px" }}
+                              className="icon-btn"
                               onClick={() => toggleDetailRow(doc)}
                               aria-expanded={Boolean(detailState)}
+                              aria-label={
+                                detailState ? `Ocultar detalle de ${doc.filename}` : `Ver detalle de ${doc.filename}`
+                              }
+                              title={detailState ? "Ocultar detalle" : "Ver detalle"}
                             >
-                              {detailState ? "Ocultar detalle" : "Ver detalle"}
+                              <EyeIcon />
                             </button>
                             {doc.status !== "deleted" && !doc.protected ? (
                               <button
                                 type="button"
-                                className="btn btn-danger"
-                                style={{ minHeight: 36, padding: "0 10px" }}
+                                className="icon-btn icon-btn-danger"
                                 onClick={() => openDeleteDialog(doc)}
                                 aria-label={`Eliminar ${doc.filename}`}
+                                title="Eliminar"
                                 disabled={isPendingThisDoc}
                               >
-                                Eliminar
+                                <TrashIcon />
                               </button>
                             ) : doc.protected ? (
                               <span className="protected-label" title="El corpus oficial no se puede eliminar">
@@ -706,7 +763,7 @@ export default function KnowledgePage() {
                       </tr>
                       {detailState ? (
                         <tr>
-                          <td colSpan={8}>
+                          <td colSpan={5}>
                             <div className="document-detail-row">
                               {detailState.loading ? (
                                 <p style={{ margin: 0 }}>Consultando detalle en el servidor…</p>
@@ -717,6 +774,30 @@ export default function KnowledgePage() {
                                 />
                               ) : detailState.detail ? (
                                 <dl style={{ margin: 0 }}>
+                                  <dt>Tamaño</dt>
+                                  <dd>{formatBytes(doc.sizeBytes)}</dd>
+                                  <dt>Aplicabilidad</dt>
+                                  <dd>
+                                    {entries.length === 0 ? (
+                                      "General — aplica a cualquier procedimiento"
+                                    ) : (
+                                      <div className="applicability-chips">
+                                        {entries.map(([key, value]) => (
+                                          <span key={key} className="chip chip-neutral">
+                                            {key}: {value}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </dd>
+                                  <dt>Checksum</dt>
+                                  <dd>
+                                    <code className="checksum-code" title={doc.checksum}>
+                                      {truncateChecksum(doc.checksum)}
+                                    </code>
+                                  </dd>
+                                  <dt>Versión eliminada</dt>
+                                  <dd>{doc.knowledgeVersionDeleted !== null ? `v${doc.knowledgeVersionDeleted}` : "—"}</dd>
                                   <dt>MIME</dt>
                                   <dd>{detailState.detail.document.mime}</dd>
                                   <dt>Creado</dt>
@@ -893,7 +974,7 @@ export default function KnowledgePage() {
                 Esta acción es transaccional: se purgan sus fragmentos e índices dentro de la
                 misma transacción, la versión de conocimiento avanza, y una consulta canaria
                 negativa confirma que el contenido ya no aparece en resultados de búsqueda. Si
-                la canaria detecta contenido residual, el backend revierte el borrado completo
+                la canaria detecta contenido residual, el servidor revierte el borrado completo
                 — nunca queda un borrado a medias.
               </p>
               {pendingDelete.loadingVerify ? (
@@ -915,6 +996,18 @@ export default function KnowledgePage() {
         />
       ) : null}
     </section>
+
+    {/* Barra inferior: resumen de versión, según el sketch — antes vivía
+        junto al hero como par de chips; ahora queda fija abajo, siempre
+        visible mientras se navega la página. */}
+    <div className="knowledge-status-bar">
+      <span className="chip chip-simulation">
+        {officialCount} guías oficiales protegidas · {testCount} de prueba
+      </span>
+      <span className="chip chip-info">
+        Versión de conocimiento: {knowledgeVersion !== null ? `v${knowledgeVersion}` : "…"}
+      </span>
+    </div>
 
     {activeCallCase ? (
       <CallModal patientCase={activeCallCase} onClose={() => setActiveCallCase(null)} />

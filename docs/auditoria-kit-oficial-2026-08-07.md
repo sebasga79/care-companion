@@ -1547,3 +1547,89 @@ todo lo que sobre".
 Build OK, `flex:0 680px` verificado en el bundle CSS servido (normalizado por el
 minificador, equivalente a `flex: 0 1 680px`). 409 passed / 3 skipped (sin cambios de
 backend).
+
+## 9.32 Rediseño de /knowledge según sketch del usuario: dropzone real, tabla simplificada, barra inferior
+
+El usuario aportó un sketch/mockup detallado y pidió rediseñar la página según ese dibujo.
+Cambio más grande de la sesión sobre esta página, en una sola tarjeta unificada de tres
+columnas donde antes había dos tarjetas separadas (§9.29):
+
+- **Columna 1** — texto introductorio ("Cargar guía clínica" + descripción), sin cambios de
+  contenido.
+- **Columna 2** — zona de arrastrar-y-soltar **funcional**, no decorativa: `onDragOver` /
+  `onDragLeave` / `onDrop` sobre un `<div>`, que al soltar un archivo lo asigna al
+  `<input type="file">` real (ahora oculto, `sr-only`) construyendo un `DataTransfer` —
+  `input.files = transfer.files` — porque un `<input type="file">` no acepta un array de
+  archivos por asignación directa. El botón "Seleccionar archivo" sigue abriendo el selector
+  nativo (`fileInputRef.current.click()`). `handleUpload` no cambió una línea: sigue leyendo
+  `form.elements.namedItem("file")`, así que la validación/subida es exactamente la misma
+  sin importar si el archivo llegó por clic o por arrastre.
+- **Columna 3** — "Probar en una llamada" con su propio botón de texto ("Iniciar prueba")
+  en vez de que el ícono redondo fuera el control (como en §9.29) — coincide con lo dibujado
+  en el sketch.
+- Los campos de aplicabilidad (procedimiento/fase) pasan a vivir en un `<details>` de ancho
+  completo debajo de las tres columnas, no dentro de ninguna de ellas — el sketch no los
+  dibuja explícitamente, así que se conservó la funcionalidad sin inventar una ubicación que
+  no estaba especificada.
+- El hero pierde los dos chips que llevaba al lado ("N guías oficiales" / "Versión de
+  conocimiento") — se consolidan en una **barra inferior nueva** (`.knowledge-status-bar`)
+  al final del contenido, sin `position: fixed` (la página ya tiene modal de llamada +
+  diálogo de confirmación, cada uno con su propio `z-index`; una barra fija sumaba solapes
+  posibles sin necesidad real, dado que es información de apoyo, no una acción).
+- La tabla de documentos se simplifica a las columnas del sketch (Nombre de la guía /
+  Versión / Estado / Fecha de subida / Acciones) con **botones de solo ícono** (ojo/basura,
+  SVG en línea, sin librería) en vez de botones de texto. Nada de información se pierde:
+  Tamaño, Aplicabilidad, Checksum y Versión eliminada se mueven a la fila de detalle
+  expandible que ya existía (`toggleDetailRow`), sólo se sacan de la vista por defecto.
+- `createdAt` ya vivía en `KnowledgeDocument` a nivel de lista (confirmado antes de tocar
+  nada) — la columna "Fecha de subida" no necesitó ningún cambio de API ni de tipos.
+
+Dos decisiones de alcance, explícitas y no preguntadas antes de implementar (siguiendo el
+mismo criterio usado con el 4º caso de prueba en §9.22 — decidir y explicar, no bloquear en
+una pregunta cuando el criterio es claro):
+- **Se conserva** el recorrido de pasos 1/2/3 (`.knowledge-steps`, §9.26) aunque no aparece
+  en el sketch — es una funcionalidad ya pedida explícitamente antes, y nada en el pedido de
+  esta vez decía quitarla; se interpreta el sketch como gobernando la tarjeta superior y la
+  tabla, no la página completa.
+- **Se elimina** la tarjeta separada "Versión activa": su información quedó duplicada por la
+  nueva barra inferior, y el sketch no la dibuja. "Consulta de verificación" (búsqueda G3)
+  se conserva sin cambios — es evidencia funcional de learn/retrieve, no meramente
+  informativa.
+
+Verificación: tsc + eslint limpios, `next build` OK. Contenedor `web` reconstruido; el HTML
+servido por curl sólo muestra las partes estáticas (React aún no hidrató), así que la
+verificación real fue contra el **bundle JS y CSS servidos**: las clases y textos nuevos
+(`knowledge-dropzone*`, `knowledge-call-test*`, `knowledge-status-bar`, `icon-btn*`,
+"Arrastra y suelta archivos aquí", "Iniciar prueba", "Nombre de la guía", "Fecha de
+subida") aparecen; las clases muertas del diseño anterior (`knowledge-top-row`,
+`knowledge-call-fab*`, `upload-zone`) no aparecen en ningún bundle. CSS servido con llaves
+balanceadas (417/417). Se confirmó además contra la API real y viva: `GET /api/v1/cases`
+devuelve el caso `skip_interview_checklist=true` que alimenta la columna 3, y
+`GET /api/v1/knowledge/documents` devuelve 108 documentos (107 oficiales protegidos + el
+resto de prueba) todos con `created_at`, exactamente lo que la tabla y la barra inferior
+esperan una vez hidratada la página en un navegador real. 409 passed / 3 skipped (sin
+cambios de backend).
+
+## 9.33 El ícono de micrófono chocaba con el encabezado en la columna "Probar en una llamada"
+
+Feedback en vivo tras §9.32, con screenshot: el ícono de micrófono quedaba pegado al texto
+"Probar en una llamada", encimado, y la columna se veía "mal distribuida" en conjunto.
+
+Causa, la misma familia de bug que `--space-5` (§9.30) — la caja CSS no coincide con lo que
+se ve: `.mic-symbol` declara una caja de `28px` de alto, pero su glifo se dibuja con
+`::before`/`::after` posicionados en **absoluto** (la base y el pie del micrófono), que se
+salen de esa caja y llegan a `~44px` reales. En `.mic-button` (76px, el ícono siempre solo,
+sin hermanos debajo dentro del mismo contenedor) el desborde nunca se notaba porque no había
+nada con qué chocar. Aquí, como hijo directo de un `flex-direction: column` con
+`gap: 2px` y un `<h3>` justo debajo, el pie del glifo quedaba montado sobre el texto.
+
+Fix: envolver el glifo en `.knowledge-call-test-icon` (52×52px, `display:grid;
+place-items:center`), mismo patrón ya usado en `.context-icon` / `.speaker-icon` /
+`.risk-summary-icon` — el espaciado con el encabezado pasa a calcularse sobre la caja real
+de la insignia, no sobre la engañosa de 28px del glifo. De paso, `gap` de la columna sube de
+`2px` a `8px` para un ritmo vertical parejo con la columna del dropzone.
+
+Verificación: tsc + eslint limpios, build OK, contenedor reconstruido. Confirmado en el CSS
+servido que `.knowledge-call-test-icon{place-items:center;width:52px;height:52px;
+display:grid}` está presente y que la regla vieja `.knowledge-call-test .mic-symbol{...}`
+ya no existe; confirmado en el bundle JS que la clase nueva se emite desde el componente.
