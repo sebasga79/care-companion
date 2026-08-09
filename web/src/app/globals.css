@@ -82,6 +82,12 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  /* Faltaba en la escala pese a usarse en 7 reglas del archivo (algunas
+     de antes de esta sesión) — sin definir, `var(--space-5)` sin
+     fallback se resolvía a nada. Encontrado por un bug visual real: dos
+     tarjetas de /knowledge quedaban pegadas porque su `gap` no aplicaba.
+     20px sigue la progresión de la escala (4/8/12/16/_20_/24/32). */
+  --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
   --control-min: 44px;
@@ -1764,26 +1770,24 @@ footer {
 
 .knowledge-top-row {
   display: flex;
-  align-items: stretch;
-  gap: var(--space-5);
+  /* `align-items: stretch` (default) estiraba la tarjeta de llamada a la
+     altura completa de la de carga, empujándolas a tocarse visualmente
+     pese al gap; `flex-start` deja que cada una tenga su alto natural. */
+  align-items: flex-start;
+  /* Bug real: `--space-5` no existe en este archivo (sólo hay
+     --space-1..4, --space-6, --space-8) — sin fallback, el gap se
+     resolvía a nada y las dos tarjetas quedaban pegadas. */
+  gap: var(--space-6);
   margin-bottom: var(--space-6);
 }
 
 .knowledge-upload-card {
+  /* Reposicionada arriba de todo, pero SIN peso visual extra — mismo
+     tamaño/forma que el resto de tarjetas `.card` de la página, como
+     pidió el usuario ("igual a como estaba antes"). La jerarquía la da
+     el ORDEN (va primera), no un borde ni una sombra distinta. */
   flex: 1 1 auto;
   min-width: 0;
-  /* Más peso visual que el resto de tarjetas informativas de la página:
-     borde de marca + sombra propia, no sólo `.card` genérica. */
-  border: 2px solid var(--aqua-deep);
-  box-shadow: 0 14px 32px rgba(8, 122, 128, 0.16);
-}
-
-.knowledge-upload-card .eyebrow {
-  color: var(--aqua-deep);
-}
-
-.knowledge-upload-card h2 {
-  font-size: 22px;
 }
 
 .knowledge-call-fab-card {
@@ -1793,7 +1797,7 @@ footer {
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
-  padding: var(--space-5);
+  padding: var(--space-6);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg, 20px);
   background: var(--aqua-soft);

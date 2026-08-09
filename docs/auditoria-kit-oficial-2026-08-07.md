@@ -1497,3 +1497,33 @@ En vez de solo corregir el solape, se rediseñó por completo según lo pedido:
 tsc + eslint limpios, build de Next OK, verificado que las clases nuevas llegan al bundle
 CSS servido por el contenedor reconstruido. 409 passed / 3 skipped (sin cambios de
 backend).
+
+## 9.30 Las dos tarjetas quedaron pegadas: `--space-5` no existía
+
+Feedback en vivo tras §9.29: la tarjeta de carga y el botón de llamada quedaron
+completamente pegados, sin separación, y la de carga ganó un borde/sombra de color que el
+usuario no pidió ("la idea era dejar la caja de carga igual a como estaba antes... y el
+micrófono al lado, pero separados").
+
+Causa del pegado, no estética sino un bug real: `.knowledge-top-row { gap: var(--space-5); }`
+— **`--space-5` nunca se definió** en la escala de espaciado (`:root` sólo tenía
+`--space-1/2/3/4/6/8`). Sin fallback, `var()` con una variable inexistente se resuelve a su
+valor inicial — para `gap`, eso es `normal`/0 — así que el `gap` no aplicaba nada pese a
+estar escrito. Grep confirmó que no era sólo mío: `--space-5` se usaba en **7 reglas del
+archivo**, varias de antes de esta sesión, todas potencialmente con el mismo problema
+silencioso.
+
+Fix de raíz, no un parche local: se agregó `--space-5: 20px` al `:root` (seguía la
+progresión 4/8/12/16/_20_/24/32 ya establecida), corrigiendo las 7 reglas de una vez en vez
+de poner un valor hardcodeado sólo en las dos que se acababan de escribir.
+
+Además, revertido lo que el usuario no pidió: `.knowledge-upload-card` perdió el borde de
+2px en `--aqua-deep` y la sombra propia que le había agregado en §9.29 — vuelve a ser una
+`.card` genérica, mismo tamaño/forma que antes, tal como se pidió ("mismo tamaño,
+dimensiones, formas"). La jerarquía sigue viniendo del ORDEN (va primera en la página), no
+de un estilo distinto. También se cambió `align-items: stretch` (default de flex, estiraba
+la tarjeta de llamada a la altura completa de la de carga) a `flex-start`, para que cada
+tarjeta tenga su alto natural.
+
+tsc + eslint limpios, build de Next OK, `--space-5:20px` verificado en el bundle CSS
+servido. 409 passed / 3 skipped (sin cambios de backend).
