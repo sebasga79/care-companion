@@ -2009,3 +2009,59 @@ propia. Configuración por defecto (LLM y embeddings `fake`) — distinto del `9
 histórico de §9.19, que medía con embeddings reales (BGE-M3) configurados a mano; no son
 la misma medición y `docs/final-report.md` ahora reporta ambas por separado, sin que una
 reemplace a la otra.
+
+## 9.39 Auditoría de "logs" (requisito del reto) — dos capas reales, documentadas por primera vez
+
+Pedido: "revisar que sí esté diciendo algo que es verdad y validar y auditar ese tema de
+logs" — antes de implementar. Texto verbatim de `rubrica-evaluacion.md` (5 menciones): las
+métricas deben ser "verificables en los logs", se "contrastan con lo que ocurre en la
+sesión... y con tus logs", "métricas inconsistentes con los logs" penaliza, y en caso de
+disputa entre jurados "un tercer jurado revisa el acta y los logs" — implica que los logs
+deben sobrevivir la sesión, no ser solo un tail en vivo.
+
+**Estado previo a esta tarea:** una sola mención en todo el material ("`./levantar_app.sh
+--logs` # ver logs" en el README), sin explicar qué se ve ahí ni por qué importa. Cero
+menciones en `final-report.md`, justo donde el jurado busca la declaración de métricas que
+hay que contrastar.
+
+**Verificación en vivo, antes de escribir nada — ¿es verdad lo que ya se afirmaba?** Sí:
+`docker logs <contenedor>` (lo que `--logs` invoca) muestra contenido real y persistente —
+269 líneas solo del bootstrap inicial, JSON estructurado por request después
+(`timestamp`/`level`/`correlation_id`/`message`), y la línea de arranque delata el proveedor
+real (`llm_provider=fake` o `groq`, según corresponda) sin que el sistema pueda mentir por
+accidente. `docker logs` sin `-f` mostró el historial completo desde el arranque del
+contenedor, no solo lo reciente — cumple con "revisable después de la sesión".
+
+**Lo que la verificación encontró que SÍ faltaba, no era falso sino incompleto:** revisando
+`api/app/orchestrator/call_cycle.py` y `api/app/api/routes/ws.py` de cerca, los eventos que
+traen el desglose granular por el que la rúbrica insiste tanto (`agent.*.completed` con
+`provider`/`input_tokens`/`output_tokens`, `turn.response_sent` con `latency_ms`) se escriben
+**solo** en la tabla `events` de SQLite vía `EventRepository.add_event()` — ninguno tiene un
+`logger.info()` acompañante. Es decir: los logs de proceso (`docker compose logs`) confirman
+que el sistema corre y con qué proveedor, pero el desglose token-por-token que sustenta cada
+cifra de la tabla de métricas **no está ahí** — vive únicamente en `/audit` y
+`/api/v1/metrics`. Documentar "verifica los tokens en los logs" habría sido una afirmación
+falsa; había que distinguir las dos capas con precisión, no fusionarlas.
+
+**Implementado, dos capas documentadas con el detalle exacto de qué contiene cada una:**
+- README, nueva sección "Cómo verificar estas cifras en los logs" (dentro de Métricas §5):
+  explica logs de proceso vs. traza estructurada, qué campos trae cada uno, y qué NO está en
+  cada uno — sin prometer de más.
+- `final-report.md` §4: mismo puente, enlazado a la sección del README en vez de duplicar el
+  texto completo.
+- `web/src/app/audit/page.tsx`: la línea de tiempo de `/audit` ahora muestra
+  **`correlation_id` visible** por evento (antes solo se usaba como `key` de React, invisible
+  en pantalla) — el mismo valor que aparece en cada línea de los logs de proceso, así que un
+  evento puntual de la traza se puede ubicar textualmente en `docker compose logs` y confirmar
+  que ambas capas cuentan la misma historia. `title` en el elemento explica qué hacer con ese
+  valor.
+
+Verificación: tsc + eslint + build limpios. Contenedor reconstruido (requirió
+`--force-recreate`: un `up -d --build` normal dejó el contenedor `api` sin el mapeo de puerto
+publicado, causa no diagnosticada más allá — `--force-recreate` lo resolvió limpio). Sesión
+real creada y cerrada contra el sistema vivo; `GET /api/v1/audit/sessions/{id}/trace`
+confirmado devolviendo `correlation_id` por evento. Bundle servido confirmado con el texto
+nuevo y `correlationId`. Backend sin cambios de código — ruff + pytest limpios (414 passed).
+Contenedores de la prueba de arranque limpio del usuario (`care-companion-*`) tuvieron que
+quedar detenidos, no reiniciados — mismos puertos que el entorno de desarrollo, no pueden
+coexistir; están intactos, solo apagados.

@@ -150,6 +150,18 @@ mismo encontró y corrigió un falso positivo real durante su desarrollo
 (`PAIN_WORSENING` disparado por temor hipotético, no por síntoma
 reportado) — ver commit `app/domain/safety_signals.py::_is_hypothetical_worry`.
 
+**Verificable en los logs, no sólo aquí** (rúbrica §4/§5/§6 — la métrica
+que no se sostiene contra logs es peor que no reportarla). Dos capas
+reales, documentadas con el detalle exacto de qué contiene cada una en el
+[README §Métricas](../README.md#cómo-verificar-estas-cifras-en-los-logs):
+logs de proceso (`./levantar_app.sh --logs`, JSON estructurado con
+`correlation_id`, confirma el proveedor real desde la línea de arranque) y
+la traza estructurada (`/audit`, `GET /api/v1/metrics`) que trae el
+desglose granular de tokens/proveedor/latencia por evento — con
+`correlation_id` visible en la línea de tiempo de `/audit` para cruzar un
+evento puntual contra el log de terminal y confirmar que es la misma
+ejecución.
+
 ## 5. Seguridad clínica (garantías)
 
 - Sin evidencia activa aplicable **no hay respuesta clínica** (evidence gate →

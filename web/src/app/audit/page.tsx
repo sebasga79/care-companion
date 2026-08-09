@@ -358,6 +358,20 @@ export default function AuditPage() {
                   <small style={{ opacity: 0.7 }}>
                     {new Date(event.createdAt).toLocaleTimeString("es")}
                   </small>
+                  {" · "}
+                  {/* Rúbrica §5/§6: las métricas deben ser "verificables en
+                      los logs". `correlation_id` es el mismo valor que
+                      aparece en cada línea de `docker compose logs`
+                      (`./levantar_app.sh --logs`) — visible aquí para que
+                      un evento de esta traza se pueda ubicar textualmente
+                      en los logs de proceso, no solo confiar en esta
+                      pantalla (auditoría §9.39). */}
+                  <code
+                    className="checksum-code"
+                    title="correlation_id — búscalo tal cual en `docker compose logs` / `./levantar_app.sh --logs` para confirmar este evento en el log de proceso"
+                  >
+                    {event.correlationId}
+                  </code>
                 </li>
               ))}
             </ol>

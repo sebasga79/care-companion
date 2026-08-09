@@ -296,6 +296,35 @@ primario (`by_provider` en `AuditRepository.usage_summary`): si una llamada
 cae al resguardo local por cuota agotada, esos tokens no se cobran al
 precio de Groq (auditoría §9.35).
 
+### Cómo verificar estas cifras en los logs
+
+La rúbrica lo pide de forma explícita en varios puntos: las métricas deben
+ser "verificables en los logs" y "se contrastan con lo que ocurre en la
+sesión de evaluación y con tus logs" — reportar un número que no se
+sostiene ahí es peor que no reportarlo. Hay **dos capas reales**, no una
+sola, y conviene no confundirlas:
+
+**1. Logs de proceso** (`./levantar_app.sh --logs`, o `docker compose
+logs -f`): la salida estándar de los contenedores, persistida por Docker
+desde que arrancan (no sólo lo reciente). Cada línea de la API es JSON
+estructurado con `correlation_id`, y la primera línea de arranque delata
+el proveedor real en uso —
+`care_companion_app_ready ... llm_provider=groq` (o `fake` si no
+configuraste una key) — así que no hay forma de que el sistema diga una
+cosa y corra otra sin que quede escrito ahí mismo. Lo que **no** está en
+estos logs: el desglose de tokens/proveedor por llamada individual — eso
+vive en la capa 2.
+
+**2. Traza estructurada** (`/audit`, y `GET /api/v1/metrics`/
+`GET /api/v1/audit/sessions/{id}/trace`): los datos granulares detrás de
+cada número de la tabla de arriba — tokens de entrada/salida y proveedor
+real por invocación, consultas RAG, latencia por turno — se escriben en la
+tabla `events` de SQLite, no en la salida estándar. `/audit` los muestra
+por sesión, con **`correlation_id` visible en cada evento** de la línea de
+tiempo: el mismo valor que aparece en los logs de proceso, para poder
+ubicar un evento puntual de la traza dentro del log de terminal y
+confirmar que son la misma ejecución, no dos historias distintas.
+
 ## Tests y calidad
 
 ```bash
