@@ -1304,3 +1304,20 @@ movilidad — el agente se queda en el tema (Programa Cicatriz Segura) hasta que
 cierra la llamada manualmente.
 
 403 passed / 3 skipped (backend), tsc + eslint + build de Next limpios.
+
+## 9.24 Jerarquía visual del CTA de "Probar en una llamada"
+
+Pedido del usuario: el botón "Probar en una llamada" debía tener "todo el protagonismo del
+mundo porque ejecuta una acción, lo demás es solo informativo" — pero usaba
+`.voice-preview-btn`, el mismo botón gris de 11px que "Hablar por voz"/"Detener voz" (un
+control secundario dentro de una llamada activa), metido en una tarjeta blanca idéntica a
+las demás. Visualmente no se distinguía de la información de alrededor.
+
+Rediseño (`.knowledge-cta` en globals.css): tarjeta con fondo sólido en gradiente de marca
+(`--blue-deep` → `--aqua-deep`), texto blanco, botón invertido (fondo blanco, texto azul,
+24px/16px vs. los 17px/11px anteriores) con sombra elevada. Se movió a ser el PRIMER
+elemento de la página — antes del hero informativo — para que sea literalmente lo primero
+que se ve, no una tarjeta más entre el resumen de versión y el formulario de carga.
+
+tsc + eslint limpios, build de Next OK, verificado que la clase nueva llega al bundle CSS
+servido por el contenedor reconstruido.

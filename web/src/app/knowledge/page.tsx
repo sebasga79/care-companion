@@ -355,6 +355,37 @@ export default function KnowledgePage() {
         {liveMessage}
       </p>
 
+      {/* Jerarquía deliberada (pedido explícito del usuario): esta es la
+          ÚNICA acción de la página — todo lo demás (hero, pasos, versión,
+          inventario) es informativo. Antes usaba `.voice-preview-btn`, el
+          mismo botón secundario y gris de "Hablar por voz"/"Detener voz":
+          visualmente no se distinguía de un control menor. Va primero en
+          la página, con color de marca sólido y un botón grande — nada
+          compite con ella por atención.
+          "Recuperar" (paso 2, más abajo) consulta el índice directo, no
+          pasa por un agente conversando — es la prueba canaria del propio
+          sistema. Esto es distinto y complementario: una llamada real,
+          con el agente de voz completo, sin el selector de 160 pacientes
+          de `/call` ni su historial longitudinal. */}
+      {demoCases.length > 0 ? (
+        <div className="knowledge-cta">
+          <div className="knowledge-cta-copy">
+            <p className="knowledge-cta-eyebrow">Verificación en vivo</p>
+            <h2>Prueba lo que acabas de subir en una llamada real</h2>
+            <p className="knowledge-cta-detail">
+              Abre una llamada con un paciente de prueba (sin historial previo) y pregunta algo
+              que sólo el documento recién cargado respondería.
+            </p>
+          </div>
+          <button type="button" className="knowledge-cta-btn" onClick={startTestCall}>
+            <span className="knowledge-cta-btn-icon" aria-hidden="true">
+              ☎
+            </span>
+            Probar en una llamada
+          </button>
+        </div>
+      ) : null}
+
       <div className="view-hero card">
         <div>
           <p className="eyebrow">Base clínica versionada</p>
@@ -389,28 +420,6 @@ export default function KnowledgePage() {
           <div><strong>Olvidar</strong><small>Elimina la prueba y verifica el índice</small></div>
         </li>
       </ol>
-
-      {/* "Recuperar" (paso 2) consulta el índice directo, no pasa por un
-          agente conversando — es la prueba canaria del propio sistema.
-          Esto es distinto y complementario: una llamada real, con el
-          agente de voz completo, para confirmar que lo recién aprendido
-          también se usa en la conversación — sin el selector de 160
-          pacientes reales de `/call` ni su historial longitudinal. */}
-      {demoCases.length > 0 ? (
-        <div className="card card-pad" style={{ marginBottom: 20 }}>
-          <p className="eyebrow">Verificación en vivo</p>
-          <h2 style={{ marginTop: 4, marginBottom: 6, fontSize: 17 }}>
-            Probar lo que acabas de subir en una llamada real
-          </h2>
-          <p style={{ color: "var(--ink-muted)", fontSize: 13, marginBottom: 12 }}>
-            Abre una llamada con un paciente de prueba (sin historial previo) y pregunta algo
-            que sólo el documento recién cargado respondería.
-          </p>
-          <button type="button" className="voice-preview-btn" onClick={startTestCall}>
-            Probar en una llamada · {demoCases[0].patientAlias}
-          </button>
-        </div>
-      ) : null}
 
       {listError ? <StatusBanner message={listError} onRetry={reloadInventory} /> : null}
 

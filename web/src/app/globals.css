@@ -1745,6 +1745,103 @@ footer {
    /knowledge and /audit shared "workspace" layout
    ------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------
+   CTA de "Probar en una llamada" (/knowledge) — jerarquía deliberada:
+   es la ÚNICA acción de la página, todo lo demás es informativo. Fondo
+   de marca sólido + botón grande para que nada compita con ella por
+   atención; antes usaba el mismo botón gris y pequeño de un control
+   secundario ("Hablar por voz") y se perdía entre tarjetas informativas.
+   ------------------------------------------------------------------- */
+
+.knowledge-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-6) var(--space-7, 32px);
+  margin-bottom: var(--space-6);
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--blue-deep), var(--aqua-deep));
+  box-shadow: 0 16px 40px rgba(8, 122, 128, 0.28);
+}
+
+.knowledge-cta-copy {
+  max-width: 640px;
+}
+
+.knowledge-cta-eyebrow {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.knowledge-cta h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.25;
+  color: #fff;
+}
+
+.knowledge-cta-detail {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.knowledge-cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 16px 30px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--blue-deep);
+  font-size: 16px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  transition: transform var(--motion-fast, 120ms ease), box-shadow var(--motion-fast, 120ms ease);
+}
+
+.knowledge-cta-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.knowledge-cta-btn:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+
+.knowledge-cta-btn-icon {
+  font-size: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-cta-btn {
+    transition: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .knowledge-cta {
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--space-5);
+  }
+  .knowledge-cta-btn {
+    justify-content: center;
+  }
+}
+
 .view-hero {
   display: flex;
   flex-wrap: wrap;
