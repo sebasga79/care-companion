@@ -1398,3 +1398,13 @@ lo necesario.
 
 tsc + eslint limpios, build de Next OK, verificado que el CSS nuevo llega al bundle
 servido por el contenedor reconstruido.
+
+Bug real encontrado probando el fix anterior: `scrollIntoView({block: "center"})` centraba
+la SECCIÓN completa — que contiene la tabla de 108 documentos — así que "Olvidar" aterrizaba
+en cualquier fila del medio (vista real: una tanda de PDFs oficiales de reemplazo articular,
+nada que ver con el documento de prueba). Dos correcciones: `jumpToStep` ahora fija
+`inventoryScope="test"` (el mismo filtro que ya existía sobre la tabla, "Origen y estado")
+antes de saltar al paso 3, así que la tabla queda reducida a los documentos de prueba —
+normalmente uno solo; y el scroll pasa a `block: "start"`, al inicio de la sección, no al
+centro. El cambio de filtro se espera un frame (`requestAnimationFrame`) antes de medir la
+posición de scroll, para no calcularla contra el DOM todavía sin filtrar.

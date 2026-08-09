@@ -146,16 +146,25 @@ export default function KnowledgePage() {
   }, [demoCases]);
 
   // Cada paso del recorrido (1/2/3) lleva aquí en vez de ser puramente
-  // descriptivo. Además del scroll, un resalte breve marca la tarjeta
-  // destino — sin eso, "Olvidar" seguía sin decir DÓNDE mirar dentro de
-  // una página larga.
+  // descriptivo. Bug real reportado en vivo: `block: "center"` centraba
+  // la SECCIÓN completa (la tabla de 108 documentos), así que "Olvidar"
+  // aterrizaba en cualquier fila del medio — no en el documento de
+  // prueba, que es lo único que importa borrar. Dos correcciones: la
+  // tabla se filtra a "de prueba" (mismo control que ya existía arriba
+  // de la tabla, sólo se activa por código) antes de saltar, y el scroll
+  // va al INICIO de la sección (`block: "start"`), no al centro.
   const jumpToStep = useCallback((headingId: string) => {
-    const heading = document.getElementById(headingId);
-    const target = heading?.closest("section") ?? heading;
-    if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
-    target.classList.add("step-target-highlight");
-    window.setTimeout(() => target.classList.remove("step-target-highlight"), 2000);
+    if (headingId === "documents-heading") setInventoryScope("test");
+    // El cambio de filtro reordena el DOM; se espera al siguiente frame
+    // para que `scrollIntoView` mida posiciones ya actualizadas.
+    requestAnimationFrame(() => {
+      const heading = document.getElementById(headingId);
+      const target = heading?.closest("section") ?? heading;
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.classList.add("step-target-highlight");
+      window.setTimeout(() => target.classList.remove("step-target-highlight"), 2000);
+    });
   }, []);
 
   const activeDocuments = documents.filter((doc) => doc.status !== "deleted");
