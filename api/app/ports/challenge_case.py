@@ -58,6 +58,12 @@ class CaseSummary(BaseModel):
     surgery_date: date | None = None
     followup_days: list[int] = Field(default_factory=list)
     historical_followups: list[HistoricalFollowup] = Field(default_factory=list)
+    # `True` solo para los 3 casos de `FixtureCaseAdapter` (Camila/Julián/
+    # Sofía): sin historial real, pensados para pruebas rápidas (G5,
+    # smoke-test de voz) que no deben forzar el protocolo completo de un
+    # paciente longitudinal. El selector de `/call` los excluye a propósito
+    # — viven aparte, en `/knowledge`, junto al flujo de aprender/olvidar.
+    is_synthetic_demo: bool = False
 
 
 class ReferenceTrajectory(BaseModel):
@@ -104,6 +110,7 @@ class ChallengeCase(BaseModel):
     surgery_date: date | None = None
     historical_followups: list[HistoricalFollowup] = Field(default_factory=list)
     reference_trajectory: ReferenceTrajectory | None = None
+    is_synthetic_demo: bool = False
 
 
 class ChallengeCasePort(Protocol):

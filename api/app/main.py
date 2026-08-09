@@ -12,6 +12,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.adapters.combined_cases import CombinedCaseAdapter
 from app.adapters.dataset_case_source import DatasetCaseAdapter, DatasetFilesMissingError
 from app.adapters.fake_embeddings import FakeEmbeddings
 from app.adapters.fake_llm import FakeLLM
@@ -145,15 +146,22 @@ def _build_case_port(settings: Settings) -> ChallengeCasePort:
     """Dataset real si está descargado (`scripts/fetch_dataset.py`),
     fixtures ficticios si no. A diferencia de LLM/embeddings, esto NUNCA
     impide el arranque: un caso claramente ficticio (`demo-case-001`,
-    "Camila (paciente ficticia)") no engaña a nadie sobre qué está viendo,
+    "Camila (paciente de prueba)") no engaña a nadie sobre qué está viendo,
     así que fallar rápido aquí solo rompería el gate de instalación de 15
     minutos (G2) para quien todavía no descargó el dataset — se loguea un
-    warning explícito en vez de fingir silencio (spec.md §11.2)."""
+    warning explícito en vez de fingir silencio (spec.md §11.2).
+
+    Con el dataset presente, los 3 casos de prueba NO desaparecen: se
+    combinan con `CombinedCaseAdapter` (auditoría §9.22) para que
+    `/knowledge` siempre pueda abrir una llamada de prueba sin el
+    protocolo completo de un paciente longitudinal. `/call` los excluye de
+    su selector por `is_synthetic_demo`."""
     try:
-        return DatasetCaseAdapter(settings.dataset_dir)
+        dataset_adapter = DatasetCaseAdapter(settings.dataset_dir)
     except DatasetFilesMissingError as exc:
         logger.warning("dataset_case_adapter_unavailable_using_fixtures reason=%s", exc)
         return FixtureCaseAdapter()
+    return CombinedCaseAdapter(dataset_adapter, FixtureCaseAdapter())
 
 
 def _build_llm_adapter(settings: Settings) -> LLMPort:

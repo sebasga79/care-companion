@@ -165,6 +165,11 @@ export interface CaseSummary {
   surgeryDate: string | null;
   followupDays: number[];
   historicalFollowups: HistoricalFollowup[];
+  /** `true` sólo para los 3 casos de prueba (Camila/Julián/Sofía): sin
+   * historial, pensados para probar G5 o hacer un smoke-test de voz sin
+   * el protocolo completo de un paciente longitudinal. `/call` los
+   * excluye de su selector; `/knowledge` los usa para su llamada rápida. */
+  isSyntheticDemo: boolean;
 }
 
 export interface HistoricalFollowup {
@@ -202,6 +207,7 @@ interface RawCase {
   days_since_procedure: number;
   surgery_date?: string | null;
   followup_days?: number[];
+  is_synthetic_demo?: boolean;
   historical_followups?: {
     day: number;
     archetype: string;
@@ -235,6 +241,7 @@ function mapCase(raw: RawCase): CaseSummary {
     daysSinceProcedure: raw.days_since_procedure,
     surgeryDate: raw.surgery_date ?? null,
     followupDays: raw.followup_days ?? [],
+    isSyntheticDemo: raw.is_synthetic_demo ?? false,
     historicalFollowups: (raw.historical_followups ?? []).map((item) => ({
       day: item.day,
       archetype: item.archetype,

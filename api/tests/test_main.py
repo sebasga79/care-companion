@@ -16,6 +16,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
+from app.adapters.combined_cases import CombinedCaseAdapter
 from app.adapters.dataset_case_source import (
     PERFILES_CLINICOS_FILE,
     PERFILES_DEMOGRAFICOS_FILE,
@@ -117,4 +118,9 @@ def test_create_app_uses_dataset_case_adapter_when_dataset_present(
     monkeypatch.setenv("DATASET_DIR", str(dataset_dir))
 
     app = create_app()
-    assert isinstance(app.state.case_port, DatasetCaseAdapter)
+    # Con dataset presente, `_build_case_port` envuelve el adapter real en
+    # `CombinedCaseAdapter` (auditoría §9.22): los 3 casos de prueba de
+    # `FixtureCaseAdapter` siguen alcanzables para `/knowledge`, no
+    # desaparecen sólo porque el dataset real cargó.
+    assert isinstance(app.state.case_port, CombinedCaseAdapter)
+    assert isinstance(app.state.case_port._primary, DatasetCaseAdapter)  # noqa: SLF001

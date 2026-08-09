@@ -197,7 +197,7 @@ async def test_agent_opens_call_with_purpose_and_persists_first_turn(db_path: st
     opening = await orchestrator.start_session(session_id)
 
     assert "seguimiento postoperatorio" in opening.lower()
-    assert "cirugia ambulatoria general x" in opening.lower()
+    assert "seguimiento general (paciente de prueba)" in opening.lower()
     assert "cómo se ha sentido desde el último seguimiento" in opening.lower()
     assert SessionRepository(db_path).get(session_id)["state"] == "interviewing"
     turns = TurnRepository(db_path).list_for_session(session_id)

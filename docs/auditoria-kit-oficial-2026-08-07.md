@@ -1185,3 +1185,58 @@ aclaraciones **legítimamente distintas** seguidas (dolor, luego herida) se hace
 mismo patrón de verificación que los fixes de `safety_signals.py` de esta sesión.
 
 388 passed / 3 skipped, ruff verde.
+
+## 9.22 Llamada de prueba reutilizable, sin el protocolo de un paciente longitudinal
+
+Pedido del usuario tras probar G5 en vivo: subir un documento de prueba en `/knowledge`
+funciona, pero verificarlo en una llamada real obligaba a ir a `/call` y elegir uno de los
+40 pacientes reales — activando todo su protocolo (saludo con evolución conocida, 4
+seguimientos previos) sólo para una prueba de "¿el agente usa lo que acabo de subir?".
+
+**Auditoría previa a implementar (instrucción explícita del usuario: auditar y validar
+antes de tocar código):**
+
+- **El reto no exige un paciente del dataset oficial para la prueba en vivo.** G4 (única
+  compuerta sobre voz) dice literalmente "saludo + pregunta trivial" — genérico. La propia
+  auditoría anota que "el jurado prueba con escenarios de decisión interpretados en vivo":
+  el jurado improvisa el rol de paciente, no sigue un guion de historial precargado.
+- **La pieza ya existía, apagada.** `app/adapters/fixture_cases.py` tiene 3 casos
+  sintéticos (Camila/Julián/Sofía) sin historial, construidos en ADR-001 antes del dataset
+  real. Sólo se usaban como resguardo de arranque si faltaban los archivos del dataset — con
+  el dataset presente (como está hoy), quedaban completamente inalcanzables desde la API.
+
+**Implementado (opción A del análisis, la de menor riesgo):**
+
+- `CaseSummary`/`ChallengeCase` ganan `is_synthetic_demo: bool = False` — `True` sólo en
+  los 3 casos de `FixtureCaseAdapter`.
+- `CombinedCaseAdapter` nuevo (`app/adapters/combined_cases.py`): compone
+  `DatasetCaseAdapter` (primario) + `FixtureCaseAdapter` (extra) sobre el mismo
+  `ChallengeCasePort` — cero cambios en el dominio, mismo principio que el resto de la
+  arquitectura de adapters. `_build_case_port` en `main.py` lo usa cuando el dataset carga
+  bien; si falta el dataset, el comportamiento de resguardo no cambia (fixtures solos).
+- `/call` filtra `isSyntheticDemo` de su selector — sigue mostrando exactamente los mismos
+  pacientes reales que antes, sin sorpresas.
+- `/knowledge` obtiene un botón "Probar en una llamada" que abre el primer caso sintético
+  directamente, sin selector.
+- Limpieza menor de paso: el nombre de procedimiento de los 3 casos era un slug interno
+  (`cirugia_ambulatoria_general_x`) que hasta ahora nunca se mostraba al usuario final —
+  con la nueva superficie sí se muestra, así que pasa a "Seguimiento general (paciente de
+  prueba)". `procedure_category` (usado internamente para el filtro de aplicabilidad del
+  RAG) no cambió.
+
+**Refactor de UI, pedido explícito ("reciclar y reutilizar... ventana modal que surja al
+frente igual que en la otra"):** toda la lógica de una llamada (WebSocket, voz, turnos,
+estado) se extrajo de `/call/page.tsx` a `web/src/components/CallModal.tsx` — un componente
+autocontenido que recibe `patientCase`/`onClose` y no sabe si vino de un selector de 160
+pacientes o de un botón de prueba con un caso sintético. `/call` quedó reducido a la
+lista + selección; `/knowledge` lo reutiliza sin duplicar una sola línea de la lógica de
+llamada.
+
+Verificado de punta a punta contra el stack Docker reconstruido: `POST /api/v1/sessions`
+con `demo-case-001` abre con saludo limpio, sin mención de "evolución registrada" (no hay
+`prior_followups`); un turno preguntando por el documento subido en la sesión anterior de
+G5 lo recupera y cita correctamente (`prueba-g5-conocimiento-vivo.txt`), confirmando que el
+camino de retrieval es idéntico al de un paciente real — sólo cambia qué caso abre la
+llamada.
+
+398 passed / 3 skipped (backend), tsc + eslint + build de Next limpios.

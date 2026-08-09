@@ -1,9 +1,11 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusBanner } from "@/components/StatusBanner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CallModal } from "@/components/CallModal";
+import { api, type CaseSummary } from "@/lib/api";
 import {
   knowledgeApi,
   ApiError,
@@ -104,6 +106,36 @@ export default function KnowledgePage() {
   const [inventoryPage, setInventoryPage] = useState(1);
 
   const [liveMessage, setLiveMessage] = useState("");
+
+  // Llamada de prueba, sin salir de esta página (pedido explícito: probar
+  // G5 — aprender/olvidar — requiere verificar en una llamada real que el
+  // documento recién subido se usa, y el selector de 160 pacientes de
+  // `/call` con su protocolo completo de historial sobra para esto). Los
+  // "pacientes de prueba" (`isSyntheticDemo`) son los únicos candidatos.
+  const [demoCases, setDemoCases] = useState<CaseSummary[]>([]);
+  const [activeCallCase, setActiveCallCase] = useState<CaseSummary | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listCases()
+      .then((all) => {
+        if (!cancelled) setDemoCases(all.filter((item) => item.isSyntheticDemo));
+      })
+      .catch(() => {
+        // Silencioso a propósito: si esto falla, el botón de abajo
+        // simplemente no aparece — no vale la pena un segundo StatusBanner
+        // compitiendo con los errores del inventario de conocimiento, que
+        // ya cubre "sin conexión al servidor".
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const startTestCall = useCallback(() => {
+    if (demoCases.length > 0) setActiveCallCase(demoCases[0]);
+  }, [demoCases]);
 
   const activeDocuments = documents.filter((doc) => doc.status !== "deleted");
   const officialCount = activeDocuments.filter((doc) => doc.protected).length;
@@ -309,6 +341,7 @@ export default function KnowledgePage() {
   }
 
   return (
+    <>
     <section aria-labelledby="knowledge-heading">
       <p role="status" aria-live="polite" className="sr-only">
         {liveMessage}
@@ -348,6 +381,28 @@ export default function KnowledgePage() {
           <div><strong>Olvidar</strong><small>Elimina la prueba y verifica el índice</small></div>
         </li>
       </ol>
+
+      {/* "Recuperar" (paso 2) consulta el índice directo, no pasa por un
+          agente conversando — es la prueba canaria del propio sistema.
+          Esto es distinto y complementario: una llamada real, con el
+          agente de voz completo, para confirmar que lo recién aprendido
+          también se usa en la conversación — sin el selector de 160
+          pacientes reales de `/call` ni su historial longitudinal. */}
+      {demoCases.length > 0 ? (
+        <div className="card card-pad" style={{ marginBottom: 20 }}>
+          <p className="eyebrow">Verificación en vivo</p>
+          <h2 style={{ marginTop: 4, marginBottom: 6, fontSize: 17 }}>
+            Probar lo que acabas de subir en una llamada real
+          </h2>
+          <p style={{ color: "var(--ink-muted)", fontSize: 13, marginBottom: 12 }}>
+            Abre una llamada con un paciente de prueba (sin historial previo) y pregunta algo
+            que sólo el documento recién cargado respondería.
+          </p>
+          <button type="button" className="voice-preview-btn" onClick={startTestCall}>
+            Probar en una llamada · {demoCases[0].patientAlias}
+          </button>
+        </div>
+      ) : null}
 
       {listError ? <StatusBanner message={listError} onRetry={reloadInventory} /> : null}
 
@@ -813,5 +868,10 @@ export default function KnowledgePage() {
         />
       ) : null}
     </section>
+
+    {activeCallCase ? (
+      <CallModal patientCase={activeCallCase} onClose={() => setActiveCallCase(null)} />
+    ) : null}
+    </>
   );
 }
