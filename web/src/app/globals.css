@@ -1150,19 +1150,94 @@ footer {
   margin-top: var(--space-5) !important;
 }
 
+/* Cada columna del modal scrollea por su cuenta: antes el rail clínico
+   (tres tarjetas apiladas) estiraba el panel entero y se cortaba abajo. */
+.call-modal-panel .clinical-rail {
+  max-height: min(72vh, 760px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: var(--space-2);
+}
+
 /* ---------------------------------------------------------------------
-   Cuerpo de la tarjeta de voz: transcripción a la izquierda, escenario
-   (orbe + controles) a la derecha. Antes la transcripción iba DEBAJO del
-   orbe, así que la conversación —lo que de verdad se está mirando— sólo
-   aparecía tras hacer scroll, y el ancho quedaba desaprovechado.
+   Cuerpo de la tarjeta de voz DENTRO DEL MODAL.
+
+   Rediseño tras la primera versión, que quedó mal: se partió en columnas
+   (transcripción | orbe) sin repensar la jerarquía, así que competían tres
+   columnas a la vez, el orbe quedaba encajonado y sobraba un hueco blanco
+   abajo a la izquierda. Además, el wrapper que añadí se llamaba
+   `.voice-stage`, la MISMA clase que `VoiceOrb` usa internamente, así que
+   los estilos del contenedor se aplicaban también dentro del orbe.
+
+   Modelo correcto para una llamada en curso: los controles son una BARRA
+   horizontal compacta y la conversación ocupa todo el ancho debajo. La
+   transcripción es lo que se está mirando; el orbe sólo tiene que estar
+   siempre a mano.
    ------------------------------------------------------------------- */
 
 .voice-card-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
-  gap: var(--space-5);
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
   margin-top: var(--space-4);
+  min-width: 0;
+}
+
+/* Barra de controles: orbe compacto a la izquierda, botones a la derecha. */
+.call-voice-panel .voice-stage {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "mic status"
+    "mic copy";
+  align-items: center;
+  gap: 2px var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 16px;
+  background: var(--surface-subtle, #f8fafc);
+}
+
+.call-voice-panel .waveform {
+  display: none; /* decorativo; en el modal roba altura sin aportar */
+}
+
+.call-voice-panel .mic-button {
+  grid-area: mic;
+  width: 64px;
+  height: 64px;
+  margin: 0;
+}
+
+.call-voice-panel .voice-status-text {
+  grid-area: status;
+  font-size: 17px;
+  text-align: left;
+}
+
+.call-voice-panel .voice-status-copy {
+  grid-area: copy;
+  margin: 0;
+  font-size: 13px;
+  text-align: left;
+  opacity: 0.75;
+}
+
+.call-modal-panel .call-controls {
+  margin-top: var(--space-3);
+  justify-content: flex-start;
+}
+
+/* El título de portada no aporta nada en una llamada en curso y se comía
+   una franja entera del modal; el contexto ya está en la cabecera. */
+.call-modal-panel .voice-card-head h1,
+.call-modal-panel .voice-card-head .eyebrow {
+  display: none;
+}
+
+.call-modal-panel .voice-card-head {
+  justify-content: flex-end;
+  margin-bottom: 0;
 }
 
 .voice-transcript {
@@ -1177,33 +1252,24 @@ footer {
   font-size: 15px;
 }
 
-/* La transcripción crece hasta donde alcanza y luego scrollea sola, para
-   que los controles de la llamada nunca se salgan de la vista. */
+/* La transcripción crece y luego scrollea sola: los controles de arriba
+   nunca se salen de la vista al acumularse turnos. */
 .voice-transcript .transcript {
-  max-height: min(46vh, 460px);
+  max-height: min(52vh, 520px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  padding-right: var(--space-2);
 }
 
-.voice-stage {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  /* El escenario acompaña el scroll de la transcripción en pantallas
-     altas, en vez de quedar arriba y dejar un hueco. */
-  position: sticky;
-  top: 0;
+/* Las burbujas no deben ocupar todo el ancho disponible: a pantalla
+   completa una frase corta se estiraba de borde a borde. */
+.voice-transcript .transcript > * {
+  max-width: min(70ch, 100%);
 }
 
 @media (max-width: 1100px) {
-  .voice-card-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  /* En una columna, el orbe y los controles van PRIMERO: son la acción. */
-  .voice-stage {
-    order: -1;
-    position: static;
+  .call-voice-panel .voice-stage {
+    grid-template-columns: auto minmax(0, 1fr);
   }
   .voice-transcript .transcript {
     max-height: none;
