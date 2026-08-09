@@ -1791,3 +1791,70 @@ el sistema real corriendo, no sólo contra tests: sesión real creada, `POST ...
 desglose de resguardo excluido sobre datos reales acumulados. Confirmado en el bundle JS
 servido que `reportVoiceLatency` y la tarjeta "Latencia voz-a-voz" se emiten desde el
 componente.
+
+## 9.36 Auditoría de `docs/`: 11 archivos muertos borrados, diagrama reconstruido con el sistema real
+
+Pedido: "hay demasiada documentación regada y no está consolidada... vamos a revisar qué se
+puede depurar... dar un reporte conciso y detallado de los hallazgos antes de tomar la
+decisión." Se auditaron los 33 archivos de `docs/` más `CLAUDE.md`, `CONTRIBUTING.md`,
+`NOTICE` y los README de `api/`/`web/` — no por nombre, sino por fecha del último commit,
+quién los referencia **desde código real** (no solo desde otros docs) y lectura directa del
+contenido. El reporte completo con las cuatro categorías (eliminar / fusionar / mantener-
+corrigiendo / mantener tal cual) se entregó al usuario antes de tocar nada; esta entrada
+documenta solo lo que se decidió ejecutar.
+
+**Patrón que confirmó la sospecha del usuario:** 19 de 33 archivos no se tocan desde el
+23-24 de julio (fase previa al kit oficial, "T0") — nunca se volvieron a editar pese a que
+el sistema cambió por completo desde entonces.
+
+**Borrados (11 archivos, decisión del usuario — "Eliminarlos ya"):** confirmado que ninguno
+tiene referencia ni desde código (`api/`, `web/src`) ni desde los documentos que sí se
+conservan (`README.md`, `final-report.md`, `plan.md`, `CLAUDE.md`, `architecture.md`,
+`spec.md`, `traceability.md` — verificado con grep explícito antes de borrar, cero
+coincidencias). Eran plantillas con scores vacíos para decisiones ya tomadas
+(`rag-decision-scorecard.md`, `voice-decision-scorecard.md`: literalmente dicen "nadie debe
+completar los scores antes del 7 de agosto" para un RAG y una voz que ya estaban
+implementados desde el 23-24 de julio), una nota que se autodeclara superseded
+(`stop-work-note.md`), plantillas de proceso nunca llenadas (`adr-template.md`,
+`clean-install-log.md`, `evidence-ledger.md`), y artefactos de logística personal sin
+relación con el producto (`health-shift-plan.md`, `pre-010-workstation.md`,
+`agenda-t0.md`, `organizer-questions-draft.md`). Además, `web/README.md`: era el boilerplate
+sin editar de `create-next-app` ("This is a Next.js project bootstrapped with...") — cero
+contenido del proyecto real. Se reemplazó por uno real (estructura de `src/`, comandos de
+desarrollo con los puertos reales, mención a `CallModal` compartido).
+
+**Diagrama reconstruido, no retocado (`docs/architecture-diagram.md`, entregable #2):** la
+v1.0 (24 de julio) mostraba `LLMPort → FakeLLM`, `EmbeddingsPort → Fake` y
+`ChallengeCasePort → Fixture (Delta Share en T0)` — ninguno de los tres existe hoy (nunca
+hubo Delta Share; Groq real + Ollama de resguardo; embeddings reales BGE-M3). Dado que el
+criterio de 15pts "Comprensión del problema y diseño de la conversación" dice explícitamente
+que el jurado toma piezas del diagrama al azar y las busca en el código, un diagrama
+desalineado es peor que no tenerlo. v2.0 corrige los tres adapters, agrega el
+`SafetySignalDetector` (ausente del original pese a ser parte real del flujo de decisión) y
+la ruta de auditoría/métricas completa (`AuditRepository`, el evento
+`client.voice_latency_reported` de §9.35) — inexistente en v1.0 porque `/audit` con métricas
+reales no existía todavía el 24 de julio.
+
+**Verificación del Mermaid sin poder renderizar en este entorno:** `mermaid-cli` vía `npx`
+no encontró Chrome pese a instalar `chrome-headless-shell` y luego la versión exacta que
+pedía (148.0.7778.97) — desajuste de rutas entre el caché de `npx` y el de `puppeteer
+browsers install`, no resuelto por no ser bloqueante. En su lugar se validó con la librería
+`mermaid` real en Node vía `jsdom` (sin necesidad de un navegador completo,
+`mermaid.parse()` sobre cada bloque extraído): **ambos diagramas parsean sin error**
+(`diagramType: 'flowchart-v2'`). Verificación estructural adicional: 4 `subgraph` / 4 `end`
+balanceados; el único texto nuevo con `{}` literales (un parámetro de ruta en una etiqueta
+de arista) se simplificó para no depender de que las llaves escapen igual dentro de
+`-->|"..."|` que dentro de `[""]` (el otro uso de `{id}` que sí se conservó es idéntico al
+de la v1.0 ya renderizada como DOC-002).
+
+**Pendiente, explícitamente diferido por decisión del usuario:** las bitácoras solapadas
+(`plan.md`, `CLAUDE.md`, `auditoria-kit-oficial-2026-08-07.md` cuentan la misma historia
+tres veces) y los documentos citados desde código con datos falsos (`prompt-config-
+appendix.md` con hashes de `interview.py`/`response.py` desactualizados —ambos se
+reescribieron esta sesión—, `CLAUDE.md` con "Llama 3.1 70B" en su línea 117,
+`traceability.md` con 34 de ~150 filas todavía marcadas `Pendiente-T0`) — el usuario pidió
+priorizar el diagrama primero; estos quedan para una siguiente pasada.
+
+Verificación: sin cambios en `api/app`, `api/tests` ni `web/src` (solo `docs/` y
+`web/README.md`) — no aplica rebuild de Docker ni reejecutar la suite completa; se confirmó
+con `git status` que el cambio queda acotado a documentación.
