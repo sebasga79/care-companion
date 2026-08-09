@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Care Companion — Frontend
 
-## Getting Started
+Interfaz del agente de voz postoperatorio Care Companion. Next.js 16 (App
+Router) + React + TypeScript, sin librería de componentes de terceros. Ver
+`../README.md` para el arranque recomendado (`./levantar_app.sh`, Docker) y
+`../docs/architecture.md`/`../docs/design.md` para el diseño y el alcance.
 
-First, run the development server:
+## Desarrollo local
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd web
+pnpm install
+NEXT_PUBLIC_API_URL=http://localhost:49317 pnpm dev --port 49318
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+O desde la raíz del repo: `./levantar_app.sh --local` (backend + frontend,
+hot reload, sin Docker).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tests y lint
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm exec tsc --noEmit   # type-check
+pnpm lint                # eslint
+pnpm build                # build de producción (incluye type-check)
+```
 
-## Learn More
+## Estructura
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+  app/            rutas del App Router: /call, /knowledge, /audit
+  components/     CallModal, VoiceOrb, TranscriptPanel, EvidencePanel,
+                  RiskPanel, MetricsBand, StatusBanner, ConfirmDialog...
+  lib/            api.ts (cliente REST/WS tipado), useVoiceSession.ts
+                  (STT/TTS del navegador con barge-in), knowledge.ts
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`CallModal` concentra toda la lógica de una llamada (WebSocket, voz,
+turnos) para que `/call` y `/knowledge` la reutilicen igual, en vez de
+duplicarla — ver `docs/auditoria-kit-oficial-2026-08-07.md` §9.22.
