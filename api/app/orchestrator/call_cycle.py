@@ -248,6 +248,45 @@ def _references_known_history(text: str) -> bool:
     return bool(_HISTORY_REFERENCE_RE.search(normalize_spanish(text)))
 
 
+# Bug real visto en vivo tras cambiar a Llama 3.3 70B: el modelo conversa
+# más natural que el 8B y eso incluye abrir por saludo — "Hola, Mauricio,
+# me alegra saber que..." en el turno 4 de una llamada ya en curso. Suena a
+# que la llamada se reinició.
+#
+# El `ResponseAgent` no recibe el historial de turnos (por diseño: su
+# trabajo es redactar UN turno, no llevar la conversación), así que no
+# puede saber que ya se saludó. Y en `handle_turn` SIEMPRE se saludó: el
+# mensaje de apertura lo emite `start_session` antes del primer turno del
+# paciente. O sea que en esta ruta un saludo inicial es SIEMPRE redundante
+# — es una regla determinista, no una instrucción que valga la pena poner
+# en el prompt y esperar que el modelo respete cada vez.
+_REDUNDANT_GREETING_RE = re.compile(
+    r"^\s*(?:hola|buen(?:os|as)\s+(?:d[ií]as|tardes|noches)|qu[eé]\s+tal|saludos)"
+    r"[\s,.!¡]*(?:[A-ZÁÉÍÓÚÑ][\wáéíóúñ]*(?:\s+[A-ZÁÉÍÓÚÑ][\wáéíóúñ]*)?)?"
+    r"[\s,.!¡]*",
+    re.IGNORECASE,
+)
+
+
+def _strip_redundant_greeting(message: str, *, patient_text: str = "") -> str:
+    """Quita el saludo de apertura de un turno intermedio de la llamada.
+
+    `patient_text` importa: si el paciente acaba de saludar, devolverle el
+    saludo es lo correcto y NO se toca. Sólo sobra cuando el agente saluda
+    por su cuenta en mitad de una llamada ya abierta.
+
+    Conserva el resto intacto y recapitaliza la primera letra. Si al quitar
+    el saludo no queda nada (el turno era *sólo* un saludo), devuelve el
+    mensaje original — vaciar la respuesta sería peor que repetir un hola.
+    """
+    if patient_text and _REDUNDANT_GREETING_RE.match(patient_text.strip()):
+        return message
+    stripped = _REDUNDANT_GREETING_RE.sub("", message, count=1)
+    if not stripped.strip():
+        return message
+    return stripped[0].upper() + stripped[1:]
+
+
 # Bug real visto en vivo (transcripción del jurado, GENERAL_STATE): el
 # paciente contestó "que ya no tengo dolor, la herida está muchísimo
 # mejor..." — información real, sólo que no sobre "ánimo" — y el
@@ -1205,7 +1244,12 @@ class CallCycleOrchestrator:
                 reason=f"ResponseAgent: {response_result.output.get('reason')}",
             )
 
-        agent_message = response_result.output["message"]
+        # La llamada ya fue abierta por `start_session`; un "Hola, <nombre>"
+        # aquí suena a que la conversación se reinició (ver
+        # `_strip_redundant_greeting`).
+        agent_message = _strip_redundant_greeting(
+            response_result.output["message"], patient_text=patient_text
+        )
         intent = response_result.output["intent"]
         if fsm.state is not SessionState.ESCALATED and not objectives_pending:
             agent_message = (

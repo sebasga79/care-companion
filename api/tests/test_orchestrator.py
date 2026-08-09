@@ -903,3 +903,39 @@ def test_pain_present_as_confirmed_true_still_asks_location() -> None:
         ]
     )
     assert "PAIN_LOCATION" not in covered
+
+
+def test_strip_redundant_greeting_removes_midcall_hello() -> None:
+    """Bug real con Llama 3.3 70B: el modelo abría turnos intermedios con
+    "Hola, <nombre>", lo que suena a que la llamada se reinició."""
+    from app.orchestrator.call_cycle import _strip_redundant_greeting
+
+    assert _strip_redundant_greeting(
+        "Hola, Mauricio, me alegra saber que ya no tienes dolor."
+    ) == "Me alegra saber que ya no tienes dolor."
+    assert _strip_redundant_greeting(
+        "Buenas tardes, Jean. ¿En qué parte siente el dolor?"
+    ) == "¿En qué parte siente el dolor?"
+
+
+def test_strip_redundant_greeting_preserves_normal_messages() -> None:
+    """Contrapeso: un turno que no abre con saludo queda intacto, y uno que
+    es SÓLO un saludo se conserva antes que quedar vacío."""
+    from app.orchestrator.call_cycle import _strip_redundant_greeting
+
+    normal = "¿Ha notado fiebre o sensación de calor?"
+    assert _strip_redundant_greeting(normal) == normal
+    # "hola" dentro de la frase, no al inicio: no se toca.
+    embedded = "Le voy a decir hola de parte del equipo."
+    assert _strip_redundant_greeting(embedded) == embedded
+    assert _strip_redundant_greeting("Hola.") == "Hola."
+
+
+def test_greeting_is_kept_when_the_patient_greets_first() -> None:
+    """Contrapeso obligatorio: si el paciente saluda, devolverle el saludo
+    es lo correcto — el guard sólo quita saludos que el agente inicia solo."""
+    from app.orchestrator.call_cycle import _strip_redundant_greeting
+
+    assert _strip_redundant_greeting(
+        "Buenas tardes. ¿Cómo ha seguido del dolor?", patient_text="hola, buenas"
+    ) == "Buenas tardes. ¿Cómo ha seguido del dolor?"

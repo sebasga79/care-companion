@@ -1069,6 +1069,106 @@ footer {
   align-items: start;
 }
 
+/* ---------------------------------------------------------------------
+   Modal de llamada — una vez elegido el paciente, la llamada es LA tarea.
+   La lista queda detrás, visible pero inerte, para no perder el contexto
+   de a quién se está llamando.
+   ------------------------------------------------------------------- */
+
+.call-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-6) var(--space-5);
+  overflow-y: auto;
+  background: rgba(10, 26, 47, 0.55);
+  /* El desenfoque es lo que hace legible el contraste: sin él, el texto de
+     las tarjetas de atrás compite con el del panel. */
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: call-modal-fade 160ms ease-out;
+}
+
+.call-modal-panel {
+  position: relative;
+  width: min(1180px, 100%);
+  margin: auto;
+  padding: var(--space-6);
+  border-radius: 20px;
+  background: var(--surface, #fff);
+  box-shadow: 0 24px 64px rgba(10, 26, 47, 0.28);
+  animation: call-modal-rise 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.call-modal-panel:focus {
+  outline: none;
+}
+
+.call-modal-close {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 1;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--text-muted, #5b6b7f);
+  background: rgba(10, 26, 47, 0.05);
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.call-modal-close:hover {
+  background: rgba(10, 26, 47, 0.1);
+  color: var(--text, #0a1a2f);
+}
+
+.call-modal-close:focus-visible {
+  outline: 2px solid var(--brand, #0f766e);
+  outline-offset: 2px;
+}
+
+/* El modal ya aporta su propio margen superior. */
+.call-modal-panel .call-grid {
+  margin-top: var(--space-5) !important;
+}
+
+@keyframes call-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes call-modal-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* WCAG 2.2 AA — respeta reduced motion (NFR-009). */
+@media (prefers-reduced-motion: reduce) {
+  .call-modal-backdrop,
+  .call-modal-panel {
+    animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .call-modal-backdrop {
+    padding: var(--space-3);
+  }
+  .call-modal-panel {
+    padding: var(--space-5) var(--space-4);
+    border-radius: 16px;
+  }
+}
+
 .voice-card-head {
   display: flex;
   flex-wrap: wrap;

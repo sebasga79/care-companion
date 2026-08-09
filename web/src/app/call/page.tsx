@@ -322,6 +322,43 @@ export default function CallPage() {
     }
   }
 
+  // El modal de llamada es la superficie principal una vez elegido el
+  // paciente: la lista queda detrás, inerte. Cerrarlo cuelga la llamada si
+  // estaba activa — salir del modal y dejar un WebSocket vivo de fondo
+  // sería un estado invisible para el usuario.
+  const modalRef = useRef<HTMLDivElement | null>(null);
+
+  async function closeCallModal() {
+    // Se compara `phase` en vez de `isActive` porque esa constante se
+    // declara más abajo en el componente (zona muerta temporal).
+    if (phase === "active" || phase === "connecting") {
+      await endCall();
+    }
+    setSelectedCaseId("");
+    setPhase("idle");
+    setTurns([]);
+    setCitations([]);
+  }
+
+  // Escape cierra, y el scroll del fondo se bloquea mientras está abierto
+  // (si no, la rueda del ratón mueve la lista de atrás y el modal parece
+  // pegado a una página que se desliza sola).
+  useEffect(() => {
+    if (!selectedCase) return;
+    modalRef.current?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") void closeCallModal();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCase]);
+
   function toggleMic() {
     if (voice.listening) {
       voice.stop();
@@ -346,7 +383,7 @@ export default function CallPage() {
 
   return (
     <>
-      {!isActive ? (
+      {true ? (
       <section className="patient-picker card card-pad" aria-labelledby="patient-picker-heading">
         <div className="patient-picker-head">
           <div>
@@ -402,6 +439,32 @@ export default function CallPage() {
         )}
       </section>
       ) : null}
+
+      {selectedCase ? (
+        <div
+          className="call-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            // Sólo cierra si el clic empezó en el backdrop, no si vino de
+            // arrastrar una selección de texto desde dentro del panel.
+            if (event.target === event.currentTarget) closeCallModal();
+          }}
+        >
+        <div
+          className="call-modal-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Llamada de seguimiento con ${patientAlias}`}
+          ref={modalRef}
+        >
+          <button
+            type="button"
+            className="call-modal-close"
+            onClick={closeCallModal}
+            aria-label="Cerrar la llamada y volver a la lista de pacientes"
+          >
+            ×
+          </button>
 
       {/* Ficha de contexto: sólo aparece cuando ya hay un paciente elegido.
           Antes se renderizaba siempre y mostraba placeholders sin valor
@@ -600,6 +663,9 @@ export default function CallPage() {
 
         </aside>
       </div>
+        </div>
+        </div>
+      ) : null}
     </>
   );
 }
