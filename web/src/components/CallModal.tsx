@@ -134,6 +134,24 @@ export function CallModal({ patientCase, onClose }: CallModalProps) {
 
   const socketRef = useRef<WebSocket | null>(null);
   const clientSeqRef = useRef(0);
+  // Latencia voz→voz (rúbrica §5, obligatoria en el README): "P50 y P95,
+  // medidos desde que el paciente termina de hablar hasta que empieza a
+  // sonar el audio del agente". Ningún dato de esto viaja por el backend:
+  // STT y TTS son ambos del navegador (Web Speech API), así que es la
+  // única medición que solo puede tomarse aquí. `sendText` es el punto
+  // exacto de "el paciente terminó de hablar" (turno de voz o el fallback
+  // de texto, mismo contrato); la transición false→true de `voice.speaking`
+  // es el punto exacto de "empieza a sonar el audio" (ver `utter.onstart`
+  // en useVoiceSession). "Consumir" la marca tras usarla evita contar el
+  // saludo inicial (no tiene turno de paciente precedente) o una locución
+  // repetida sin turno nuevo de por medio.
+  const patientTurnEndedAtRef = useRef<number | null>(null);
+  const voiceLatencySamplesRef = useRef<number[]>([]);
+  const [voiceLatencyStats, setVoiceLatencyStats] = useState<{
+    p50: number;
+    p95: number;
+    n: number;
+  } | null>(null);
   // Refs so the WebSocket onmessage closure (captured once at connect time)
   // always reaches the latest voice behavior without being recreated.
   const voiceModeRef = useRef(false);
@@ -265,6 +283,9 @@ export function CallModal({ patientCase, onClose }: CallModalProps) {
     clientSeqRef.current += 1;
     setTurns((prev) => [...prev, makeTurn(sid, "patient", text)]);
     setVoiceState("thinking");
+    // Arranca el cronómetro voz→voz: "el paciente termina de hablar" es
+    // exactamente ahora (ver comentario junto a la declaración del ref).
+    patientTurnEndedAtRef.current = performance.now();
     ws.send(
       JSON.stringify({
         v: 1,
@@ -297,6 +318,30 @@ export function CallModal({ patientCase, onClose }: CallModalProps) {
   useEffect(() => {
     speakRef.current = voice.speak;
   }, [voice.speak]);
+
+  // Cierra la medición voz→voz: `voice.speaking` pasa a `true` justo cuando
+  // `SpeechSynthesisUtterance.onstart` dispara — el navegador ya está
+  // produciendo audio, no solo encolándolo.
+  const wasSpeakingRef = useRef(false);
+  useEffect(() => {
+    if (voice.speaking && !wasSpeakingRef.current && patientTurnEndedAtRef.current !== null) {
+      const latencyMs = performance.now() - patientTurnEndedAtRef.current;
+      patientTurnEndedAtRef.current = null; // consumida: no recontar sin turno nuevo
+      const samples = voiceLatencySamplesRef.current;
+      samples.push(latencyMs);
+      const sorted = [...samples].sort((a, b) => a - b);
+      const pct = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+      const stats = { p50: pct(0.5), p95: pct(0.95), n: sorted.length };
+      setVoiceLatencyStats(stats);
+      // Lectura manual durante una llamada real de prueba; es el único
+      // lugar donde existe este dato (STT/TTS son ambos del navegador).
+      console.info(
+        `[latencia voz→voz] turno=${latencyMs.toFixed(0)}ms  ` +
+          `P50=${stats.p50.toFixed(0)}ms P95=${stats.p95.toFixed(0)}ms n=${stats.n}`,
+      );
+    }
+    wasSpeakingRef.current = voice.speaking;
+  }, [voice.speaking]);
 
   async function endCall() {
     voice.stop();
@@ -472,6 +517,17 @@ export function CallModal({ patientCase, onClose }: CallModalProps) {
                     style={{ fontStyle: "italic", opacity: 0.8 }}
                   >
                     «{voice.partial}»
+                  </p>
+                ) : null}
+
+                {voiceLatencyStats ? (
+                  <p
+                    className="voice-latency-readout"
+                    title="Desde que termina de hablar el paciente hasta que empieza a sonar el audio del agente (rúbrica §5). Medido en este navegador, esta llamada."
+                  >
+                    Latencia voz→voz — P50 {voiceLatencyStats.p50.toFixed(0)} ms · P95{" "}
+                    {voiceLatencyStats.p95.toFixed(0)} ms · {voiceLatencyStats.n} turno
+                    {voiceLatencyStats.n === 1 ? "" : "s"}
                   </p>
                 ) : null}
 

@@ -1633,3 +1633,87 @@ Verificación: tsc + eslint limpios, build OK, contenedor reconstruido. Confirma
 servido que `.knowledge-call-test-icon{place-items:center;width:52px;height:52px;
 display:grid}` está presente y que la regla vieja `.knowledge-call-test .mic-symbol{...}`
 ya no existe; confirmado en el bundle JS que la clase nueva se emite desde el componente.
+
+## 9.34 Latencia voz-a-voz, corrección de G3, disco lleno y cuota diaria de Groq — cuatro hallazgos de una sola tarea
+
+Pedido: "obtener los datos de latencia y lo otro que piden en los requisitos del concurso.
+No vamos a correr tests largos, solo lo que pidan en el concurso." Cuatro hallazgos reales,
+en el orden en que aparecieron.
+
+**1. `docs/final-report.md` §2.1 pedía una compuerta más estricta de la que existe.**
+Antes de tocar código, se releyó la rúbrica y `stack-tecnico.md` del kit oficial
+palabra por palabra (`raw.githubusercontent.com`, no la página de marketing —
+el primer fetch a `sourcemeridian.com/tech-sphere-challenge` dio un resumen genérico y
+sin cifras, y llevó a un segundo fetch más específico). El texto verbatim de
+`stack-tecnico.md` §1:
+
+> "La lista fija **familias**, no versiones puntuales [...] Si un modelo sugerido ya no
+> existe, usa el sucesor vigente de la misma familia y proveedor [...] Esto no cambia cómo
+> se revisa la compuerta G3: lo que se evalúa es que el modelo pertenezca a una de las
+> familias permitidas [...] no que coincida un identificador exacto de versión."
+
+La sección anterior (hasta el 8 de agosto) declaraba `llama-3.1-8b-instant` razonando que
+había que preservar el número de versión (`3.1`) de la lista original y ceder en tamaño.
+Esa lectura era más estricta de lo que la compuerta exige — no había ambigüedad de G3 que
+resolver, sólo un cambio de capacidad (12.000 TPM del 70B vs 6.000 del 8B, ver §9.20/9.21)
+que la documentación nunca reflejó. Reescrito con la cita verbatim de por qué, en vez de
+sólo cambiar el nombre del modelo. Se corrigieron además tres menciones obsoletas en el
+README raíz (`"Llama 3.1 70B"` en el resumen de arquitectura — un tercer nombre distinto,
+nunca actualizado desde antes de la primera corrección de modelo — y `"Phi-3.5 Mini"` como
+resguardo, cuando el resguardo real siempre fue `Ollama/llama3.2:3b`).
+
+**2. Disco lleno a mitad de sesión — bloqueo real de entorno, no de código.** Con la sesión
+en curso, Bash empezó a fallar con `ENOSPC` en cualquier comando, incluido uno sin salida
+(`true`); `Edit` confirmó que no era una partición aislada del harness, sino el disco real
+del proyecto (`.tmp` de escritura atómica falló dentro de `web/src/app/`). Verificado que no
+hubo corrupción (los archivos afectados quedaron exactamente como antes de cada intento
+fallido — la escritura atómica falla antes de tocar el archivo real). El usuario liberó
+espacio de Docker manualmente.
+
+**3. Docker no volvía a responder tras liberar espacio.** `docker info`/`docker version`
+colgaban indefinidamente pese a que los procesos de Docker Desktop, `com.docker.backend` y
+`com.docker.virtualization` (la VM) seguían vivos — el daemon estaba en un estado atascado,
+no caído. `osascript -e 'quit app "Docker"'` no cerró todo en 30s; escaló a `pkill`, pero un
+proceso `com.docker.backend` (PID viejo, de antes del intento de reinicio) sobrevivió al
+`pkill` y bloqueó que el relanzamiento (`open -a Docker`) levantara una instancia nueva y
+limpia — el VM console log no mostraba actividad nueva pese al relanzamiento. Matar ese PID
+específico y relanzar sí funcionó: daemon respondiendo en ~15s. El volumen persistente
+(`source-meridian-agent_care_companion_data`) sobrevivió intacto — no hizo falta
+re-ingestar el corpus ni el dataset.
+
+**4. La cuota *diaria* de Groq (TPD), no sólo la de minuto (TPM), se agota con uso real
+acumulado.** Con Docker recuperado, se corrió una medición corta (3 casos del dataset, no
+los 12 completos — "no vamos a correr tests largos") contra `llama-3.3-70b-versatile`, el
+modelo realmente desplegado (la corrida `capa1-groq.json` del 8 de agosto medía
+`llama-3.1-8b-instant`, ya no el default). A mitad del turno 5 del tercer caso, Groq empezó
+a responder 429 con `tokens per day (TPD): Limit 100000, Used 99659` — cuota consumida por
+el desarrollo/pruebas acumuladas del día, no por esta corrida sola. El adapter
+(`FallbackLLM`) cayó al resguardo local como debía, sin romper la conversación, pero eso
+contaminó 2 de 16 turnos con tiempo de reintento + modelo local en vez de Groq real.
+Verificado por proveedor consultando la tabla `events` directamente (payload de cada
+`agent.*.completed` trae `provider`): 32 de 36 invocaciones fueron `groq`, 3 `ollama` — las
+3 últimas de la sesión `verde`, ninguna antes. Se reportan ambos números (limpio de 14
+turnos: P50 3.782 ms / P95 5.139 ms; crudo de 16: P50 4.044,6 ms / P95 13.984,6 ms) en vez
+de promediarlos — mismo criterio que el outlier de 24,5s de la corrida anterior. El único
+falso positivo de esta corrida ocurrió exactamente en el turno servido por el resguardo, así
+que no se cuenta como hallazgo de precisión del modelo primario. Tokens/costo de la tabla
+principal usan sólo los 32 llamados a Groq, para no atribuirle a Groq consumo que sirvió
+gratis el modelo local. Documentado como riesgo operativo para la sesión del jurado: si
+evalúan el mismo día que hubo desarrollo activo, pueden toparse con el mismo 429→resguardo.
+
+**Además, instrumentación nueva** (no un hallazgo, una pieza que faltaba): `CallModal.tsx`
+mide en el navegador, por llamada, latencia voz-a-voz real — desde que termina de hablar el
+paciente (`sendText`, mismo punto para turno de voz o fallback de texto) hasta que empieza a
+sonar el audio del agente (transición `false→true` de `voice.speaking`, que ocurre en
+`utter.onstart`) — la definición exacta de la rúbrica §5. Se muestra en vivo junto al
+micrófono (P50/P95 acumulados de la llamada en curso) y se loguea a consola. No hay forma de
+generar una muestra real sin una llamada real con micrófono (STT/TTS son ambos del
+navegador) — instrumentado y verificado en el bundle servido, pendiente de una llamada real
+para tener muestras.
+
+Verificación: tsc + eslint limpios, `next build` OK, instrumentación confirmada en el bundle
+JS/CSS servido (clase `.voice-latency-readout` presente con las reglas correctas). Backend:
+ruff + pytest limpios (409 passed / 3 skipped) antes de la corrida del benchmark — sin
+cambios de código de backend en esta tarea, sólo documentación y el script de medición ya
+existente. `docs/final-report.md` §2.1, §4 y §6 y `README.md` actualizados con cifras y
+modelo reales; `docs/benchmarks/README.md` con el detalle completo de la corrida nueva.

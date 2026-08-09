@@ -36,40 +36,49 @@ propietario, con puertos estrictos como mitigación de rework en T0.
 
 ## 2.1 Modelo de lenguaje declarado (compuerta G3)
 
-**Modelo usado: `llama-3.1-8b-instant` — Llama 3.1 servido por Groq.**
+**Modelo usado: `llama-3.3-70b-versatile` — Llama 3.3 70B servido por Groq.**
 Configurado en [`api/app/core/config.py`](../api/app/core/config.py)
 (`LLMProvider.GROQ`), verificable en `LLM_PROVIDER`/`LLM_MODEL` y en el
 campo `provider`/`model` que cada llamada persiste en `events`.
 
-**Por qué este y no otro.** La lista cerrada de
+**Por qué este y no otro.** Versión anterior de esta sección (hasta el 8 de
+agosto) declaraba `llama-3.1-8b-instant`, razonando que había que preservar
+el número de versión (`3.1`) de la referencia original de
 [`docs/stack-tecnico.md`](https://github.com/TechSphere2026/ParticipantArtifacts/blob/main/docs/stack-tecnico.md)
-nombra *"Llama 3.1 70B (vía Groq)"*. Al conectarlo encontramos que **Groq
-retiró ese modelo de su catálogo**: hoy ofrece `llama-3.1-8b-instant`
-(Llama 3.1, 8B) y `llama-3.3-70b-versatile` (70B, pero versión 3.3).
-Ninguno reproduce exactamente el nombre de la lista, así que había que
-elegir de qué lado desviarse:
+(*"Llama 3.1 70B (vía Groq)"*, retirado del catálogo de Groq) y ceder en
+tamaño antes que en versión. **Esa lectura era más estricta de lo que la
+compuerta exige.** El texto completo de `stack-tecnico.md` §1 lo aclara
+explícitamente:
 
-| Candidato | Familia | Versión | Tamaño | Desviación respecto a la lista |
-|---|---|---|---|---|
-| `llama-3.1-8b-instant` | Llama | **3.1** ✅ | 8B ✗ | Sólo el tamaño |
-| `llama-3.3-70b-versatile` | Llama | 3.3 ✗ | **70B** ✅ | Versión mayor distinta |
+> "La lista fija **familias**, no versiones puntuales, porque los
+> proveedores retiran o reemplazan snapshots sin previo aviso […] Si un
+> modelo sugerido ya no existe, usa el sucesor vigente **de la misma
+> familia y proveedor**: la versión más reciente de Llama disponible en
+> Groq […] Esto no cambia cómo se revisa la compuerta G3: lo que se evalúa
+> es que el modelo pertenezca a una de las familias permitidas y esté
+> vigente en su nivel gratuito o local, **no que coincida un identificador
+> exacto de versión**."
 
-Elegimos conservar **familia y versión** (`3.1`) y ceder en el tamaño:
-cambiar de versión mayor se aleja más de lo que la lista autoriza, y G3
-**descalifica** —no penaliza— usar un modelo fuera de ella. La causa del
-desvío es del proveedor, no una preferencia nuestra: el modelo exacto ya no
-se puede invocar.
+`llama-3.3-70b-versatile` es exactamente eso: la versión de Llama vigente
+en el nivel gratuito de Groq al momento de la entrega, misma familia y
+proveedor que la referencia original. No hay conflicto con G3 en ningún
+sentido — se corrige esta sección porque el argumento anterior ya no
+describe el sistema real (el default de `api/.env`/`config.py` se cambió el
+8 de agosto por capacidad: el nivel gratuito de `llama-3.1-8b-instant` da
+**6.000 TPM**, el de `llama-3.3-70b-versatile` **12.000 TPM** — el doble de
+margen para una conversación de varios turnos con tres agentes por turno),
+no porque hubiera que resolver una ambigüedad de la compuerta.
 
-**Alternativas evaluadas y descartadas.** Los otros dos modelos de la lista
-son locales (Llama 3.2 1B/3B y Phi-3.5 Mini vía Ollama) y sí existen tal
-cual, sin ambigüedad. Se midieron en la máquina de desarrollo:
-**~5,6 s por invocación**, ~11 s por turno conversacional con tres agentes.
-Es inviable para una conversación de voz, criterio que la rúbrica evalúa
-explícitamente (15 pts). Quedan implementados y configurables como
-**resguardo** (`LLM_FALLBACK_PROVIDER=ollama`): si Groq falla o no hay red
-durante la sesión de evaluación, la llamada continúa con un modelo local de
-la lista en vez de caerse. Gemini 1.5 Flash se descartó por requerir un
-segundo adapter con SDK propio sin ganancia sobre Groq.
+**Alternativas evaluadas y descartadas.** Los modelos locales de la lista
+(Llama 3.2 1B/3B y Phi-3.5 Mini vía Ollama) sí existen tal cual, sin
+ambigüedad. Se midieron en la máquina de desarrollo: **~5,6 s por
+invocación**, ~11 s por turno conversacional con tres agentes. Es inviable
+para una conversación de voz, criterio que la rúbrica evalúa explícitamente
+(15 pts). Llama 3.2 3B queda implementado y configurable como **resguardo**
+(`LLM_FALLBACK_PROVIDER=ollama`, `LLM_FALLBACK_MODEL=llama3.2:3b`): si Groq
+falla o no hay red durante la sesión de evaluación, la llamada continúa con
+un modelo local de la lista en vez de caerse. Gemini 1.5 Flash se descartó
+por requerir un segundo adapter con SDK propio sin ganancia sobre Groq.
 
 **Embeddings (no restringidos por G3):** BGE-M3 local vía Ollama, el modelo
 que el propio kit sugiere para español. No dependen de red externa.
@@ -94,27 +103,44 @@ que el propio kit sugiere para español. No dependen de red externa.
 Latencia P50/P95 se calcula desde eventos instrumentados (`/api/v1/metrics`,
 visible en `/audit`), y también desde el arnés automatizado
 ([`api/scripts/benchmark.py`](../api/scripts/benchmark.py)), que reproduce
-turnos reales del dataset oficial contra Groq (`llama-3.1-8b-instant`) y
-compara contra `label_ground_truth`. Metodología completa en
+turnos reales del dataset oficial contra Groq y compara contra
+`label_ground_truth`. Tabla completa con costo por llamada en el
+[README §Métricas](../README.md#métricas-rúbrica-5) (obligatoria por
+rúbrica); metodología y ambas corridas en
 [`docs/benchmarks/README.md`](benchmarks/README.md).
 
-**Corrida `capa1-groq.json` (12 casos, 62 turnos, 2026-08-08):**
+**Dos corridas con propósitos distintos, porque el modelo cambió a mitad de
+sesión** (`llama-3.1-8b-instant` → `llama-3.3-70b-versatile`, más capacidad
+por minuto — ver §2.1):
 
-| Métrica | Valor |
-|---|---|
-| Falsos negativos | 1 de 4 rojos (sensibilidad 75 %) |
-| Falsos positivos | 0 de 6 verdes (especificidad 100 %) |
-| Latencia p50 / p95 | 1.093 ms / 3.267 ms (≈1,1 s / ≈3,3 s) |
-| Tokens por turno | 2.493 entrada · 290 salida |
-| Invocaciones LLM / consultas RAG por turno | 1,58 · 1,5 |
+| | `capa1-groq.json` (8 ago) | `capa1-groq-70b.json` (9 ago) |
+|---|---|---|
+| Modelo | `llama-3.1-8b-instant` (histórico) | `llama-3.3-70b-versatile` (**desplegado hoy**) |
+| Casos / turnos | 12 / 62 | 3 / 16 |
+| Para qué sirve | Sensibilidad/especificidad — muestra grande | Latencia/tokens/costo del modelo real |
+| Falsos negativos | 1 de 4 rojos (sensibilidad 75 %) | 0 de 1 rojo — muestra insuficiente para tasa |
+| Falsos positivos | 0 de 6 verdes (especificidad 100 %) | 1 de 1 verde, ocurrido bajo agotamiento de cuota diaria (ver nota) — no se cuenta como hallazgo confirmado |
+| Latencia p50 / p95 | 1.093 ms / 3.267 ms | 3.782 ms / 5.139 ms (14 turnos limpios) |
+| Tokens por turno | 2.493 entrada · 290 salida | 3.590,7 entrada · 407,3 salida |
+| Costo estimado por llamada | no calculado en esa corrida | **US$0,0114** |
 
-El falso negativo restante y su justificación están documentados en
-`docs/benchmarks/README.md` — es un caso de minimización verbal sostenida
-sin dato objetivo inequívoco, dejado como limitación conocida en vez de un
-fix de riesgo a dos días del plazo. El benchmark mismo encontró y corrigió
-un falso positivo real durante su desarrollo (`PAIN_WORSENING` disparado
-por temor hipotético, no por síntoma reportado) — ver commit
-`app/domain/safety_signals.py::_is_hypothetical_worry`.
+La corrida del 9 de agosto es deliberadamente corta — no reemplaza la
+sensibilidad/especificidad de la de 12 casos (para eso sigue siendo
+autoridad), sólo refresca latencia/tokens/costo contra el modelo
+efectivamente desplegado, porque reportar los números del modelo viejo
+sería exactamente lo que la rúbrica penaliza ("reportar números que no se
+sostienen es peor que no reportarlos"). Detalle completo, incluido el
+hallazgo de que la cuota **diaria** (no sólo la de minuto) de Groq se agotó
+a mitad de la corrida y forzó una caída al resguardo local en 2 de 16
+turnos, en `docs/benchmarks/README.md`.
+
+El falso negativo de la corrida grande y su justificación están
+documentados en `docs/benchmarks/README.md` — es un caso de minimización
+verbal sostenida sin dato objetivo inequívoco, dejado como limitación
+conocida en vez de un fix de riesgo a dos días del plazo. El benchmark
+mismo encontró y corrigió un falso positivo real durante su desarrollo
+(`PAIN_WORSENING` disparado por temor hipotético, no por síntoma
+reportado) — ver commit `app/domain/safety_signals.py::_is_hypothetical_worry`.
 
 ## 5. Seguridad clínica (garantías)
 
@@ -131,7 +157,7 @@ por temor hipotético, no por síntoma reportado) — ver commit
 - **Voz:** funciona con Web Speech del navegador (Chrome; STT puede enrutar a
   Google), validada con micrófono real, con half-duplex para evitar que el
   TTS del agente se autoescuche.
-- **Modelo:** Groq (`llama-3.1-8b-instant`) primario, Ollama local
+- **Modelo:** Groq (`llama-3.3-70b-versatile`) primario, Ollama local
   (`llama3.2:3b`) de resguardo si Groq falla o excede la cuota. Dataset
   oficial (160 casos, 4 xlsx) y corpus RAG oficial (107 PDFs, 9.296 chunks)
   integrados, con embeddings semánticos reales (BGE-M3 vía Ollama, 1024
@@ -143,12 +169,17 @@ por temor hipotético, no por síntoma reportado) — ver commit
 - **Clean-install ≤15 min (NFR-004):** cronometrado — 9 min 50 s de punta a
   punta (`docker compose down -v && up -d --build`, dataset + corpus +
   embeddings reales incluidos), ver §9.19 de la auditoría.
-- **Latencia voz-a-voz (spec.md §1.5) sin medir todavía.** Lo medido hasta
-  ahora (`groq-latency.json`, `capa1-groq.json`) es latencia de texto
-  LLM-a-LLM, sin STT ni TTS. El README oficial exige la métrica desde que
-  el paciente termina de hablar hasta que **empieza a sonar** el audio del
-  agente — falta instrumentarla del lado del navegador durante una llamada
-  real (ver §9.20 de la auditoría).
+- **Latencia voz-a-voz (spec.md §1.5) instrumentada, sin muestra real
+  todavía.** `CallModal.tsx` mide en el navegador, por llamada, desde que
+  el paciente termina de hablar hasta que empieza a sonar el audio del
+  agente — la definición exacta de la rúbrica §5 — y la muestra en vivo
+  junto al micrófono. Lo que falta no es instrumentación: STT y TTS corren
+  enteramente en el navegador (Web Speech API), así que la única forma de
+  producir una muestra real es una llamada real con micrófono; no hay script
+  ni proceso de servidor que pueda generarla. Lo medido hasta ahora
+  (`groq-latency.json`, `capa1-groq*.json`) sigue siendo el mejor proxy de
+  servidor (sin tránsito WS ni arranque real del motor de TTS) — ver
+  §9.20 y §9.34 de la auditoría.
 - Filtros server-side de auditoría, reranker adicional y responsive móvil
   quedan como mejoras no bloqueantes.
 

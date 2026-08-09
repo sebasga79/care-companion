@@ -28,9 +28,9 @@ tipada** que coordina agentes de responsabilidad única (`Interview`, `Triage`,
 `Response`) — los agentes nunca se llaman entre sí. RAG híbrido (**FTS5 + coseno
 + RRF**) con evidence gate. Todo proveedor externo (LLM, STT, TTS, embeddings,
 datos) entra por **puertos/adaptadores**; hoy corren adapters `fake`
-deterministas para pruebas, **Groq/Llama 3.1 70B** como opción competitiva primaria
-y **Ollama/Phi-3.5 Mini** como resguardo local, sin tocar el dominio (ver
-`docs/adr/ADR-001`).
+deterministas para pruebas, **Groq/Llama 3.3 70B Versatile** como opción
+competitiva primaria y **Ollama/Llama 3.2 3B** como resguardo local, sin tocar
+el dominio (ver `docs/adr/ADR-001`).
 
 Detalle en [`docs/architecture.md`](docs/architecture.md).
 
@@ -55,10 +55,10 @@ No se necesitan credenciales para correr el prototipo: usa el proveedor LLM
 ### Probar con el modelo real (Groq)
 
 Por defecto todo corre con `fake` (determinista, sin red). Para hablar de
-verdad con **Llama 3.1 (`llama-3.1-8b-instant`) vía Groq** — el modelo
-declarado para la compuerta G3, ver
-[`docs/final-report.md` §2.1](docs/final-report.md) para por qué esa
-variante y no el 70B:
+verdad con **Llama 3.3 70B Versatile (`llama-3.3-70b-versatile`) vía Groq** —
+el modelo declarado para la compuerta G3, ver
+[`docs/final-report.md` §2.1](docs/final-report.md) para la familia permitida
+y por qué esta variante:
 
 1. Crea una API key gratis en <https://console.groq.com/keys>.
 2. `cp api/.env.example api/.env` y edita dos líneas:
@@ -221,6 +221,65 @@ confirma que desaparece. El `knowledge_version` cambia en cada operación.
 **Auditoría (`/audit`):** cada sesión identifica paciente y procedimiento y muestra
 el seguimiento clínico consolidado, nivel de decisión, fuentes, escalamiento y
 métricas honestas (medidas o `pendiente`).
+
+## Métricas (rúbrica §5)
+
+Obligatorias por rúbrica: latencia P50/P95, consumo de tokens y costo estimado
+por llamada. Metodología completa, corridas anteriores y hallazgos en
+[`docs/benchmarks/README.md`](docs/benchmarks/README.md); JSON crudo en
+[`docs/benchmarks/capa1-groq-70b.json`](docs/benchmarks/capa1-groq-70b.json).
+
+**Corrida `capa1-groq-70b.json` (9 ago, 3 casos reales del dataset — 1 rojo /
+1 amarillo / 1 verde, 16 turnos, contra Groq real `llama-3.3-70b-versatile`,
+el modelo desplegado por defecto):**
+
+| Métrica | Valor |
+|---|---|
+| Latencia P50 / P95 (servidor, ver nota) | **3.782 ms / 5.139 ms** (14 turnos limpios) |
+| Tokens de entrada / salida por turno | 3.590,7 / 407,3 |
+| Tokens por llamada (promedio) | 18.657,3 |
+| Invocaciones al modelo por turno | 2,29 |
+| Consultas al RAG por llamada | 3,33 |
+| Costo estimado por llamada | **US$ 0,0114** |
+
+**Cómo se calculó el costo:** Groq on-demand para `llama-3.3-70b-versatile`
+(consultado en [groq.com/pricing](https://groq.com/pricing), ago 2026):
+US$0,59 / millón de tokens de entrada, US$0,79 / millón de salida. En
+desarrollo se usa el nivel gratuito (US$0 real), así que el costo se
+extrapola desde los tokens realmente consumidos por llamada, tal como pide
+la rúbrica.
+
+**Nota metodológica — dos números, honestos ambos.** La corrida completa
+(16 turnos) incluyó los últimos 2 turnos de la conversación `verde`, donde
+la cuota **diaria** de Groq (TPD, 100.000 tokens/día para este modelo) se
+agotó a mitad de la medición: 3 llamadas cayeron al resguardo local
+(Ollama) tras reintentos 429. Esos 2 turnos miden tiempo de reintento y
+degradación al resguardo, no el modelo bajo prueba — igual que el máximo de
+24,5s de la corrida anterior (ver `docs/benchmarks/README.md`), se separan
+en vez de mezclarlos:
+
+| | Turnos | P50 | P95 | Máx |
+|---|---|---|---|---|
+| **Limpia** (Groq puro) | 14 | 3.782 ms | 5.139 ms | 6.540 ms |
+| Cruda (incluye agotamiento de cuota) | 16 | 4.044,6 ms | 13.984,6 ms | 14.726,4 ms |
+
+Con 14-16 muestras el P95 es indicativo, no una medición robusta — una
+corrida más larga da un percentil más estable, pero agotaría la cuota
+diaria compartida con el resto del desarrollo y no aporta un número más
+honesto, sólo más impreciso mientras el resguardo interfiere. Tokens,
+llamadas e invocaciones RAG de la tabla principal usan sólo los 14 turnos
+limpios (Groq real), para no atribuirle a Groq consumo que en realidad
+sirvió el modelo local gratuito.
+
+**Latencia voz-a-voz** (definición exacta de la rúbrica: desde que el
+paciente termina de hablar hasta que empieza a sonar el audio del agente)
+está **instrumentada en vivo** en `/call` y `/knowledge` — aparece junto al
+micrófono durante la llamada apenas hay una muestra — pero STT y TTS corren
+enteramente en el navegador (Web Speech API), así que no hay forma de
+generar una muestra real sin una llamada real con micrófono. La cifra de
+esta tabla es el mejor proxy medible en el servidor (desde que llega
+`client.turn_text` hasta que se envía la respuesta) y no incluye tránsito
+de red del WebSocket ni el arranque real del motor de TTS del navegador.
 
 ## Tests y calidad
 

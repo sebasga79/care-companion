@@ -142,3 +142,61 @@ minimización, no un síntoma aislado. Queda documentado como limitación
 conocida: intentar una heurística de "tono minimizador" a dos días del
 plazo tiene más riesgo de introducir un falso positivo nuevo que beneficio
 de cerrar este único caso.
+
+### `capa1-groq-70b.json` — corrida corta, 2026-08-09, modelo actual
+
+Esta corrida existe por un motivo distinto a la de arriba: **el default de
+`api/.env`/`config.py` cambió de `llama-3.1-8b-instant` a
+`llama-3.3-70b-versatile` el 8 de agosto** (más capacidad por minuto, ver
+`docs/auditoria-kit-oficial-2026-08-07.md` §9.20-9.21), así que los números
+de la corrida de arriba ya no describen el modelo que el jurado va a
+ejercitar. La rúbrica es explícita sobre esto: *"lo que reportes se
+contrasta con lo que ocurre en la sesión de evaluación... reportar números
+que no se sostienen es peor que no reportarlos"* — así que hacía falta
+volver a medir, no reescribir la tabla vieja con el modelo nuevo de nombre.
+
+3 casos (1 rojo / 1 amarillo / 1 verde), 16 turnos, **deliberadamente corta**
+— no busca sensibilidad/especificidad estadísticamente sólida (para eso
+sigue vigente la corrida de 12 casos de arriba), busca únicamente refrescar
+latencia/tokens/costo contra el modelo real desplegado sin gastar los
+15-25 minutos de una corrida completa.
+
+| Métrica | Valor |
+|---|---|
+| Latencia P50 / P95 (14 turnos limpios, ver nota) | 3.782 ms / 5.139 ms |
+| Latencia P50 / P95 (16 turnos, cruda) | 4.044,6 ms / 13.984,6 ms |
+| Tokens por turno (limpio) | 3.590,7 entrada · 407,3 salida |
+| Invocaciones LLM / consultas RAG por turno (limpio) | 2,29 · 3,33/llamada |
+| Costo estimado por llamada (sólo tokens Groq) | US$0,0114 |
+
+**Hallazgo nuevo: la cuota diaria (TPD) de Groq, no sólo la de minuto
+(TPM), se agota con uso acumulado real.** A mitad del turno 5 del tercer
+caso, Groq empezó a responder 429 con
+`"Rate limit reached ... tokens per day (TPD): Limit 100000, Used 99659"`.
+El adapter (`OpenAICompatLLM` + `FallbackLLM`) hizo exactamente lo que debía
+—reintentar, agotar los reintentos, caer al resguardo local (Ollama)— y la
+conversación terminó sin caerse. Pero eso significa que los turnos 5 y 6 de
+ese caso no midieron a Groq: midieron reintentos 429 y la latencia del
+modelo local. Verificado por proveedor consultando directamente la tabla
+`events` (payload de cada `agent.*.completed` trae `provider`): de 36
+invocaciones a agentes en toda la corrida, 32 fueron `groq` y 3 `ollama`
+—las 3 últimas de la sesión `verde`, ni una antes—. La tabla de arriba
+separa ambos números en vez de promediarlos.
+
+**Consecuencia práctica para la sesión de evaluación del jurado:** el
+presupuesto diario de este modelo en el nivel gratuito (100.000 tokens) es
+compartido con todo el desarrollo/pruebas del día. Si el jurado agenda la
+sesión el mismo día que hubo desarrollo activo, existe riesgo real de
+toparse con el mismo 429→resguardo — el sistema no se cae (ese es
+justamente el propósito del resguardo), pero la voz suena con el modelo
+local, más lento. Mitigación simple y ya disponible: generar una API key de
+Groq nueva (cuota propia) para el día de la evaluación, o evaluar temprano
+en el día antes de que el desarrollo consuma cuota.
+
+**El único falso positivo de esta corrida** (`caso_tray_pac_42_00000_1`,
+`verde` → `DATA_INTEGRITY_FAILURE`) ocurrió en el turno 6, exactamente el
+turno servido por el resguardo local tras el agotamiento de cuota — no se
+cuenta como hallazgo de precisión del modelo primario sin volver a
+verificarlo con cuota Groq disponible. Con sólo 1 caso `verde` en la
+muestra tampoco alcanza para una lectura de especificidad; para eso sigue
+siendo autoridad la corrida de 12 casos de arriba.
