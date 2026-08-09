@@ -1094,13 +1094,22 @@ footer {
 
 .call-modal-panel {
   position: relative;
-  width: min(1180px, 100%);
+  /* Más ancho que antes: con la transcripción y el orbe lado a lado hay
+     dos columnas que alimentar dentro de la tarjeta de voz. */
+  width: min(1560px, 100%);
   margin: auto;
   padding: var(--space-6);
   border-radius: 20px;
   background: var(--surface, #fff);
   box-shadow: 0 24px 64px rgba(10, 26, 47, 0.28);
   animation: call-modal-rise 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* El panel NUNCA excede el viewport: si el contenido crece, scrollea
+     dentro del modal. Antes crecía sin límite y la llamada quedaba
+     cortada arriba y abajo. `dvh` y no `vh` por las barras del navegador
+     móvil, que en `vh` dejan el borde inferior fuera de pantalla. */
+  max-height: calc(100dvh - 2 * var(--space-6));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .call-modal-panel:focus {
@@ -1139,6 +1148,66 @@ footer {
 /* El modal ya aporta su propio margen superior. */
 .call-modal-panel .call-grid {
   margin-top: var(--space-5) !important;
+}
+
+/* ---------------------------------------------------------------------
+   Cuerpo de la tarjeta de voz: transcripción a la izquierda, escenario
+   (orbe + controles) a la derecha. Antes la transcripción iba DEBAJO del
+   orbe, así que la conversación —lo que de verdad se está mirando— sólo
+   aparecía tras hacer scroll, y el ancho quedaba desaprovechado.
+   ------------------------------------------------------------------- */
+
+.voice-card-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  gap: var(--space-5);
+  align-items: start;
+  margin-top: var(--space-4);
+}
+
+.voice-transcript {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.voice-transcript-title {
+  margin: 0;
+  font-size: 15px;
+}
+
+/* La transcripción crece hasta donde alcanza y luego scrollea sola, para
+   que los controles de la llamada nunca se salgan de la vista. */
+.voice-transcript .transcript {
+  max-height: min(46vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.voice-stage {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  /* El escenario acompaña el scroll de la transcripción en pantallas
+     altas, en vez de quedar arriba y dejar un hueco. */
+  position: sticky;
+  top: 0;
+}
+
+@media (max-width: 1100px) {
+  .voice-card-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* En una columna, el orbe y los controles van PRIMERO: son la acción. */
+  .voice-stage {
+    order: -1;
+    position: static;
+  }
+  .voice-transcript .transcript {
+    max-height: none;
+  }
 }
 
 @keyframes call-modal-fade {

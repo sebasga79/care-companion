@@ -533,6 +533,13 @@ export default function CallPage() {
             </span>
           </div>
 
+          <div className="voice-card-body">
+          <div className="voice-transcript">
+            <h2 className="voice-transcript-title">Transcripción</h2>
+            <TranscriptPanel turns={turns} patientAlias={patientAlias} />
+          </div>
+
+          <div className="voice-stage">
           <VoiceOrb
             state={displayVoiceState}
             micEnabled={voice.listening}
@@ -607,8 +614,8 @@ export default function CallPage() {
             </form>
           ) : null}
 
-          <h2 style={{ marginTop: 24, marginBottom: 12, fontSize: 15 }}>Transcripción</h2>
-          <TranscriptPanel turns={turns} patientAlias={patientAlias} />
+          </div>
+          </div>
         </section>
 
         <aside className="clinical-rail" aria-label="Supervisión clínica">
