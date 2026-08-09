@@ -1471,3 +1471,29 @@ la referencia al nombre interno del agente, no sólo se traduce); "el handoff co
 más coincidencias.
 
 tsc + eslint limpios, build de Next OK, verificado en el contenedor reconstruido.
+
+## 9.29 Rediseño de la fila superior de /knowledge: texto invisible + jerarquía pedida
+
+Causa del texto blanco ilegible reportado en vivo, confirmada leyendo el CSS servido: el
+`.topbar` de navegación es `position: sticky; top: 0; backdrop-filter: blur(18px)` (efecto
+vidrio esmerilado, ya existía antes de esta sesión). La tarjeta `.knowledge-cta` del diseño
+anterior (§9.24) quedaba como el primer elemento de la página, pegada al borde superior, y
+el desenfoque del header caía directamente sobre su texto.
+
+En vez de solo corregir el solape, se rediseñó por completo según lo pedido:
+- La sección "Cargar guía clínica" pasa a ser el PRIMER elemento de la página, con más
+  jerarquía visual que las tarjetas informativas (borde de color de marca + sombra propia,
+  no `.card` genérica) — antes vivía a mitad de página, en un `two-col` junto a "Versión
+  activa".
+- El botón de llamada de prueba es ahora independiente: su propia tarjeta
+  (`.knowledge-call-fab-card`), hermana de la de carga dentro de `.knowledge-top-row`, no
+  anidada dentro de ella.
+- El botón es redondo y reutiliza el ícono exacto de `VoiceOrb` (`.mic-button`/
+  `.mic-symbol`, mismas medidas y colores) en vez de un ícono nuevo — es el mismo símbolo
+  de "llamada" en toda la app.
+- "Versión activa" queda sola donde antes compartía el `two-col` con "Cargar" — ya no
+  fuerza dos columnas con un solo elemento.
+
+tsc + eslint limpios, build de Next OK, verificado que las clases nuevas llegan al bundle
+CSS servido por el contenedor reconstruido. 409 passed / 3 skipped (sin cambios de
+backend).

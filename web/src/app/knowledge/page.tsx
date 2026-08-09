@@ -377,107 +377,20 @@ export default function KnowledgePage() {
         {liveMessage}
       </p>
 
-      {/* Jerarquía deliberada (pedido explícito del usuario): esta es la
-          ÚNICA acción de la página — todo lo demás (hero, pasos, versión,
-          inventario) es informativo. Antes usaba `.voice-preview-btn`, el
-          mismo botón secundario y gris de "Hablar por voz"/"Detener voz":
-          visualmente no se distinguía de un control menor. Va primero en
-          la página, con color de marca sólido y un botón grande — nada
-          compite con ella por atención.
+      {/* Jerarquía deliberada (pedido explícito del usuario, dos rondas):
+          cargar un documento es LA acción principal de la página — va
+          primero, arriba de todo, con más peso visual que el hero
+          informativo que sigue. La llamada de prueba es independiente
+          (no vive dentro de la tarjeta de carga): un botón redondo con
+          el mismo ícono de micrófono que ya usa `VoiceOrb` en la llamada
+          real (`.mic-button`/`.mic-symbol`), no un ícono nuevo inventado.
           "Recuperar" (paso 2, más abajo) consulta el índice directo, no
           pasa por un agente conversando — es la prueba canaria del propio
           sistema. Esto es distinto y complementario: una llamada real,
           con el agente de voz completo, sin el selector de 160 pacientes
           de `/call` ni su historial longitudinal. */}
-      {demoCases.length > 0 ? (
-        <div className="knowledge-cta">
-          <div className="knowledge-cta-copy">
-            <p className="knowledge-cta-eyebrow">Verificación en vivo</p>
-            <h2>Prueba lo que acabas de subir en una llamada real</h2>
-            <p className="knowledge-cta-detail">
-              Abre una llamada con un paciente de prueba (sin historial previo) y pregunta algo
-              que sólo el documento recién cargado respondería.
-            </p>
-          </div>
-          <button type="button" className="knowledge-cta-btn" onClick={startTestCall}>
-            <span className="knowledge-cta-btn-icon" aria-hidden="true">
-              ☎
-            </span>
-            Probar en una llamada
-          </button>
-        </div>
-      ) : null}
-
-      <div className="view-hero card">
-        <div>
-          <p className="eyebrow">Base clínica versionada</p>
-          <h1 id="knowledge-heading">Evidencia que el agente puede aprender y olvidar</h1>
-          <p>
-            Aquí se administra la evidencia que fundamenta las respuestas. El corpus oficial
-            permanece protegido; los evaluadores pueden cargar una guía de prueba, recuperarla
-            y eliminarla sin reiniciar el sistema.
-          </p>
-        </div>
-        <div className="hero-actions">
-          <span className="chip chip-simulation">
-            {officialCount} guías oficiales protegidas · {testCount} de prueba
-          </span>
-          <span className="chip chip-info">
-            Versión de conocimiento: {knowledgeVersion !== null ? `v${knowledgeVersion}` : "…"}
-          </span>
-        </div>
-      </div>
-
-      {/* Cada paso lleva a donde de verdad se hace esa acción — antes era
-          puramente decorativo: decía "Olvidar" pero no había forma de
-          saber dónde ocurría eso sin explicarlo aparte (hallazgo real del
-          usuario: "ahí dice olvidar, pero dónde?"). */}
-      <ol className="knowledge-steps" aria-label="Recorrido de evaluación de la base clínica">
-        <li data-done={Boolean(uploadNote)}>
-          <button type="button" onClick={() => jumpToStep("upload-heading")}>
-            <span>1</span>
-            <div><strong>Cargar</strong><small>Agrega una guía de prueba</small></div>
-          </button>
-        </li>
-        <li data-done={Boolean(searchResult?.results.length)}>
-          <button type="button" onClick={() => jumpToStep("verify-heading")}>
-            <span>2</span>
-            <div><strong>Recuperar</strong><small>Confirma que el agente la encuentra</small></div>
-          </button>
-        </li>
-        <li data-done={Boolean(canaryNote?.includes("negativa ejecutada"))}>
-          <button type="button" onClick={() => jumpToStep("documents-heading")}>
-            <span>3</span>
-            <div><strong>Olvidar</strong><small>Elimina la prueba y verifica el índice</small></div>
-          </button>
-        </li>
-      </ol>
-
-      {listError ? <StatusBanner message={listError} onRetry={reloadInventory} /> : null}
-
-      <div className="two-col knowledge-overview">
-        <section className="card card-pad" aria-labelledby="version-heading">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Versión activa</p>
-              <h2 id="version-heading">
-                {listLoading
-                  ? "Consultando el servidor…"
-                  : knowledgeVersion !== null
-                    ? `Versión de conocimiento v${knowledgeVersion}`
-                    : "Sin conexión al servidor"}
-              </h2>
-            </div>
-            {knowledgeVersion !== null ? <span className="status-orbit">v{knowledgeVersion}</span> : null}
-          </div>
-          <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>
-            {knowledgeVersion !== null
-              ? `${activeDocuments.length} documentos activos: ${officialCount} oficiales protegidos y ${testCount} de prueba. Los borrados quedan como trazabilidad.`
-              : "El inventario de conocimiento (documentos, versión y prueba canaria) aparecerá aquí cuando el servidor esté disponible."}
-          </p>
-        </section>
-
-        <section className="card card-pad" aria-labelledby="upload-heading">
+      <div className="knowledge-top-row">
+        <section className="card card-pad knowledge-upload-card" aria-labelledby="upload-heading">
           <div className="section-heading">
             <div>
               <p className="eyebrow">Ingesta</p>
@@ -561,7 +474,92 @@ export default function KnowledgePage() {
             ) : null}
           </form>
         </section>
+
+        {demoCases.length > 0 ? (
+          <div className="knowledge-call-fab-card">
+            <button
+              type="button"
+              className="knowledge-call-fab"
+              onClick={startTestCall}
+              aria-label="Probar en una llamada real lo que acabas de subir"
+            >
+              <span className="mic-symbol" aria-hidden="true" />
+            </button>
+            <p className="knowledge-call-fab-label">
+              <strong>Probar en una llamada</strong>
+              Verifica lo que acabas de subir, sin historial previo.
+            </p>
+          </div>
+        ) : null}
       </div>
+
+      <div className="view-hero card">
+        <div>
+          <p className="eyebrow">Base clínica versionada</p>
+          <h1 id="knowledge-heading">Evidencia que el agente puede aprender y olvidar</h1>
+          <p>
+            Aquí se administra la evidencia que fundamenta las respuestas. El corpus oficial
+            permanece protegido; los evaluadores pueden cargar una guía de prueba, recuperarla
+            y eliminarla sin reiniciar el sistema.
+          </p>
+        </div>
+        <div className="hero-actions">
+          <span className="chip chip-simulation">
+            {officialCount} guías oficiales protegidas · {testCount} de prueba
+          </span>
+          <span className="chip chip-info">
+            Versión de conocimiento: {knowledgeVersion !== null ? `v${knowledgeVersion}` : "…"}
+          </span>
+        </div>
+      </div>
+
+      {/* Cada paso lleva a donde de verdad se hace esa acción — antes era
+          puramente decorativo: decía "Olvidar" pero no había forma de
+          saber dónde ocurría eso sin explicarlo aparte (hallazgo real del
+          usuario: "ahí dice olvidar, pero dónde?"). */}
+      <ol className="knowledge-steps" aria-label="Recorrido de evaluación de la base clínica">
+        <li data-done={Boolean(uploadNote)}>
+          <button type="button" onClick={() => jumpToStep("upload-heading")}>
+            <span>1</span>
+            <div><strong>Cargar</strong><small>Agrega una guía de prueba</small></div>
+          </button>
+        </li>
+        <li data-done={Boolean(searchResult?.results.length)}>
+          <button type="button" onClick={() => jumpToStep("verify-heading")}>
+            <span>2</span>
+            <div><strong>Recuperar</strong><small>Confirma que el agente la encuentra</small></div>
+          </button>
+        </li>
+        <li data-done={Boolean(canaryNote?.includes("negativa ejecutada"))}>
+          <button type="button" onClick={() => jumpToStep("documents-heading")}>
+            <span>3</span>
+            <div><strong>Olvidar</strong><small>Elimina la prueba y verifica el índice</small></div>
+          </button>
+        </li>
+      </ol>
+
+      {listError ? <StatusBanner message={listError} onRetry={reloadInventory} /> : null}
+
+      <section className="card card-pad" aria-labelledby="version-heading" style={{ marginBottom: 24 }}>
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Versión activa</p>
+              <h2 id="version-heading">
+                {listLoading
+                  ? "Consultando el servidor…"
+                  : knowledgeVersion !== null
+                    ? `Versión de conocimiento v${knowledgeVersion}`
+                    : "Sin conexión al servidor"}
+              </h2>
+            </div>
+            {knowledgeVersion !== null ? <span className="status-orbit">v{knowledgeVersion}</span> : null}
+          </div>
+          <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>
+            {knowledgeVersion !== null
+              ? `${activeDocuments.length} documentos activos: ${officialCount} oficiales protegidos y ${testCount} de prueba. Los borrados quedan como trazabilidad.`
+              : "El inventario de conocimiento (documentos, versión y prueba canaria) aparecerá aquí cuando el servidor esté disponible."}
+          </p>
+      </section>
 
       <section className="card card-pad" aria-labelledby="documents-heading" style={{ marginBottom: 24 }}>
         <div className="section-heading">

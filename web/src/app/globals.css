@@ -1746,99 +1746,110 @@ footer {
    ------------------------------------------------------------------- */
 
 /* ---------------------------------------------------------------------
-   CTA de "Probar en una llamada" (/knowledge) — jerarquía deliberada:
-   es la ÚNICA acción de la página, todo lo demás es informativo. Fondo
-   de marca sólido + botón grande para que nada compita con ella por
-   atención; antes usaba el mismo botón gris y pequeño de un control
-   secundario ("Hablar por voz") y se perdía entre tarjetas informativas.
+   Fila superior de /knowledge (rediseño, pedido explícito del usuario,
+   segunda ronda): la carga de guía es LA acción principal de la página —
+   va primero, arriba de todo, con más jerarquía que el hero informativo
+   que sigue. La llamada de prueba es INDEPENDIENTE — su propia tarjeta,
+   no vive dentro de la de carga — con un botón redondo que reusa el
+   mismo ícono de micrófono de `VoiceOrb` (`.mic-button`/`.mic-symbol`)
+   en vez de un ícono nuevo inventado.
+
+   Versión anterior descartada: una barra ancha con fondo en gradiente y
+   texto blanco que, pegada al borde superior de la página, quedaba
+   debajo del `.topbar` (`position: sticky` + `backdrop-filter: blur
+   (18px)`) — el desenfoque del header caía sobre el texto y lo volvía
+   casi ilegible. Esta versión no depende de estar pegada al borde: tiene
+   su propio fondo sólido y suficiente margen para no solaparse.
    ------------------------------------------------------------------- */
 
-.knowledge-cta {
+.knowledge-top-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  align-items: stretch;
   gap: var(--space-5);
-  padding: var(--space-6) var(--space-7, 32px);
   margin-bottom: var(--space-6);
-  border-radius: 20px;
-  background: linear-gradient(135deg, var(--blue-deep), var(--aqua-deep));
-  box-shadow: 0 16px 40px rgba(8, 122, 128, 0.28);
 }
 
-.knowledge-cta-copy {
-  max-width: 640px;
+.knowledge-upload-card {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Más peso visual que el resto de tarjetas informativas de la página:
+     borde de marca + sombra propia, no sólo `.card` genérica. */
+  border: 2px solid var(--aqua-deep);
+  box-shadow: 0 14px 32px rgba(8, 122, 128, 0.16);
 }
 
-.knowledge-cta-eyebrow {
-  margin: 0 0 6px;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.75);
+.knowledge-upload-card .eyebrow {
+  color: var(--aqua-deep);
 }
 
-.knowledge-cta h2 {
-  margin: 0;
-  font-size: 24px;
-  line-height: 1.25;
-  color: #fff;
+.knowledge-upload-card h2 {
+  font-size: 22px;
 }
 
-.knowledge-cta-detail {
-  margin: 10px 0 0;
-  font-size: 14px;
-  line-height: 1.55;
-  color: rgba(255, 255, 255, 0.88);
-}
-
-.knowledge-cta-btn {
-  display: inline-flex;
+.knowledge-call-fab-card {
+  display: flex;
+  flex: 0 0 220px;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  flex: 0 0 auto;
-  padding: 16px 30px;
-  border: 0;
-  border-radius: 999px;
-  background: #fff;
-  color: var(--blue-deep);
-  font-size: 16px;
-  font-weight: 800;
-  white-space: nowrap;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg, 20px);
+  background: var(--aqua-soft);
+  text-align: center;
+}
+
+/* Mismas medidas/colores que `.mic-button` de VoiceOrb — es a propósito
+   el mismo ícono de "llamada" en toda la app, no uno nuevo. */
+.knowledge-call-fab {
+  display: grid;
+  width: 76px;
+  height: 76px;
+  place-items: center;
+  border: 5px solid white;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #ffffff, #eef9fa);
+  box-shadow: 0 0 0 2px rgba(34, 184, 188, 0.28), 0 12px 30px rgba(12, 116, 130, 0.14);
   cursor: pointer;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
-  transition: transform var(--motion-fast, 120ms ease), box-shadow var(--motion-fast, 120ms ease);
+  transition: transform var(--motion-fast, 120ms ease);
 }
 
-.knowledge-cta-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+.knowledge-call-fab:hover {
+  transform: translateY(-2px);
 }
 
-.knowledge-cta-btn:focus-visible {
-  outline: 3px solid #fff;
+.knowledge-call-fab:focus-visible {
+  outline: 3px solid var(--aqua-deep);
   outline-offset: 3px;
 }
 
-.knowledge-cta-btn-icon {
-  font-size: 18px;
+.knowledge-call-fab-label {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.knowledge-call-fab-label strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+@media (max-width: 860px) {
+  .knowledge-top-row {
+    flex-direction: column;
+  }
+  .knowledge-call-fab-card {
+    flex-basis: auto;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .knowledge-cta-btn {
+  .knowledge-call-fab {
     transition: none;
-  }
-}
-
-@media (max-width: 720px) {
-  .knowledge-cta {
-    flex-direction: column;
-    align-items: stretch;
-    padding: var(--space-5);
-  }
-  .knowledge-cta-btn {
-    justify-content: center;
   }
 }
 
