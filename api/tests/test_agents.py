@@ -570,6 +570,119 @@ async def test_response_agent_grounded_prompt_never_leaks_into_abstain_or_handof
     assert "contenido oculto" not in sent_prompt
 
 
+async def test_response_agent_forbids_echoing_the_patients_own_question() -> None:
+    """Bug real visto en vivo (auditoría §9.25): el paciente preguntó
+    "dónde puedo conseguir este parche" y el agente respondió "¿Cuál es la
+    fuente de donde se puede obtener este parche...?" — le devolvió su
+    propia pregunta reformulada, tres turnos seguidos, incluso después de
+    que el paciente lo corrigiera explícitamente ("eso es lo que le estoy
+    preguntando a usted"). El system prompt debe prohibir esto de forma
+    explícita, no sólo describir cómo formular una siguiente pregunta."""
+    llm = ScriptedFakeLLM(default="respuesta")
+    agent = ResponseAgent(llm)
+    await agent.run(
+        _request(
+            ResponseTurnInput(
+                evidence_sufficient=True,
+                should_escalate=False,
+                evidence_fragments=[
+                    {
+                        "title": "Programa Cicatriz Segura",
+                        "text": "aplicar el parche desde el día 21",
+                        "citation_id": "c1",
+                        "document_id": "d1",
+                        "document_version": 1,
+                        "chunk_id": "ch1",
+                        "knowledge_version": 1,
+                    }
+                ],
+                patient_question_or_context="¿dónde puedo conseguir este parche?",
+            ).model_dump()
+        )
+    )
+    system_prompt = llm.calls[-1][0].content
+    assert "no es responder, es un eco" in system_prompt.lower()
+
+
+async def test_response_agent_grounded_instructions_cover_partial_evidence_gap() -> None:
+    """Cuando el tema general sí tiene evidencia pero el dato PUNTUAL
+    preguntado no está en los fragmentos (p. ej. dónde comprar algo), el
+    prompt debe instruir a afirmar lo soportado y admitir honestamente el
+    vacío específico — no tratarlo como abstención total ni inventar una
+    pregunta de vuelta."""
+    llm = ScriptedFakeLLM(default="respuesta")
+    agent = ResponseAgent(llm)
+    await agent.run(
+        _request(
+            ResponseTurnInput(
+                evidence_sufficient=True,
+                should_escalate=False,
+                evidence_fragments=[
+                    {
+                        "title": "Guía",
+                        "text": "dato general",
+                        "citation_id": "c1",
+                        "document_id": "d1",
+                        "document_version": 1,
+                        "chunk_id": "ch1",
+                        "knowledge_version": 1,
+                    }
+                ],
+                patient_question_or_context="¿cuánto cuesta?",
+            ).model_dump()
+        )
+    )
+    system_prompt = llm.calls[-1][0].content
+    assert "dato puntual" in system_prompt.lower()
+    assert "no cuentas con esa información específica" in system_prompt.lower()
+
+
+async def test_response_agent_does_not_force_a_closing_question_without_one() -> None:
+    """Segunda causa raíz del mismo bug: el system prompt anterior ordenaba
+    "conducir la llamada" sin excepción, empujando al modelo a inventar una
+    pregunta de cierre incluso sin checklist pendiente ni siguiente
+    pregunta real. Ahora debe decir explícitamente que está bien no
+    preguntar nada si no hay una pregunta real que hacer."""
+    llm = ScriptedFakeLLM(default="respuesta")
+    agent = ResponseAgent(llm)
+    await agent.run(
+        _request(
+            ResponseTurnInput(
+                evidence_sufficient=True,
+                should_escalate=False,
+                evidence_fragments=[],
+                patient_question_or_context="gracias, eso era todo",
+                next_question=None,
+            ).model_dump()
+        )
+    )
+    system_prompt = llm.calls[-1][0].content
+    assert "no inventes una pregunta de cierre" in system_prompt.lower()
+
+
+async def test_response_agent_still_asks_the_real_next_question_when_present() -> None:
+    """Contrapeso obligatorio: las dos instrucciones nuevas (no forzar
+    cierre, no hacer eco) NO deben apagar el mecanismo real de conducir la
+    entrevista cuando SÍ hay una siguiente pregunta legítima del
+    checklist — sigue siendo la forma en que el agente recolecta
+    información en las llamadas con pacientes reales."""
+    llm = ScriptedFakeLLM(default="respuesta")
+    agent = ResponseAgent(llm)
+    await agent.run(
+        _request(
+            ResponseTurnInput(
+                evidence_sufficient=False,
+                should_escalate=False,
+                patient_question_or_context="me siento mejor",
+                next_question="¿Ha tenido fiebre o sensación de calor?",
+            ).model_dump()
+        )
+    )
+    user_message = llm.calls[-1][-1].content
+    assert "## SIGUIENTE PREGUNTA DEL SEGUIMIENTO" in user_message
+    assert "¿Ha tenido fiebre o sensación de calor?" in user_message
+
+
 async def test_response_agent_tells_model_not_to_greet_again_mid_call() -> None:
     """Bug real visto en vivo (auditoría §9.23): a mitad de una llamada ya
     abierta, el modelo volvía a saludar ("¡Hola Camila!", "es un gusto

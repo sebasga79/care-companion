@@ -1321,3 +1321,63 @@ que se ve, no una tarjeta más entre el resumen de versión y el formulario de c
 
 tsc + eslint limpios, build de Next OK, verificado que la clase nueva llega al bundle CSS
 servido por el contenedor reconstruido.
+
+## 9.25 El agente devolvía la pregunta del paciente como si fuera propia
+
+Hallazgo en vivo: ante "¿dónde puedo conseguir este parche?", el agente respondía "¿Cuál
+es la fuente de donde se puede obtener este parche...?" — un eco, no una respuesta. Pasó
+tres veces seguidas, incluso después de que el paciente lo corrigiera explícitamente
+("eso es lo que le estoy preguntando a usted").
+
+Causa raíz (dos mecanismos del prompt en tensión, ver `app/agents/response.py`):
+`evidence_sufficient` se calcula a nivel de TEMA (¿se recuperó algo relevante?), no de
+DATO PUNTUAL (¿la evidencia responde exactamente lo preguntado?) — el documento cubre el
+protocolo del parche pero no dónde comprarlo, así que el sistema entra en modo
+`grounded_answer` sin instrucción para el caso "tema cubierto, dato puntual ausente". Y el
+system prompt ordenaba incondicionalmente "conduce la llamada... cierra con una pregunta"
+— sin una pregunta real que ofrecer, el modelo resolvía la tensión fabricando una a partir
+de la del paciente.
+
+Fix de dos capas (sólo prompt, sin código de dominio — el problema es abierto, no
+enumerable):
+1. `_GROUNDED_INSTRUCTIONS` gana una sección explícita para evidencia parcial: afirmar lo
+   soportado, admitir el vacío puntual con claridad, redirigir a farmacia/equipo médico —
+   sin tratarlo como abstención total.
+2. `_BASE_SYSTEM_PROMPT` deja de exigir cerrar con pregunta sin excepción, y prohíbe
+   explícitamente devolver la pregunta del paciente reformulada, con el ejemplo exacto del
+   bug real como caso ilustrativo.
+
+Verificación honesta, con un tropiezo real en el camino: la primera prueba en vivo (misma
+transcripción, 3 turnos) dio un mensaje corrupto ("autoadheóso", "aplicaÁrse") que parecía
+peor que el bug original. Investigado antes de reportar nada: los eventos mostraban
+`provider: ollama, model: llama3.2:3b` en LOS TRES turnos — Groq daba 429 en cada llamada
+de esa sesión (confirmado en logs del contenedor), así que la prueba completa corrió sobre
+el resguardo local, no sobre el modelo que se acababa de cambiar. La corrupción es
+calidad del modelo de 3B, no una regresión del fix.
+
+Hallazgo aparte, real e importante: **el 70B tiene una cuota diaria (TPD) mucho menor que
+el 8B** — 100.000 tokens/día contra 500.000 — y las pruebas de la sesión ya la habían
+consumido casi entera (99.274/100.000) en el momento del intento. Con ~1.500-2.000 tokens
+por turno × 3 agentes, 100k TPD alcanza para apenas 15-20 turnos de prueba al día. Esto no
+estaba considerado cuando se decidió el cambio a 70B (auditoría, sección anterior) — sólo
+se verificó el límite por minuto (12.000 TPM, mejor que el 8B), no el diario (peor).
+
+Verificación real, aislando sólo lo que cambió: en vez de una conversación completa (9
+llamadas LLM: interview+triage+response × 3 turnos, todas compitiendo por la misma cuota
+ya agotada), se invocó `ResponseAgent.run()` directo contra Groq real con el escenario
+exacto (evidencia sobre el parche, pregunta "dónde lo consigo") — 1 sola llamada. Esperó
+~1 min a que la ventana de cuota liberara margen (mensaje 429 con "Please try again in
+51.84s", confirmando de nuevo el comportamiento de ventana móvil de sesiones anteriores).
+Resultado, confirmado `provider=groq model=llama-3.3-70b-versatile`:
+
+> "...no tengo información específica sobre dónde comprarlo. Te sugiero consultar con tu
+> farmacia o tu equipo médico... ¿Has hablado con tu equipo médico sobre este tema?"
+
+Sin eco. Afirma lo soportado, admite el vacío puntual, redirige. Cierra con una pregunta
+pese a `next_question=None` — no cumple la instrucción 2 al pie de la letra, pero esa
+pregunta de cierre es genuinamente nueva (no repite la del paciente), así que no es el
+patrón que se estaba corrigiendo; se documenta como imperfección conocida, no como falla.
+
+Cuatro tests nuevos en `test_agents.py`, incluido el contrapeso obligatorio (con
+`next_question` real presente, el mecanismo de conducir la entrevista sigue intacto).
+407 passed / 3 skipped, ruff verde.
