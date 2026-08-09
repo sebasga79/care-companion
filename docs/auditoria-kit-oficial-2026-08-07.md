@@ -1381,3 +1381,20 @@ patrón que se estaba corrigiendo; se documenta como imperfección conocida, no 
 Cuatro tests nuevos en `test_agents.py`, incluido el contrapeso obligatorio (con
 `next_question` real presente, el mecanismo de conducir la entrevista sigue intacto).
 407 passed / 3 skipped, ruff verde.
+
+## 9.26 El recorrido de pasos de /knowledge era decorativo, no navegable
+
+Hallazgo del usuario: el tracker "1 Cargar → 2 Recuperar → 3 Olvidar" dice qué hacer pero
+no dónde — "ahí dice olvidar, pero dónde?". Para un jurado siguiendo el recorrido sin guía,
+eso es fricción real: tendría que buscar por su cuenta la tabla de documentos y encontrar
+el botón de eliminar.
+
+Cada `<li>` del tracker pasa a ser un botón (`jumpToStep`) que hace scroll suave hasta la
+sección real donde ocurre esa acción (`upload-heading` / `verify-heading` /
+`documents-heading`, los tres `id` ya existentes de las secciones correspondientes) y la
+resalta 2 s con un aro de color (`prefers-reduced-motion` cae a un outline fijo sin
+animación). Cero endpoints nuevos — sólo navegación dentro de la página que ya tenía todo
+lo necesario.
+
+tsc + eslint limpios, build de Next OK, verificado que el CSS nuevo llega al bundle
+servido por el contenedor reconstruido.

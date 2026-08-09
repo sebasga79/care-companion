@@ -1897,13 +1897,38 @@ footer {
 }
 
 .knowledge-steps li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 14px 16px;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: white;
+  overflow: hidden;
+}
+
+/* Cada paso es clickeable — lleva a donde de verdad ocurre esa acción
+   (`jumpToStep` en knowledge/page.tsx). Antes el <li> sólo describía el
+   paso sin decir dónde ejecutarlo. */
+.knowledge-steps li > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--motion-fast, 120ms ease);
+}
+
+.knowledge-steps li > button:hover {
+  background: var(--blue-soft);
+}
+
+.knowledge-steps li > button:focus-visible {
+  outline: 2px solid var(--aqua-deep);
+  outline-offset: -2px;
 }
 
 .knowledge-steps li > span {
@@ -1916,6 +1941,24 @@ footer {
   background: var(--blue-soft);
   color: var(--blue);
   font-weight: 900;
+}
+
+/* Resalte temporal al saltar desde el recorrido de pasos (2s, luego se
+   quita solo — ver `jumpToStep`). */
+.step-target-highlight {
+  animation: step-target-flash 2s ease-out;
+}
+
+@keyframes step-target-flash {
+  0% { box-shadow: 0 0 0 4px var(--aqua-deep); }
+  100% { box-shadow: 0 0 0 4px rgba(8, 122, 128, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-target-highlight {
+    animation: none;
+    outline: 3px solid var(--aqua-deep);
+  }
 }
 
 .knowledge-steps li[data-done="true"] > span {

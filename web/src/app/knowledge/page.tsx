@@ -145,6 +145,19 @@ export default function KnowledgePage() {
     if (demoCases.length > 0) setActiveCallCase(demoCases[0]);
   }, [demoCases]);
 
+  // Cada paso del recorrido (1/2/3) lleva aquí en vez de ser puramente
+  // descriptivo. Además del scroll, un resalte breve marca la tarjeta
+  // destino — sin eso, "Olvidar" seguía sin decir DÓNDE mirar dentro de
+  // una página larga.
+  const jumpToStep = useCallback((headingId: string) => {
+    const heading = document.getElementById(headingId);
+    const target = heading?.closest("section") ?? heading;
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("step-target-highlight");
+    window.setTimeout(() => target.classList.remove("step-target-highlight"), 2000);
+  }, []);
+
   const activeDocuments = documents.filter((doc) => doc.status !== "deleted");
   const officialCount = activeDocuments.filter((doc) => doc.protected).length;
   const testCount = activeDocuments.filter((doc) => !doc.protected).length;
@@ -406,18 +419,28 @@ export default function KnowledgePage() {
         </div>
       </div>
 
+      {/* Cada paso lleva a donde de verdad se hace esa acción — antes era
+          puramente decorativo: decía "Olvidar" pero no había forma de
+          saber dónde ocurría eso sin explicarlo aparte (hallazgo real del
+          usuario: "ahí dice olvidar, pero dónde?"). */}
       <ol className="knowledge-steps" aria-label="Recorrido de evaluación de la base clínica">
         <li data-done={Boolean(uploadNote)}>
-          <span>1</span>
-          <div><strong>Cargar</strong><small>Agrega una guía de prueba</small></div>
+          <button type="button" onClick={() => jumpToStep("upload-heading")}>
+            <span>1</span>
+            <div><strong>Cargar</strong><small>Agrega una guía de prueba</small></div>
+          </button>
         </li>
         <li data-done={Boolean(searchResult?.results.length)}>
-          <span>2</span>
-          <div><strong>Recuperar</strong><small>Confirma que el agente la encuentra</small></div>
+          <button type="button" onClick={() => jumpToStep("verify-heading")}>
+            <span>2</span>
+            <div><strong>Recuperar</strong><small>Confirma que el agente la encuentra</small></div>
+          </button>
         </li>
         <li data-done={Boolean(canaryNote?.includes("negativa ejecutada"))}>
-          <span>3</span>
-          <div><strong>Olvidar</strong><small>Elimina la prueba y verifica el índice</small></div>
+          <button type="button" onClick={() => jumpToStep("documents-heading")}>
+            <span>3</span>
+            <div><strong>Olvidar</strong><small>Elimina la prueba y verifica el índice</small></div>
+          </button>
         </li>
       </ol>
 
