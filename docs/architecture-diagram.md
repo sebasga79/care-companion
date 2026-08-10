@@ -5,9 +5,9 @@
 > corre hoy**, no la propuesta previa al kit.
 
 Reconstruido sobre v1.0 (24 de julio, previo al kit oficial): esa versión
-mostraba `LLMPort → FakeLLM`, `EmbeddingsPort → Fake` y
-`ChallengeCasePort → Fixture (Delta Share en T0)` — ninguno de los tres
-existe hoy (nunca hubo Delta Share; el kit real trae `.xlsx` + PDFs). Con la
+mostraba un LLM simulado y `ChallengeCasePort → Fixture (Delta Share en T0)`.
+Ninguno es seleccionable en el runtime actual (los dobles permanecen solo en
+tests); nunca hubo Delta Share y el kit real trae `.xlsx` + PDFs. Con la
 rúbrica evaluando el diagrama tomando piezas al azar y buscándolas en el
 código (criterio "Comprensión del problema y diseño de la conversación"),
 un diagrama desalineado con el repositorio es peor que no tenerlo. Esta
@@ -19,7 +19,7 @@ versión refleja los adapters reales, agrega la ruta de auditoría/métricas
 ```mermaid
 flowchart TB
     subgraph Browser["Navegador (Next.js / React)"]
-        CALL["/call\nselector de 160 pacientes reales"]
+        CALL["/call\n40 pacientes · 160 episodios históricos"]
         KNOW["/knowledge\nconocimiento vivo + llamada de prueba"]
         AUDIT["/audit\ntraza, decisiones y métricas rúbrica §5"]
         MODAL["CallModal\ncompartido por /call y /knowledge"]
@@ -45,8 +45,8 @@ flowchart TB
 
     subgraph PORTS["Puertos / adaptadores"]
         LLM["LLMPort\nOpenAICompatLLM → Groq llama-3.3-70b-versatile\nenvuelto en FallbackLLM → Ollama llama3.2:3b"]
-        EMB["EmbeddingsPort\nOpenAICompatEmbeddings → Ollama BGE-M3 (1024-dim)"]
-        CASE["ChallengeCasePort\nCombinedCaseAdapter =\nDatasetCaseAdapter (160 episodios/40 pacientes reales)\n+ FixtureCaseAdapter (4 casos sintéticos de prueba)"]
+        EMB["EmbeddingsPort\nLocalHashEmbeddings (arranque reproducible)\no OpenAICompatEmbeddings → Ollama BGE-M3"]
+        CASE["ChallengeCasePort\nCombinedCaseAdapter =\nDatasetCaseAdapter (160 episodios/40 pacientes sintéticos del kit)\n+ FixtureCaseAdapter (4 casos sintéticos de prueba)"]
     end
 
     DB[("SQLite WAL\nsessions·turns·events·documents·chunks\ncitations·observations·decisions\nescalations·followup_records")]

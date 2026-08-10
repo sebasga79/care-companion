@@ -27,6 +27,7 @@ _LLM_CALL_EVENT_TYPES = (
     "agent.triage.completed",
     "agent.response.completed",
 )
+_REAL_LLM_PROVIDERS = frozenset({"groq", "ollama"})
 
 
 def _percentile_stats(values: list[float]) -> dict[str, float | None]:
@@ -258,46 +259,74 @@ class AuditRepository:
             ]
         return _percentile_stats(values)
 
-    def usage_summary(self) -> dict[str, Any]:
+    def usage_summary(
+        self, *, provider_filter: str | None = None, model_filter: str | None = None
+    ) -> dict[str, Any]:
         """Agrega tokens/invocaciones LLM/consultas RAG desde `events`
         (rúbrica §5: "tokens de entrada y salida por turno y por llamada,
         invocaciones al modelo por turno, consultas al RAG por llamada").
 
-        Cada `agent.*.completed` ya trae `usage.model_dump()` como payload
-        (`app/orchestrator/call_cycle.py`), incluido `provider` — clave para
-        `by_provider` (ver abajo). Cada `rag.retrieval.completed` se loguea
-        una vez por turno. Ninguna cifra se inventa: si no hay eventos
-        instrumentados todavía (p. ej. `LLM_PROVIDER=fake` recién arrancado
-        sin sesiones), se devuelve `sample_size=0` y el caller reporta
-        "pendiente" — mismo patrón que `latency_percentiles`.
+        El universo es deliberadamente estricto: sesiones cerradas que
+        contienen al menos una invocación de un proveedor real permitido.
+        Sesiones abiertas, pruebas antiguas y eventos sin proveedor/modelo
+        verificable no entran en tokens, RAG ni denominadores por llamada.
 
-        `by_provider`: desglose de tokens por proveedor real de cada
-        llamada (`groq`, `ollama`, ...). Existe porque `FallbackLLM` puede
-        degradar una llamada individual al resguardo local sin que la
-        sesión se entere — un caso real, no hipotético: durante la corrida
-        de benchmark del 9 de agosto, la cuota diaria de Groq se agotó a
-        mitad de una conversación y 3 de 36 invocaciones cayeron a Ollama
-        (gratis). Sin este desglose, `_cost_metric` habría cobrado precio
-        de Groq por tokens que en realidad sirvió gratis el modelo local —
-        exactamente el tipo de número que "no se sostiene" que la rúbrica
-        penaliza. `input_tokens_total`/`output_tokens_total` siguen siendo
-        el total real (incluye resguardo) para las cifras de consumo; sólo
-        el costo debe mirar `by_provider`."""
+        Cuando se indican filtros, tokens e invocaciones corresponden
+        exclusivamente al proveedor/modelo configurado. El total excluido
+        se conserva por separado para hacer visible cualquier degradación
+        real a otro modelo sin mezclar universos ni precios."""
         placeholders = ",".join("?" for _ in _LLM_CALL_EVENT_TYPES)
         with session_scope(self._database_path) as conn:
             llm_rows = conn.execute(
-                f"SELECT payload FROM events WHERE event_type IN ({placeholders})",  # noqa: S608
+                f"""SELECT e.session_id, e.payload, s.created_at, s.closed_at
+                FROM events e
+                JOIN sessions s ON s.id = e.session_id
+                WHERE e.event_type IN ({placeholders})
+                  AND s.state = 'closed'
+                  AND s.closed_at IS NOT NULL""",  # noqa: S608
                 _LLM_CALL_EVENT_TYPES,
             ).fetchall()
-            rag_call_count = conn.execute(
-                "SELECT COUNT(*) AS n FROM events WHERE event_type = 'rag.retrieval.completed'"
-            ).fetchone()["n"]
-            turn_count = conn.execute(
-                "SELECT COUNT(*) AS n FROM turns WHERE speaker = 'patient'"
-            ).fetchone()["n"]
-            session_count = conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"]
 
-        if not llm_rows:
+            all_real_rows: list[tuple[Any, dict[str, Any]]] = []
+            real_rows: list[tuple[Any, dict[str, Any]]] = []
+            eligible_session_ids: set[str] = set()
+            for row in llm_rows:
+                try:
+                    payload = json.loads(row["payload"]) if row["payload"] else {}
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                provider = str(payload.get("provider") or "")
+                model = str(payload.get("model") or "")
+                if provider not in _REAL_LLM_PROVIDERS or not model:
+                    continue
+                all_real_rows.append((row, payload))
+                if provider_filter is not None and provider != provider_filter:
+                    continue
+                if model_filter is not None and model != model_filter:
+                    continue
+                real_rows.append((row, payload))
+                eligible_session_ids.add(row["session_id"])
+
+            if eligible_session_ids:
+                session_placeholders = ",".join("?" for _ in eligible_session_ids)
+                session_params = tuple(sorted(eligible_session_ids))
+                rag_call_count = conn.execute(
+                    f"""SELECT COUNT(*) AS n FROM events
+                    WHERE event_type = 'rag.retrieval.completed'
+                      AND session_id IN ({session_placeholders})""",  # noqa: S608
+                    session_params,
+                ).fetchone()["n"]
+                turn_count = conn.execute(
+                    f"""SELECT COUNT(*) AS n FROM turns
+                    WHERE speaker = 'patient'
+                      AND session_id IN ({session_placeholders})""",  # noqa: S608
+                    session_params,
+                ).fetchone()["n"]
+            else:
+                rag_call_count = 0
+                turn_count = 0
+
+        if not real_rows:
             return {
                 "sample_size": 0,
                 "input_tokens_total": 0,
@@ -305,31 +334,71 @@ class AuditRepository:
                 "llm_calls_total": 0,
                 "rag_queries_total": 0,
                 "turn_count": turn_count,
-                "session_count": session_count,
+                "session_count": 0,
                 "by_provider": {},
+                "window_started_at": None,
+                "window_ended_at": None,
+                "provider_filter": provider_filter,
+                "model_filter": model_filter,
+                "excluded_tokens_total": 0,
             }
 
         input_tokens_total = 0
         output_tokens_total = 0
-        by_provider: dict[str, dict[str, int]] = {}
-        for row in llm_rows:
-            payload = json.loads(row["payload"]) if row["payload"] else {}
+        by_provider_work: dict[str, dict[str, Any]] = {}
+        for row, payload in real_rows:
             tokens_in = int(payload.get("input_tokens", 0))
             tokens_out = int(payload.get("output_tokens", 0))
             input_tokens_total += tokens_in
             output_tokens_total += tokens_out
-            provider = str(payload.get("provider") or "desconocido")
-            bucket = by_provider.setdefault(provider, {"input_tokens": 0, "output_tokens": 0})
+            provider = str(payload["provider"])
+            model = str(payload["model"])
+            bucket = by_provider_work.setdefault(
+                provider,
+                {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "session_ids": set(),
+                    "models": set(),
+                },
+            )
             bucket["input_tokens"] += tokens_in
             bucket["output_tokens"] += tokens_out
+            bucket["session_ids"].add(row["session_id"])
+            bucket["models"].add(model)
+
+        by_provider = {
+            provider: {
+                "input_tokens": bucket["input_tokens"],
+                "output_tokens": bucket["output_tokens"],
+                "session_count": len(bucket["session_ids"]),
+                "models": sorted(bucket["models"]),
+            }
+            for provider, bucket in by_provider_work.items()
+        }
+        closed_rows = {row["session_id"]: row for row, _payload in real_rows}
+        excluded_tokens_total = sum(
+            int(payload.get("input_tokens", 0)) + int(payload.get("output_tokens", 0))
+            for row, payload in all_real_rows
+            if row["session_id"] in eligible_session_ids
+            and (
+                (provider_filter is not None and payload.get("provider") != provider_filter)
+                or (model_filter is not None and payload.get("model") != model_filter)
+            )
+        )
 
         return {
-            "sample_size": len(llm_rows),
+            "sample_size": len(real_rows),
             "input_tokens_total": input_tokens_total,
             "output_tokens_total": output_tokens_total,
-            "llm_calls_total": len(llm_rows),
+            "llm_calls_total": len(real_rows),
             "rag_queries_total": rag_call_count,
             "turn_count": turn_count,
-            "session_count": session_count,
+            "session_count": len(eligible_session_ids),
             "by_provider": by_provider,
+            "window_started_at": min(row["created_at"] for row in closed_rows.values()),
+            "window_ended_at": max(row["closed_at"] for row in closed_rows.values()),
+            "provider_filter": provider_filter,
+            "model_filter": model_filter,
+            "excluded_tokens_total": excluded_tokens_total,
         }

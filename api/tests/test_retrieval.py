@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from app.adapters.fake_embeddings import FakeEmbeddings
+from app.adapters.local_hash_embeddings import LocalHashEmbeddings
 from app.repositories.db import apply_schema, get_connection
 from app.services.embedding_codec import pack_embedding
 from app.services.retrieval import hybrid_search
@@ -19,7 +19,7 @@ _DIMENSIONS = 128
 
 async def _seed_document(
     conn: sqlite3.Connection,
-    embeddings: FakeEmbeddings,
+    embeddings: LocalHashEmbeddings,
     *,
     doc_id: str,
     title: str,
@@ -80,10 +80,10 @@ async def _seed_document(
     conn.commit()
 
 
-async def _build_fixture_corpus() -> tuple[sqlite3.Connection, FakeEmbeddings]:
+async def _build_fixture_corpus() -> tuple[sqlite3.Connection, LocalHashEmbeddings]:
     conn = get_connection(":memory:")
     apply_schema(conn)
-    embeddings = FakeEmbeddings(dimensions=_DIMENSIONS)
+    embeddings = LocalHashEmbeddings(dimensions=_DIMENSIONS)
 
     await _seed_document(
         conn,
@@ -303,7 +303,7 @@ async def test_empty_corpus_returns_no_results() -> None:
     conn = get_connection(":memory:")
     apply_schema(conn)
     try:
-        embeddings = FakeEmbeddings(dimensions=_DIMENSIONS)
+        embeddings = LocalHashEmbeddings(dimensions=_DIMENSIONS)
         results = await hybrid_search(
             conn, "cualquier cosa", embeddings=embeddings, session_knowledge_version=1
         )

@@ -512,8 +512,8 @@ def _sum_usage_from_events(events: list[dict[str, Any]]) -> UsageMetrics:
     input_tokens = 0
     output_tokens = 0
     latency_ms = 0.0
-    provider = "fake"
-    model = "fake-model-v1"
+    provider = "not_invoked"
+    model = "not_invoked"
     for event in events:
         if event.get("event_type") not in _USAGE_EVENT_TYPES:
             continue

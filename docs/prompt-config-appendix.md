@@ -1,20 +1,24 @@
 # Care Companion — Apéndice de prompts y configuración (DOC-004)
 
-> v1.2 · 7 de agosto de 2026 · Reproducible. **No** contiene chain-of-thought,
+> v2.0 · 9 de agosto de 2026 · Reproducible. **No** contiene chain-of-thought,
 > secretos ni claves. Los prompts viven versionados en el código (`api/app/agents/`);
 > este apéndice los referencia con hash para trazabilidad.
 
 ## 1. Modelo y proveedor
 
-| Parámetro | Valor actual (pre-T0) | En T0 |
+| Parámetro | Entrega | Resguardo opcional |
 |---|---|---|
-| `LLM_PROVIDER` | `fake` (determinista) | `groq` primario / `ollama` local |
-| `LLM_MODEL` | `fake-model-v1` | Llama 3.1 70B / Phi-3.5 Mini |
-| Adapter | `FakeLLM` | `OpenAICompatLLM` detrás del mismo `LLMPort` |
+| `LLM_PROVIDER` | `groq` | `ollama` |
+| `LLM_MODEL` | `llama-3.3-70b-versatile` | `llama3.2:3b` |
+| Adapter | `OpenAICompatLLM` | `FallbackLLM` → `OpenAICompatLLM` |
+| Timeout por request | 20 s | mismo presupuesto configurado |
+| Reintentos por 429 en llamada | 0 | activación inmediata del resguardo |
 
-Allowlist de proveedores: **solo** `fake`, `groq` y `ollama` (validado en
-`test_gates.py::test_gate_single_model_allowlist`). No hay adapters de otros
-proveedores en el código.
+Allowlist de runtime: **solo** `groq` y `ollama` (validado en
+`test_gates.py::test_gate_single_model_allowlist`). Los dobles de LLM se
+inyectan desde tests; no son seleccionables por configuración ni por el
+launcher. La API key se solicita en el primer arranque y vive únicamente en
+`api/.env`, ignorado por Git.
 
 ## 2. Agentes — rol, presupuesto y prompt
 
@@ -64,9 +68,9 @@ en `fail_safe`. **Ningún agente llama a otro** — solo el orquestador coordina
 
 | Archivo | Hash |
 |---|---|
-| `api/app/agents/interview.py` | `f73e3b1fc2aafcae` |
-| `api/app/agents/response.py` | `5e73be1fc147d7cc` |
-| `api/app/agents/triage.py` | `615f7be7f80c9838` |
+| `api/app/agents/interview.py` | `c1c5215963532e85` |
+| `api/app/agents/response.py` | `18fd1e33d620a20a` |
+| `api/app/agents/triage.py` | `f9917f195f40a79b` |
 
 > Regenerar: `shasum -a 256 api/app/agents/{interview,response,triage}.py`.
 > Cualquier cambio de prompt cambia el hash — es la versión del prompt.
@@ -91,7 +95,8 @@ en `fail_safe`. **Ningún agente llama a otro** — solo el orquestador coordina
 | `RAG_MAX_UPLOAD_BYTES` | `15_000_000` | cubre el corpus oficial |
 | `RAG_CHUNK_SIZE_CHARS` | `800` | con solape |
 | `RAG_CHUNK_OVERLAP_CHARS` | `150` | |
-| `RAG_EMBEDDING_DIMENSIONS` | `128` | FakeEmbeddings; el real llega en T0 |
+| `EMBEDDINGS_PROVIDER` | `local_hash` | opción reproducible; `ollama` habilita BGE-M3 |
+| `RAG_EMBEDDING_DIMENSIONS` | `128` | representación local; BGE-M3 usa su dimensión nativa |
 | `RAG_RRF_K` | `60` | fusión Reciprocal Rank Fusion |
 | `RAG_RETRIEVAL_TOP_K` | `5` | |
 | `RAG_CANDIDATE_POOL_SIZE` | `200` | |
@@ -99,9 +104,11 @@ en `fail_safe`. **Ningún agente llama a otro** — solo el orquestador coordina
 
 ## 5. Higiene
 
-- Ningún secreto en prompts, config versionada ni logs. `.env.example` solo
-  placeholders (`changeme`); credenciales reales fuera del repo
+- Ningún secreto en prompts, config versionada ni logs. `.env.example` deja
+  la credencial vacía; el launcher escribe la real fuera de Git
   (`docs/policies/secrets.md`).
 - No se registra chain-of-thought ni audio bruto por defecto (spec §11.6).
-- Los parámetros de temperatura/tokens del modelo obligatorio se fijan en T0
-  con el proveedor real (AI-001) y se anexan aquí entonces.
+- El adapter no fuerza temperatura ni `max_tokens`; usa los valores estables
+  del endpoint de Groq y solicita JSON mode para salidas estructuradas. Todo
+  resultado vuelve a validarse con Pydantic y admite un único reintento de
+  parsing a nivel de agente.

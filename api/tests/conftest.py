@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import create_app
+from app.orchestrator.call_cycle import CallCycleOrchestrator
+from tests.support.llm_doubles import FakeLLM
 
 
 @pytest.fixture
@@ -76,5 +78,22 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, db_path: str) -> Iterator[None]:
 
 @pytest.fixture
 def client(clean_env: None) -> TestClient:
-    """Shared TestClient over an isolated app (its own temp DB)."""
-    return TestClient(create_app())
+    """Shared TestClient over an isolated app (its own temp DB).
+
+    Runtime only exposes real LLM providers. Unit/integration tests inject a
+    deterministic double after application wiring so the suite never spends
+    quota or depends on network availability.
+    """
+    app = create_app()
+    llm = FakeLLM()
+    app.state.llm = llm
+    app.state.call_cycle_orchestrator = CallCycleOrchestrator(
+        database_path=app.state.settings.database_path,
+        llm=llm,
+        embeddings=app.state.embeddings_cache,
+        case_port=app.state.case_port,
+        evidence_score_threshold=app.state.settings.rag_evidence_score_threshold,
+        candidate_pool_size=app.state.settings.rag_candidate_pool_size,
+        retrieval_top_k=app.state.settings.rag_retrieval_top_k,
+    )
+    return TestClient(app)

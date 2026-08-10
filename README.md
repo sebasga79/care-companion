@@ -1,6 +1,6 @@
 # Care Companion
 
-Agente de voz para seguimiento postoperatorio pediátrico en español, con
+Agente de voz para seguimiento postoperatorio en español, con
 conocimiento clínico vivo (RAG), decisión no degradable y supervisión humana.
 Entrada al **Source Meridian Tech Sphere Challenge 2026**.
 
@@ -11,14 +11,26 @@ Entrada al **Source Meridian Tech Sphere Challenge 2026**.
 
 ## Qué hace
 
-Una **llamada clínica** en la que un cuidador responde por el paciente. El
-sistema entrevista, recupera evidencia citable, decide un nivel de riesgo que
+Una **llamada de seguimiento** con el paciente o, cuando corresponde, un
+familiar/cuidador. El sistema entrevista, recupera evidencia citable, decide un nivel de riesgo que
 las reglas deterministas **nunca** dejan rebajar por el modelo, responde en
 español y, cuando corresponde, escala a una persona. Todo queda auditado.
 
 Tres vistas: **`/call`** (llamada en vivo), **`/knowledge`** (conocimiento vivo
 con aprendizaje/olvido demostrable) y **`/audit`** (traza de decisiones,
 fuentes y métricas).
+
+## Entregables
+
+- **Repositorio público:** [sebasga79/care-companion](https://github.com/sebasga79/care-companion/)
+- **Diagrama de arquitectura y flujo de decisión:**
+  [architecture-diagram.md](https://github.com/sebasga79/care-companion/blob/main/docs/architecture-diagram.md)
+- **Informe final:**
+  [final-report.md](https://github.com/sebasga79/care-companion/blob/main/docs/final-report.md)
+- **Video, parte 1 — demo funcional:**
+  [MVP Concurso Tech Sphere Challenge 2026](https://youtu.be/wKgmlhy0Txo)
+- **Video, parte 2 — argumentación y preguntas de cierre:**
+  [Respuestas preguntas concurso Source Meridian](https://youtu.be/cez5dnn9KEA)
 
 ---
 
@@ -29,26 +41,19 @@ git clone https://github.com/sebasga79/care-companion.git && cd care-companion
 ./levantar_app.sh
 ```
 
-Requiere **Docker Desktop** instalado y corriendo. El comando construye las
+Requiere **Docker Desktop** instalado y corriendo. En el primer arranque el
+comando solicita de forma privada una API key gratuita de Groq —no se muestra
+ni se versiona—, construye las
 imágenes, descarga el dataset y corpus oficial del reto (~127 MB, solo la
 primera vez), los indexa, levanta backend y frontend, y abre `/call` en el
 navegador — nada manual de por medio. Primera vez toma unos minutos
 (descarga + indexado); ejecuciones siguientes son casi instantáneas.
 
-**Antes de correrlo por primera vez**, para que el agente hable con el
-modelo real del concurso — Groq — en vez de quedarse en un modo de prueba
-sin red:
-
-1. Crea una API key gratis en [console.groq.com/keys](https://console.groq.com/keys) — sin tarjeta, menos de un minuto.
-2. `cp api/.env.example api/.env` y edita dos líneas:
-   ```bash
-   LLM_PROVIDER=groq
-   LLM_API_KEY=gsk_tu_api_key_real
-   ```
-
-Si ya corriste `./levantar_app.sh` una vez sin la key, agrégala y vuelve a
-correr con `./levantar_app.sh --rebuild` (el simple no reconstruye
-contenedores ya levantados).
+La key se crea en [console.groq.com/keys](https://console.groq.com/keys). Si
+ya existe en el entorno, también puede ejecutarse
+`GROQ_API_KEY=... ./levantar_app.sh`; el launcher la guarda únicamente en
+`api/.env`, archivo ignorado por Git. No existe un modo conversacional
+simulado en el runtime.
 
 - Frontend: <http://localhost:49318> (redirige a `/call`)
 - API + OpenAPI: <http://localhost:49317/docs>
@@ -74,8 +79,10 @@ tipada** que coordina agentes de responsabilidad única (`Interview`, `Triage`,
 `Response`) — los agentes nunca se llaman entre sí. RAG híbrido (**FTS5 + coseno + RRF**) con evidence gate. Todo proveedor externo (LLM, STT, TTS, embeddings,
 datos) entra por **puertos/adaptadores**: **Groq/Llama 3.3 70B Versatile**
 como modelo primario del concurso, **Ollama/Llama 3.2 3B** como resguardo
-local si Groq falla, y un adapter `fake` determinista reservado para tests
-automatizados — sin tocar el dominio (ver `docs/adr/ADR-001`).
+local opcional si Groq falla, y embeddings reproducibles locales o
+Ollama/BGE-M3 — sin tocar el dominio (ver `docs/adr/ADR-001`). Los dobles
+deterministas existen solo dentro de la suite automatizada y nunca son una
+configuración ejecutable del producto.
 
 Detalle en [`docs/architecture.md`](docs/architecture.md) y el diagrama en
 [`docs/architecture-diagram.md`](docs/architecture-diagram.md).
@@ -100,7 +107,9 @@ Ruta local alternativa, útil para desarrollo (sin Docker):
 > otros servicios locales — backend **49317**, frontend **49318**.
 
 Nunca commitees `api/.env` (ya está en `.gitignore`); la key real solo vive
-ahí, en tu máquina. No hay secretos en el repositorio.
+ahí, en tu máquina. El repositorio incluye únicamente `api/.env.example` con
+campos vacíos/de referencia, como exige el formulario de entrega. No hay
+secretos en el repositorio.
 
 ### Resguardo local opcional (Ollama)
 
@@ -111,11 +120,12 @@ durante la sesión de evaluación, en vez de quedarse sin respuesta:
 2. Agrega `LLM_FALLBACK_PROVIDER=ollama` a `api/.env`.
 3. `./levantar_app.sh --rebuild`.
 
-### Embeddings reales para el RAG (Ollama + BGE-M3)
+### Embeddings del RAG
 
-Por defecto el RAG usa `FakeEmbeddings` (hashing de n-gramas — sin
-dependencias, pero sin semántica real: no entiende sinónimos ni
-regionalismos). Para embeddings semánticos de verdad:
+El arranque reproducible usa `local_hash`: una representación vectorial
+determinista de n-gramas, combinada con FTS5 mediante RRF. No finge un modelo
+ni requiere otro servicio. Para mayor recuperación semántica en español se
+puede habilitar Ollama/BGE-M3:
 
 1. Instala [Ollama](https://ollama.com/) (si no lo hiciste ya para el
    resguardo del LLM) y corre `ollama pull bge-m3`.
@@ -126,7 +136,7 @@ regionalismos). Para embeddings semánticos de verdad:
    `EMBEDDINGS_BASE_URL`/`EMBEDDINGS_MODEL` se completan solos
    (`http://localhost:11434/v1` / `bge-m3`).
 3. `./levantar_app.sh --rebuild`. **Si ya habías cargado documentos con
-   embeddings `fake`**, los vectores viejos quedan en otra dimensión — borra
+   otro proveedor**, los vectores viejos quedan en otra dimensión — borra
    la base (`./levantar_app.sh --clean`) y vuelve a cargar el conocimiento.
 
 ### Dataset y corpus clínico real del reto
@@ -179,9 +189,9 @@ necesitas el corpus PDF todavía.
 docker compose up -d --build
 ```
 
-Mismos puertos host (49318 frontend, 49317 API). Lee `api/.env` igual que
-`./levantar_app.sh` — configúralo primero (ver arriba) para correr con Groq
-en vez del adapter `fake` reservado para tests.
+Mismos puertos host (49318 frontend, 49317 API). Para esta ruta manual crea
+primero `api/.env` desde `.env.example` y completa `LLM_API_KEY`; el launcher
+recomendado hace ese paso de forma interactiva y segura.
 
 No se debe publicar una API key en el repositorio.
 
@@ -225,85 +235,58 @@ métricas honestas (medidas o `pendiente`).
 ## Métricas (rúbrica §5)
 
 Obligatorias por rúbrica: latencia P50/P95, consumo de tokens y costo estimado
-por llamada. Metodología completa, corridas anteriores y hallazgos en
-[`docs/benchmarks/README.md`](docs/benchmarks/README.md); JSON crudo en
-[`docs/benchmarks/capa1-groq-70b.json`](docs/benchmarks/capa1-groq-70b.json).
-
-**Corrida `capa1-groq-70b.json` (9 ago, 3 casos reales del dataset — 1 rojo /
-1 amarillo / 1 verde, 16 turnos, contra Groq real `llama-3.3-70b-versatile`,
-el modelo desplegado por defecto):**
-
-| Métrica | Valor |
-|---|---|
-| Latencia P50 / P95 (servidor, ver nota) | **3.782 ms / 5.139 ms** (14 turnos limpios) |
-| Tokens de entrada / salida por turno | 3.590,7 / 407,3 |
-| Tokens por llamada (promedio) | 18.657,3 |
-| Invocaciones al modelo por turno | 2,29 |
-| Consultas al RAG por llamada | 3,33 |
-| Costo estimado por llamada | **US$ 0,0114** |
-
-**Cómo se calculó el costo:** Groq on-demand para `llama-3.3-70b-versatile`
-(consultado en [groq.com/pricing](https://groq.com/pricing), ago 2026):
-US$0,59 / millón de tokens de entrada, US$0,79 / millón de salida. En
-desarrollo se usa el nivel gratuito (US$0 real), así que el costo se
-extrapola desde los tokens realmente consumidos por llamada, tal como pide
-la rúbrica.
-
-**Nota metodológica — dos números, honestos ambos.** La corrida completa
-(16 turnos) incluyó los últimos 2 turnos de la conversación `verde`, donde
-la cuota **diaria** de Groq (TPD, 100.000 tokens/día para este modelo) se
-agotó a mitad de la medición: 3 llamadas cayeron al resguardo local
-(Ollama) tras reintentos 429. Esos 2 turnos miden tiempo de reintento y
-degradación al resguardo, no el modelo bajo prueba — igual que el máximo de
-24,5s de la corrida anterior (ver `docs/benchmarks/README.md`), se separan
-en vez de mezclarlos:
-
-| | Turnos | P50 | P95 | Máx |
-|---|---|---|---|---|
-| **Limpia** (Groq puro) | 14 | 3.782 ms | 5.139 ms | 6.540 ms |
-| Cruda (incluye agotamiento de cuota) | 16 | 4.044,6 ms | 13.984,6 ms | 14.726,4 ms |
-
-Con 14-16 muestras el P95 es indicativo, no una medición robusta — una
-corrida más larga da un percentil más estable, pero agotaría la cuota
-diaria compartida con el resto del desarrollo y no aporta un número más
-honesto, sólo más impreciso mientras el resguardo interfiere. Tokens,
-llamadas e invocaciones RAG de la tabla principal usan sólo los 14 turnos
-limpios (Groq real), para no atribuirle a Groq consumo que en realidad
-sirvió el modelo local gratuito.
+por llamada. La fuente canónica es `GET /api/v1/metrics` y las mismas cifras
+se muestran en `/audit`; ambas leen eventos SQLite de la ejecución, no una
+tabla pegada desde un benchmark.
 
 **Latencia voz-a-voz** (definición exacta de la rúbrica: desde que el
 paciente termina de hablar hasta que empieza a sonar el audio del agente)
-está **instrumentada en vivo** en `/call` y `/knowledge` — aparece junto al
-micrófono durante la llamada apenas hay una muestra. STT y TTS corren
+está **instrumentada en vivo** en `/call` y en la llamada de prueba de
+`/knowledge`, y se consolida en `/audit` — aparece junto al micrófono durante
+la llamada apenas hay una muestra. STT y TTS corren
 enteramente en el navegador (Web Speech API), así que la única forma de
 medirla es una llamada real con micrófono — no un script.
 
-**Primeras 3 muestras reales, navegador real (9 ago), llamada de voz
-completa contra Groq:**
+**Muestras de voz reales, Chrome + micrófono (9 ago), llamada completa
+contra Groq/Llama 3.3 70B:**
 
 | Métrica | Valor |
 |---|---|
-| Latencia voz-a-voz P50 / P95 | **6.154 ms / 6.507 ms** (n=3) |
+| Latencia voz-a-voz P50 / P95 | **6154 ms (6,154 s) / 6507 ms (6,507 s)** (n=4) |
 
-Con sólo 3 muestras el número es preliminar, no una distribución estable —
-se reporta igual, sin esperar a tener más, porque un número real con
-muestra chica es más honesto que "pendiente" indefinidamente (rúbrica:
-"reportar números que no se sostienen es peor que no reportarlos", pero
-lo contrario también aplica — un real pequeño no es un número que no se
-sostenga, es evidencia genuina con su límite declarado). Por encima del
-objetivo interno de ≤2,5s P95 (spec.md NFR-002): el turno más lento de
-las 3 muestras hizo la cadena completa (entrevista → RAG con embeddings
-reales → triage → respuesta, 4 llamadas al modelo/embeddings en un solo
-turno) — el proxy de servidor de la tabla principal (~3,8s P50 medido en
-`capa1-groq-70b.json`, sección anterior) no incluye esa latencia de RAG
-semántico real ni el tránsito de red del WebSocket, así que subestima la
-experiencia real de punta a punta. Queda como límite conocido en
-"Límites y trabajo pendiente" del informe final, no oculto.
+Con cuatro muestras el percentil es preliminar. El valor de 2,5 s que aparece
+en documentos históricos era una meta interna, no un umbral de la rúbrica;
+la fuente oficial exige reportar P50/P95 y contrastarlos con la sesión. Por
+eso se conserva la medición observada y su tamaño de muestra, sin convertir
+la meta interna en una falsa compuerta.
 
-La cifra del proxy de servidor (tabla principal de arriba) sigue siendo
-útil aparte: mide sólo el tiempo de cómputo del backend, sin ruido de
-red/TTS, así que aísla mejor si una regresión futura es del modelo o de
-la capa de transporte.
+Tokens, invocaciones, consultas RAG y costo se agregan únicamente sobre
+**llamadas cerradas del proveedor y modelo finales**. La respuesta incluye
+`n`, fecha final de la ventana y desglose por proveedor/modelo. Las
+sesiones abiertas, pruebas y ejecuciones históricas no verificables quedan
+fuera del denominador. El costo usa US$0,59/1M tokens de entrada y
+US$0,79/1M de salida para Groq/Llama 3.3 70B, y divide solo entre llamadas
+cerradas que realmente usaron Groq; los tokens del resguardo local no se
+cobran como si fueran Groq.
+
+**Snapshot reproducible del 9 de agosto de 2026** — únicamente
+`groq/llama-3.3-70b-versatile`, 6 llamadas cerradas, 25 turnos del paciente,
+ventana UTC `2026-08-09T01:06:23`–`2026-08-09T20:48:00`:
+
+| Métrica de uso | Valor observado |
+|---|---:|
+| Tokens entrada / salida totales | 74 841 / 8 614 |
+| Tokens entrada / salida por turno | 2 993,6 / 344,6 |
+| Tokens entrada / salida por llamada | 12 473,5 / 1 435,7 |
+| Invocaciones LLM por turno | 2,08 (52 invocaciones) |
+| Consultas RAG por llamada | 2,83 (17 consultas) |
+| Costo estimado por llamada | **US$0,0085** |
+
+Otros 5850 tokens servidos por un modelo real de resguardo dentro de esas
+sesiones se informan en `scope.excluded_other_model_tokens`, pero no se mezclan
+con el consumo ni con el precio del modelo final. Este snapshot es evidencia
+fechada; al ejecutar nuevas llamadas, `/api/v1/metrics` recalcula el universo
+y muestra su nuevo denominador.
 
 Cada muestra que el navegador mide queda además **persistida como evento
 auditable** (`POST /api/v1/sessions/{id}/voice-latency` →
@@ -333,8 +316,7 @@ logs -f`): la salida estándar de los contenedores, persistida por Docker
 desde que arrancan (no sólo lo reciente). Cada línea de la API es JSON
 estructurado con `correlation_id`, y la primera línea de arranque delata
 el proveedor real en uso —
-`care_companion_app_ready ... llm_provider=groq` (o `fake` si no
-configuraste una key) — así que no hay forma de que el sistema diga una
+`care_companion_app_ready ... llm_provider=groq` — así que no hay forma de que el sistema diga una
 cosa y corra otra sin que quede escrito ahí mismo. Lo que **no** está en
 estos logs: el desglose de tokens/proveedor por llamada individual — eso
 vive en la capa 2.

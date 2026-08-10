@@ -24,7 +24,7 @@ def test_minimal_valid_summary() -> None:
     assert summary.risk.should_escalate is False
     assert summary.handoff.status == "none"
     assert summary.citations == []
-    assert summary.usage.provider == "fake"
+    assert summary.usage.provider == "not_invoked"
 
 
 def test_missing_required_field_raises() -> None:

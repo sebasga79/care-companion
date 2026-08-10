@@ -31,7 +31,7 @@ app/
   core/          settings, logging, correlation_id, middleware
   domain/        modelos Pydantic, FSM del orquestador, reductor de decisión
   ports/         interfaces (LLM, STT, TTS, embeddings, casos del reto)
-  adapters/      implementaciones (fakes deterministas + fixtures)
+  adapters/      proveedores reales, dataset y algoritmos locales
   repositories/  acceso a SQLite (WAL, transacciones cortas)
   api/           routers REST
   db/schema.sql  schema idempotente aplicado al arranque

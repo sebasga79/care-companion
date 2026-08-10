@@ -12,9 +12,9 @@ services:
     # LLM_MODEL a mano desde variables del SHELL del host — `api/.env`, que
     # es donde de verdad se edita la config (Groq real, resguardo Ollama,
     # rate limiting), nunca se leía. El contenedor arrancaba con los
-    # defaults (`fake`) sin que nada lo avisara: la conversación se veía
-    # fluida porque FakeLLM responde instantáneo, así que "todo muy rápido"
-    # en vivo era la señal correcta de que Groq no se estaba usando.
+    # defaults locales sin que nada lo avisara. `env_file` carga la selección
+    # explícita de Groq/Ollama y su configuración; runtime no admite un LLM
+    # simulado.
     # `env_file` carga TODO `api/.env` automáticamente — variables nuevas
     # ya no requieren tocar este archivo.
     #

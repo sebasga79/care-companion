@@ -1,7 +1,7 @@
 """CON-002/CON-003, SAFE-002, RES-001 — tests de los tres agentes de
 responsabilidad única + `app.agents.support.invoke_structured`.
 
-Usa `ScriptedFakeLLM` (adapters/fake_llm.py) para programar exactamente lo
+Usa `ScriptedFakeLLM` (`tests/support/llm_doubles.py`) para programar exactamente lo
 que "responde el modelo" por escenario, sin red ni credenciales — el mismo
 mecanismo que usan los tests E2E-002."""
 
@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import pytest
 
-from app.adapters.fake_llm import ScriptedFakeLLM
 from app.agents.interview import InterviewAgent, InterviewTurnInput
 from app.agents.response import ResponseAgent, ResponseTurnInput
 from app.agents.support import (
@@ -24,6 +23,7 @@ from app.agents.support import (
 from app.agents.triage import TriageAgent, TriageTurnInput
 from app.domain.models import AgentRequest
 from app.ports.llm import LLMMessage
+from tests.support.llm_doubles import ScriptedFakeLLM
 
 
 def _request(payload: dict) -> AgentRequest:

@@ -61,7 +61,7 @@ def test_cost_only_counts_primary_provider_tokens_not_fallback(
     Aquí se simulan ambos proveedores en la misma sesión y se verifica que
     sólo los tokens de `LLM_PROVIDER` (groq) entran al cálculo."""
     monkeypatch.setenv("LLM_PROVIDER", "groq")
-    monkeypatch.setenv("LLM_API_KEY", "gsk_test_key_not_a_placeholder_value")
+    monkeypatch.setenv("LLM_API_KEY", "unit-test-credential-not-a-secret")
     monkeypatch.setenv("LLM_COST_PER_MILLION_INPUT_TOKENS", "1.0")
     monkeypatch.setenv("LLM_COST_PER_MILLION_OUTPUT_TOKENS", "2.0")
     local_client = TestClient(create_app())
@@ -79,7 +79,12 @@ def test_cost_only_counts_primary_provider_tokens_not_fallback(
         correlation_id="corr-groq",
         component="agents",
         event_type="agent.response.completed",
-        payload={"input_tokens": 1000, "output_tokens": 100, "provider": "groq"},
+        payload={
+            "input_tokens": 1000,
+            "output_tokens": 100,
+            "provider": "groq",
+            "model": "llama-3.3-70b-versatile",
+        },
     )
     # Llamada degradada al resguardo local: 500 in / 50 out — NO debe costar nada.
     event_repo.add_event(
@@ -87,8 +92,14 @@ def test_cost_only_counts_primary_provider_tokens_not_fallback(
         correlation_id="corr-ollama",
         component="agents",
         event_type="agent.response.completed",
-        payload={"input_tokens": 500, "output_tokens": 50, "provider": "ollama"},
+        payload={
+            "input_tokens": 500,
+            "output_tokens": 50,
+            "provider": "ollama",
+            "model": "phi3.5",
+        },
     )
+    assert local_client.post(f"/api/v1/sessions/{session_id}/finish").status_code == 200
 
     body = local_client.get("/api/v1/metrics").json()
     assert body["cost"]["status"] == "medido"
@@ -96,7 +107,64 @@ def test_cost_only_counts_primary_provider_tokens_not_fallback(
     expected = (1000 / 1_000_000 * 1.0 + 100 / 1_000_000 * 2.0) / 1
     assert body["cost"]["value"] == f"${expected:.4f} USD/llamada"
     assert "1000 in + 100 out tokens de groq" in body["cost"]["detail"]
-    assert "550 tokens de resguardo excluidos" in body["cost"]["detail"]
+    assert "550 tokens de otros modelos/resguardo excluidos" in body["cost"]["detail"]
+
+
+def test_usage_excludes_open_and_non_real_sessions(client: TestClient) -> None:
+    """El denominador por llamada no mezcla sesiones incompletas ni
+    registros históricos de dobles de prueba."""
+    completed = client.post(
+        "/api/v1/sessions", json={"case_id": "demo-case-001"}
+    ).json()["id"]
+    open_session = client.post(
+        "/api/v1/sessions", json={"case_id": "demo-case-002"}
+    ).json()["id"]
+    event_repo = EventRepository(get_settings().database_path)
+    event_repo.add_event(
+        session_id=completed,
+        correlation_id="corr-real",
+        component="agents",
+        event_type="agent.response.completed",
+        payload={
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "provider": "ollama",
+            "model": "llama3.2:3b",
+        },
+    )
+    event_repo.add_event(
+        session_id=completed,
+        correlation_id="corr-test-double",
+        component="agents",
+        event_type="agent.response.completed",
+        payload={
+            "input_tokens": 9000,
+            "output_tokens": 9000,
+            "provider": "fake",
+            "model": "test-double",
+        },
+    )
+    event_repo.add_event(
+        session_id=open_session,
+        correlation_id="corr-open",
+        component="agents",
+        event_type="agent.response.completed",
+        payload={
+            "input_tokens": 7000,
+            "output_tokens": 7000,
+            "provider": "ollama",
+            "model": "llama3.2:3b",
+        },
+    )
+    assert client.post(f"/api/v1/sessions/{completed}/finish").status_code == 200
+
+    body = client.get("/api/v1/metrics").json()
+    assert body["tokens"]["status"] == "medido"
+    assert body["tokens"]["value"] == "120 tokens"
+    assert "n=1 llamadas cerradas" in body["tokens"]["detail"]
+    assert body["tokens"]["scope"]["closed_calls"] == 1
+    assert body["tokens"]["scope"]["provider"] == "ollama"
+    assert body["tokens"]["scope"]["model"] == "llama3.2:3b"
 
 
 def test_metrics_latency_stays_pending_despite_unrelated_http_traffic(

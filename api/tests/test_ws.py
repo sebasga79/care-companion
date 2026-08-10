@@ -7,9 +7,9 @@ import json
 
 from fastapi.testclient import TestClient
 
-from app.adapters.fake_llm import ScriptedFakeLLM
 from app.main import create_app
 from app.orchestrator.call_cycle import CallCycleOrchestrator
+from tests.support.llm_doubles import ScriptedFakeLLM
 
 _INTERVIEW_MARKER = "extraer observaciones estructuradas del último turno"
 _TRIAGE_MARKER = "evaluador de riesgo estructurado"

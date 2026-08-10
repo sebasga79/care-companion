@@ -29,7 +29,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from app.adapters.fake_embeddings import FakeEmbeddings
+from app.adapters.local_hash_embeddings import LocalHashEmbeddings
 from app.adapters.openai_compat_embeddings import OpenAICompatEmbeddings
 from app.core.config import EmbeddingsProvider, Settings, get_settings
 from app.repositories.db import apply_schema, get_connection
@@ -63,8 +63,8 @@ def _build_embeddings_cache(settings: Settings) -> EmbeddingsCache:
     """Mismo criterio que `app/main.py::_build_embeddings_adapter` — se
     duplica aquí (no se importa `main.py`) para no arrastrar la app FastAPI
     completa a un script de batch."""
-    if settings.embeddings_provider is EmbeddingsProvider.FAKE:
-        port = FakeEmbeddings(dimensions=settings.rag_embedding_dimensions)
+    if settings.embeddings_provider is EmbeddingsProvider.LOCAL_HASH:
+        port = LocalHashEmbeddings(dimensions=settings.rag_embedding_dimensions)
     else:
         assert settings.embeddings_base_url is not None and settings.embeddings_model is not None
         port = OpenAICompatEmbeddings(

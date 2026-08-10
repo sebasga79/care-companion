@@ -5,8 +5,9 @@ arranque: un `LLM_PROVIDER` fuera de la allowlist o una configuración
 incompleta para `groq`/`ollama` deben impedir que el proceso arranque, no
 degradar silenciosamente (spec.md §11 — no defaults inseguros).
 
-Allowlist de modelos (G3, docs/auditoria-kit-oficial-2026-08-07.md §3):
-`groq` (Llama 3.1 70B, nube) es el proveedor primario elegido; `ollama`
+Ruta de modelos (G3, docs/auditoria-kit-oficial-2026-08-07.md §3):
+`groq` (Llama 3.3 70B, sucesor vigente permitido de la familia Meta Llama)
+es el proveedor primario elegido; `ollama`
 (Phi-3.5 Mini / Llama 3.2 local) es el de resguardo si el primario no
 responde en la sesión de evaluación en vivo. Ambos hablan el mismo
 protocolo de Chat Completions estilo OpenAI — un solo adapter HTTP basta
@@ -29,14 +30,13 @@ class LLMProvider(str, Enum):
     """Allowlist de proveedores LLM. El adapter concreto vive en `adapters/`;
     el dominio nunca importa un SDK de proveedor directamente (ADR-001).
 
-    Los únicos modelos permitidos por la rúbrica del reto (G3) son Gemini
-    1.5 Flash, Llama 3.1 70B vía Groq, Llama 3.2 (1B/3B) local y Phi-3.5
-    Mini local. Este proyecto usa `groq` como primario y `ollama` como
+    El stack oficial enumera Gemini 1.5 Flash, Llama 3.1 70B vía Groq,
+    Llama 3.2 (1B/3B) local y Phi-3.5 Mini local, y admite la versión sucesora
+    vigente de esas familias. Este proyecto usa `groq` como primario y `ollama` como
     resguardo local — Gemini queda fuera de la allowlist de *este* código
     porque no habla el protocolo OpenAI-compatible que ya soportamos (haría
     falta un SDK/adapter aparte, ver auditoría §3)."""
 
-    FAKE = "fake"
     GROQ = "groq"
     OLLAMA = "ollama"
 
@@ -50,8 +50,8 @@ _DEFAULT_BASE_URLS: dict[LLMProvider, str] = {
     LLMProvider.OLLAMA: "http://localhost:11434/v1",
 }
 _DEFAULT_MODELS: dict[LLMProvider, str] = {
-    # G3 exige un modelo de la lista cerrada del reto, que nombra "Llama 3.1
-    # 70B (vía Groq)". **Groq deprecó ese modelo**: hoy su catálogo ofrece
+    # G3 nombra "Llama 3.1 70B (vía Groq)" y el stack permite el sucesor
+    # vigente de la familia. **Groq deprecó ese modelo**: hoy su catálogo ofrece
     # `llama-3.1-8b-instant` (3.1 pero 8B) y `llama-3.3-70b-versatile` (70B
     # pero 3.3). Ninguno coincide exactamente; hay que desviarse en un eje o
     # en el otro, y la desviación la creó el proveedor, no nosotros.
@@ -72,9 +72,8 @@ _DEFAULT_MODELS: dict[LLMProvider, str] = {
     # en free tier, el DOBLE que los 6.000 del 8B — así que el modelo más
     # capaz es también el que menos choca contra la cuota por turno.
     LLMProvider.GROQ: "llama-3.3-70b-versatile",
-    # Decisión (auditoría §3): Phi-3.5 Mini como resguardo local por defecto;
-    # Llama 3.2 3B es la alternativa si se prefiere (LLM_FALLBACK_MODEL=llama3.2).
-    LLMProvider.OLLAMA: "phi3.5",
+    # Resguardo local verificado y perteneciente a una familia permitida.
+    LLMProvider.OLLAMA: "llama3.2:3b",
 }
 _PLACEHOLDER_VALUES = {"", "changeme"}
 
@@ -124,7 +123,7 @@ class EmbeddingsProvider(str, Enum):
     significado una segunda dependencia de red/API key en la sesión de
     evaluación en vivo, sin necesidad, ya que Ollama corre local)."""
 
-    FAKE = "fake"
+    LOCAL_HASH = "local_hash"
     OLLAMA = "ollama"
 
 
@@ -160,10 +159,13 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
 
-    llm_provider: LLMProvider = Field(default=LLMProvider.FAKE, alias="LLM_PROVIDER")
+    # El default de librería es un modelo local permitido y no requiere
+    # secretos. La ruta de entrega (`api/.env.example` + launcher) selecciona
+    # Groq/Llama 3.3 70B y solicita la credencial en el primer arranque.
+    llm_provider: LLMProvider = Field(default=LLMProvider.OLLAMA, alias="LLM_PROVIDER")
     llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
     llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
-    llm_model: str = Field(default="fake-model-v1", alias="LLM_MODEL")
+    llm_model: str = Field(default="llama3.2:3b", alias="LLM_MODEL")
     llm_request_timeout_seconds: float = Field(default=20.0, alias="LLM_REQUEST_TIMEOUT_SECONDS")
     # Ante un 429 el proveedor indica cuántos segundos esperar. En una
     # llamada en vivo, 0 reintentos es lo correcto: hacer esperar al
@@ -198,13 +200,13 @@ class Settings(BaseSettings):
         default=None, alias="LLM_COST_PER_MILLION_OUTPUT_TOKENS"
     )
 
-    # Embeddings reales para RAG (decisión post-auditoría, §3/§9): `fake`
-    # (n-gramas hasheados, sin dependencias, el default de siempre) u
+    # Embeddings para RAG: `local_hash` (n-gramas con feature hashing,
+    # reproducible y sin servicio externo) u
     # `ollama` (BGE-M3 local). Cambiar de proveedor invalida los vectores ya
     # indexados (dimensiones distintas) — requiere reingestión completa del
     # conocimiento cargado (`--clean` en `levantar_app.sh` o borrar la BD).
     embeddings_provider: EmbeddingsProvider = Field(
-        default=EmbeddingsProvider.FAKE, alias="EMBEDDINGS_PROVIDER"
+        default=EmbeddingsProvider.LOCAL_HASH, alias="EMBEDDINGS_PROVIDER"
     )
     embeddings_base_url: str | None = Field(default=None, alias="EMBEDDINGS_BASE_URL")
     embeddings_api_key: str | None = Field(default=None, alias="EMBEDDINGS_API_KEY")
@@ -286,7 +288,7 @@ class Settings(BaseSettings):
                 env_prefix="LLM_FALLBACK",
             )
 
-        if self.embeddings_provider is not EmbeddingsProvider.FAKE:
+        if self.embeddings_provider is not EmbeddingsProvider.LOCAL_HASH:
             self.embeddings_base_url = (
                 self.embeddings_base_url
                 if not _is_placeholder(self.embeddings_base_url)
@@ -317,10 +319,11 @@ class Settings(BaseSettings):
 
     @staticmethod
     def _resolved_model(provider: LLMProvider, model: str | None) -> str | None:
-        # "fake-model-v1" es el default genérico del campo; si el proveedor
-        # real no trae su propio modelo declarado, se interpreta igual que
-        # "no declarado" y se completa con el default conocido del proveedor.
-        if model and model not in ("fake-model-v1", *_PLACEHOLDER_VALUES):
+        # El default genérico local se reemplaza por el modelo conocido del
+        # proveedor cuando se selecciona Groq.
+        if model and not (
+            provider is LLMProvider.GROQ and model == _DEFAULT_MODELS[LLMProvider.OLLAMA]
+        ) and model not in _PLACEHOLDER_VALUES:
             return model
         return _DEFAULT_MODELS.get(provider, model)
 
@@ -333,8 +336,6 @@ def _require_real_values(
     api_key: str | None,
     env_prefix: str,
 ) -> None:
-    if provider is LLMProvider.FAKE:
-        return
     missing: list[str] = []
     if _is_placeholder(base_url):
         missing.append(f"{env_prefix}_BASE_URL")

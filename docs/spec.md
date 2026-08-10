@@ -1,5 +1,11 @@
 # Care Companion — Product & System Specification
 
+> **Documento histórico de planificación (23 de julio).** Conserva requisitos
+> internos y supuestos previos al kit, incluidos objetivos como 2,5 s y
+> preguntas `Pendiente-T0`; no es la fuente normativa de la entrega. Para el
+> estado real use [`architecture.md`](architecture.md),
+> [`traceability.md`](traceability.md) y el kit oficial enlazado allí.
+
 > SDD v0.1 · 23 de julio de 2026 · Estado: baseline precompetencia  
 > Las reglas definitivas del modelo, dataset, métricas y compuertas se incorporarán mediante un delta controlado el 7 de agosto.
 
@@ -523,4 +529,3 @@ Antes de cambiar una regla clínica, contrato de evento, schema de resumen, estr
 - [SQLite FTS5](https://www.sqlite.org/fts5.html)
 - [Next.js App Router](https://nextjs.org/docs/app)
 - [Akron Children’s — sitio oficial](https://www.akronchildrens.org/)
-

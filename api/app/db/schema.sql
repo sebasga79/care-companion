@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS decisions (
 
 CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id);
 
--- SAFE-004: handoff simulado, auditable, idempotente. El índice único sobre
+-- SAFE-004: handoff humano registrado, auditable e idempotente. El índice único sobre
 -- (session_id, idempotency_key) es la defensa de última línea (además de la
 -- verificación a nivel de aplicación en EscalationRepository) contra una
 -- doble alerta por la misma condición en la misma sesión (BR-025).

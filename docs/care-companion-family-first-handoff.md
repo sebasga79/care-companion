@@ -1,5 +1,10 @@
 # Care Companion — Handoff visual para Codex y Claude Code
 
+> **Exploración visual histórica, reemplazada.** Esta propuesta antecede al
+> dataset oficial y no representa el dominio ni la UI final. El contrato vigente
+> está en [`design.md`](design.md): seguimiento postoperatorio centrado en el
+> paciente, con familiar/cuidador cuando corresponda.
+
 > Versión 1.0 · 23 de julio de 2026  
 > Dirección aprobada: **Family-first Pediatric**  
 > Referencia navegable: https://care-intelligence-studio.sebastian-gaviria-2023.chatgpt.site

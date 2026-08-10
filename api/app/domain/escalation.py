@@ -1,7 +1,8 @@
-"""`EscalationRecord` (SAFE-004, spec.md §8.3/§11.1) — registro de
-escalamiento simulado. En el reto, "alertar" es un evento visible y
-auditable, no una integración real (architecture.md §8.3): nunca llama,
-envía mensajes ni escribe en un EHR real.
+"""`EscalationRecord` (SAFE-004) — registro persistente de handoff humano.
+
+La entrega no integra telefonía, mensajería ni EHR porque están fuera del
+alcance oficial; el contrato observable es crear un evento durable, visible y
+auditable para la cola humana del sistema.
 
 Idempotencia (BR-025): la alerta es idempotente por
 `session_id + trigger_set + decision_level`. `idempotency_key` se deriva

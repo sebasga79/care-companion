@@ -52,7 +52,10 @@ async def get_metrics(
 ) -> dict[str, Any]:
     latency = audit_repo.latency_percentiles()
     voice_latency = audit_repo.voice_latency_percentiles()
-    usage = audit_repo.usage_summary()
+    usage = audit_repo.usage_summary(
+        provider_filter=settings.llm_provider.value,
+        model_filter=settings.llm_model,
+    )
     measured_latency = latency["sample_size"] > 0
     measured_usage = usage["sample_size"] > 0
 
@@ -105,19 +108,40 @@ def _tokens_metric(usage: dict[str, Any], measured: bool) -> dict[str, Any]:
         return {
             "status": "pendiente",
             "value": "—",
-            "detail": "Sin llamadas al modelo instrumentadas (LLM_PROVIDER=fake o sin sesiones)",
+            "detail": "Sin llamadas cerradas con uso de un modelo real instrumentado",
         }
     turns = max(usage["turn_count"], 1)
     calls = max(usage["session_count"], 1)
     total = usage["input_tokens_total"] + usage["output_tokens_total"]
+    input_per_turn = usage["input_tokens_total"] / turns
+    output_per_turn = usage["output_tokens_total"] / turns
+    input_per_call = usage["input_tokens_total"] / calls
+    output_per_call = usage["output_tokens_total"] / calls
     return {
         "status": "medido",
         "value": f"{total:,} tokens",
         "detail": (
             f"{usage['input_tokens_total']:,} entrada · {usage['output_tokens_total']:,} salida · "
+            f"{input_per_turn:.1f}/{output_per_turn:.1f} tokens entrada/salida por turno · "
+            f"{input_per_call:.1f}/{output_per_call:.1f} por llamada · "
             f"{usage['llm_calls_total'] / turns:.1f} llamadas LLM/turno · "
-            f"{usage['rag_queries_total'] / calls:.1f} consultas RAG/llamada"
+            f"{usage['rag_queries_total'] / calls:.1f} consultas RAG/llamada · "
+            f"n={calls} llamadas cerradas · hasta {usage['window_ended_at']}"
+            f" · {usage['provider_filter']}/{usage['model_filter']}"
         ),
+        "scope": {
+            "provider": usage["provider_filter"],
+            "model": usage["model_filter"],
+            "closed_calls": usage["session_count"],
+            "patient_turns": usage["turn_count"],
+            "llm_calls": usage["llm_calls_total"],
+            "rag_queries": usage["rag_queries_total"],
+            "input_tokens": usage["input_tokens_total"],
+            "output_tokens": usage["output_tokens_total"],
+            "excluded_other_model_tokens": usage["excluded_tokens_total"],
+            "window_started_at": usage["window_started_at"],
+            "window_ended_at": usage["window_ended_at"],
+        },
     }
 
 
@@ -153,13 +177,12 @@ def _cost_metric(usage: dict[str, Any], measured: bool, settings: Settings) -> d
     )
     primary_in = primary_bucket["input_tokens"]
     primary_out = primary_bucket["output_tokens"]
-    calls = max(usage["session_count"], 1)
+    calls = max(primary_bucket.get("session_count", 0), 1)
     total_cost = primary_in / 1_000_000 * price_in + primary_out / 1_000_000 * price_out
-    fallback_in = usage["input_tokens_total"] - primary_in
-    fallback_out = usage["output_tokens_total"] - primary_out
+    excluded_tokens = usage.get("excluded_tokens_total", 0)
     fallback_note = (
-        f" ({fallback_in + fallback_out} tokens de resguardo excluidos, sin costo real)"
-        if (fallback_in + fallback_out) > 0
+        f" ({excluded_tokens} tokens de otros modelos/resguardo excluidos)"
+        if excluded_tokens > 0
         else ""
     )
     return {
@@ -167,6 +190,8 @@ def _cost_metric(usage: dict[str, Any], measured: bool, settings: Settings) -> d
         "value": f"${total_cost / calls:.4f} USD/llamada",
         "detail": (
             f"({primary_in} in + {primary_out} out tokens de {settings.llm_provider.value}) "
-            f"× (${price_in}/1M in, ${price_out}/1M out) ÷ {calls} llamadas{fallback_note}"
+            f"× (${price_in}/1M in, ${price_out}/1M out) ÷ {calls} llamadas cerradas "
+            f"del proveedor · modelos={','.join(primary_bucket.get('models', []))}"
+            f"{fallback_note}"
         ),
     }

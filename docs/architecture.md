@@ -1,601 +1,244 @@
-# Care Companion — Architecture
+# Care Companion — Arquitectura implementada
 
-> SDD v0.1 · 23 de julio de 2026 · Estado: propuesta previa al reto  
-> Concurso: Source Meridian Tech Sphere Challenge 2026 — Voice Agent Edition
+> v2.0 · 9 de agosto de 2026. Este documento describe el sistema que existe
+> en el repositorio y reemplaza la propuesta previa a la publicación del kit.
 
-## 1. Resumen de la decisión
+## 1. Objetivo y alcance
 
-Care Companion será un agente de voz en español para seguimiento postoperatorio que:
+Care Companion es un agente de voz en español para seguimiento
+postoperatorio. Inicia una llamada desde el navegador, recibe el contexto
+longitudinal del paciente, entrevista de forma adaptativa, recupera evidencia
+clínica vigente, clasifica riesgo y persiste un resumen auditable. Ante una
+señal de alarma registra un handoff a revisión humana y cierra la llamada tras
+confirmar dos teléfonos.
 
-- conversa en tiempo real y tolera regionalismos, respuestas ambiguas e interrupciones;
-- consulta únicamente una base de conocimiento clínico versionada;
-- cita las fuentes que sustentan cada afirmación clínica;
-- clasifica el riesgo con reglas deterministas y evaluación estructurada del modelo;
-- escala a una persona cuando corresponde, sin ejecutar acciones clínicas autónomas;
-- genera un resumen estructurado y una traza auditable de cada llamada;
-- permite cargar y eliminar documentos en caliente, demostrando que el agente aprende y olvida;
-- mantiene el LLM detrás de una interfaz para adoptar el modelo obligatorio que se anunciará el 7 de agosto.
+El sistema usa datos sintéticos del concurso. No implementa telefonía,
+diagnóstico, prescripción, EHR ni comunicación hospitalaria real.
 
-La solución se construirá como **monolito modular desplegable**, no como microservicios. Los límites de dominio y los contratos se diseñan desde el inicio, pero todos los módulos corren inicialmente en un proceso FastAPI y una base SQLite. Esto maximiza la posibilidad de cumplir la compuerta de ejecución en ≤15 minutos y reduce fallos operativos durante los tres días del reto.
+## 2. Drivers de arquitectura
 
-La multiagencia se implementa como una **máquina de estados dirigida por un orquestador**, con agentes de responsabilidad única. No se permitirá una conversación libre entre agentes, delegación recursiva ni loops no acotados.
+1. Arranque limpio en menos de 15 minutos siguiendo el README.
+2. LLM perteneciente a una familia permitida y verificable en configuración y
+   trazas.
+3. Voz en tiempo real desde navegador.
+4. Learn/retrieve/forget desde la consola con versión y citas.
+5. Asimetría clínica: un falso negativo es más grave que un falso positivo.
+6. Métricas sostenibles por logs: voz P50/P95, tokens, invocaciones, RAG y
+   costo por llamada.
 
-## 2. Drivers arquitectónicos
+No existe un umbral oficial de 2,5 s. Esa cifra fue una meta interna inicial;
+la arquitectura instrumenta la latencia observada en lugar de ocultarla.
 
-### 2.1 Compuertas eliminatorias
+## 3. Vista de contenedores
 
-La arquitectura debe garantizar:
+| Contenedor | Tecnología | Responsabilidad |
+|---|---|---|
+| Web | Next.js, React, TypeScript | `/call`, `/knowledge`, `/audit`, STT/TTS y medición voz-a-voz |
+| API | FastAPI, Python, Pydantic | REST, WebSocket, orquestación, agentes, seguridad, RAG y auditoría |
+| Persistencia | SQLite WAL | Sesiones, turnos, evidencia, decisiones, métricas y resúmenes |
+| LLM principal | Groq, `llama-3.3-70b-versatile` | Extracción, evaluación model-based y redacción grounded |
+| LLM opcional | Ollama, `llama3.2:3b` | Resguardo local permitido si Groq falla |
 
-1. los cuatro entregables: repositorio, diagramas, informe y video;
-2. instalación y ejecución completa en ≤15 minutos siguiendo el README;
-3. uso exclusivo del modelo obligatorio;
-4. conversación de voz en tiempo real;
-5. carga y eliminación funcional de conocimiento desde la consola.
+Docker Compose publica la API en `49317` y la web en `49318`. El volumen
+`care_companion_data` conserva dataset, corpus, índice y sesiones. El primer
+arranque descarga 4 XLSX y 107 PDF, ejecuta OCR sobre el documento escaneado e
+indexa el corpus antes de declarar la API lista.
 
-### 2.2 Rúbrica pública
+## 4. Frontend
 
-| Criterio | Peso | Respuesta arquitectónica |
-|---|---:|---|
-| RAG, precisión clínica y conocimiento vivo | 20 | recuperación híbrida, evidence gate, versionado, citas por turno, borrado verificable |
-| Lógica de decisión y escalamiento | 20 | reglas deterministas + evaluación estructurada + precedencia de seguridad + explicación auditable |
-| Comprensión y diseño de conversación | 15 | flujo postoperatorio por estados, preguntas adaptativas, español colombiano |
-| Calidad de voz | 15 | audio streaming, VAD, barge-in, cancelación, métricas de latencia |
-| Video y demo | 15 | recorrido determinista, casos semilla, panel de evidencia |
-| Repositorio, proceso y buenas prácticas | 15 | monorepo, Docker, tests, ADR, commits pequeños, trazabilidad requisito→ticket→prueba |
+### 4.1 `/call`
 
-Fuente primaria: [Tech Sphere Challenge 2026](https://sourcemeridian.com/tech-sphere-challenge#el-reto).
+- presenta 40 pacientes únicos como tarjetas buscables;
+- muestra nombre, procedimiento y fecha de cirugía;
+- al seleccionar uno muestra su evolución de días 1/3/7/14;
+- al iniciar la llamada colapsa la selección y prioriza voz, conversación,
+  evidencia y riesgo;
+- el campo de texto aparece solo como fallback cuando SpeechRecognition no
+  está disponible.
 
-### 2.3 Restricciones
+### 4.2 `/knowledge`
 
-- Construcción competitiva: 7–10 de agosto; fecha/hora exacta de cierre pendiente de la ficha técnica.
-- Implementación individual y repositorio público con licencia MIT.
-- Dataset entregado por Delta Sharing; su conexión y consumo son parte del reto.
-- El modelo obligatorio, compuertas detalladas y métricas exactas llegan el 7 de agosto.
-- El agente habla español.
-- No se requiere telefonía real, integración hospitalaria, autenticación empresarial ni cobertura de todos los procedimientos.
-- No se incorporará código, prompts, datos, nombres de tablas ni información confidencial de `caregaps-agent`.
-- No se almacenarán datos reales de pacientes ni secretos en el repositorio, los logs, el video o las capturas.
-- La imagen y la marca de Akron Children’s son referencias de diseño; cualquier activo publicado exige autorización o sustitución por un activo propio/licenciado.
+Es la consola de administración exigida por G5. Lista documentos, carga
+`.txt`/`.md`/`.pdf`, muestra estado `ready`, permite borrar material agregado
+por el usuario y verifica aprendizaje/olvido con consultas canarias. El corpus
+oficial está identificado y protegido contra borrado accidental.
 
-## 3. Principios
+### 4.3 `/audit`
 
-1. **Safety before fluency:** una respuesta natural nunca puede anular una regla de escalamiento.
-2. **Evidence before answer:** una afirmación clínica necesita evidencia recuperada o una respuesta de abstención/escalamiento.
-3. **Rules own the hard boundaries:** el LLM interpreta lenguaje y estructura, pero no controla secretos, autorizaciones, borrado ni precedencias de riesgo.
-4. **One agent, one contract:** cada agente tiene entrada, salida, herramientas y presupuesto explícitos.
-5. **Orchestration is code:** la transición entre estados vive en Python tipado y testeable.
-6. **Observable by default:** cada turno produce eventos correlacionados sin bloquear la conversación.
-7. **Portable core:** proveedores de LLM, voz, embeddings, almacenamiento y datos se conectan mediante puertos/adaptadores.
-8. **Competition first, production path visible:** se implementa solo lo necesario para ganar el reto, dejando rutas de escalamiento claras.
+Selecciona la llamada terminada más reciente y muestra paciente,
+procedimiento, duración, decisión, citas, handoff, contactos, seguimiento
+estructurado y timeline de eventos. Las etiquetas técnicas de estado/riesgo se
+traducen a lenguaje humano en presentación.
 
-## 4. Contexto del sistema
+## 5. Datos longitudinales
 
-```mermaid
-flowchart LR
-    P["Paciente<br/>voz en navegador"]
-    C["Clínico / juez<br/>consola"]
-    CC["Care Companion"]
-    DS["Delta Sharing<br/>dataset del reto"]
-    LLM["Modelo obligatorio<br/>adaptador único"]
-    KB["Documentos clínicos<br/>autorizados"]
-    H["Equipo humano<br/>cola de handoff"]
+El kit contiene 40 pacientes y 160 episodios: cuatro trayectorias por paciente
+en los días 1, 3, 7 y 14. `DatasetCaseAdapter` une los tres XLSX de perfil y
+trayectoria mediante `patient_id`, conserva los IDs originales de cada episodio
+y expone una entidad `ChallengeCase` por paciente.
 
-    P <-->|"audio y eventos"| CC
-    C <-->|"casos, conocimiento, auditoría"| CC
-    DS -->|"datos de caso"| CC
-    KB -->|"carga / eliminación"| CC
-    CC <-->|"inferencias estructuradas"| LLM
-    CC -->|"recomendación de escalamiento"| H
+El agente recibe como contexto:
+
+- identidad sintética y procedimiento;
+- fecha de cirugía y datos clínicos relevantes;
+- evolución histórica de dolor, temperatura, movilidad, herida, apetito y
+  sueño;
+- observaciones persistidas de llamadas anteriores del propio sistema.
+
+La trayectoria de referencia usada para evaluar el dataset no se inyecta como
+si fuera un síntoma actual. La llamada nueva produce un `followup_record` v1.2
+con los mismos seis ejes, decisión, alerta y trazabilidad.
+
+## 6. Orquestación
+
+`CallCycleOrchestrator` coordina una FSM tipada:
+
+```text
+created → consent → interviewing → retrieving → deciding
+        → responding → interviewing | summarizing → closed
+                         ↘ escalated → summarizing → closed
+                         ↘ fail_safe → summarizing | closed
 ```
 
-## 5. Arquitectura de contenedores
+Solo `CallOrchestrator.transition()` puede cambiar de estado. Los agentes no se
+llaman entre sí y no controlan el flujo:
 
-```mermaid
-flowchart TB
-    UI["Next.js / React<br/>Call · Knowledge · Audit"]
-    API["FastAPI<br/>REST + WebSocket"]
-    ORCH["Orquestador<br/>máquina de estados"]
-    AG["Agentes especializados<br/>Interview · Retrieval · Triage · Summary"]
-    VOICE["Adaptadores de voz<br/>VAD · STT · TTS"]
-    DATA["Puertos de datos<br/>Delta Share · Repository"]
-    DB[("SQLite<br/>estado + FTS5 + vectores")]
-    FS[("Documentos locales<br/>solo demo")]
-    MODEL["LLM Adapter<br/>modelo obligatorio"]
+| Componente | Puede hacer | No puede hacer |
+|---|---|---|
+| `InterviewAgent` | extraer observaciones y proponer una pregunta | decidir riesgo o inventar datos actuales |
+| `RetrievalAgent`/servicio | recuperar fragmentos activos y aplicables | responder al paciente |
+| `TriageAgent` | proponer riesgo rutinario/moderado/alto del modelo | producir/rebajar una alerta determinista |
+| `ResponseAgent` | redactar una respuesta breve sustentada | diagnosticar, prescribir o afirmar sin evidencia |
+| `SummaryBuilder` | proyectar hechos persistidos a `CallSummary` | completar ausencias como negaciones |
 
-    UI <-->|"HTTPS / WS"| API
-    API --> ORCH
-    ORCH --> AG
-    ORCH --> VOICE
-    AG --> MODEL
-    AG --> DATA
-    DATA --> DB
-    DATA --> FS
-```
+Cada agente recibe un `AgentRequest`, devuelve `AgentResult`, tiene un deadline
+y admite como máximo un reintento de salida inválida.
 
-### 5.1 Frontend
+## 7. Flujo por turno
 
-- Next.js App Router + React + TypeScript.
-- Tres rutas primarias:
-  - `/call`: llamada en vivo, transcripción, evidencia, riesgo y escalamiento;
-  - `/knowledge`: cargar, versionar, inspeccionar y eliminar documentos;
-  - `/audit`: sesiones, decisiones, citas y métricas.
-- Captura de audio mediante `AudioWorklet` o `MediaRecorder`, seleccionada el 7 de agosto según el contrato de voz.
-- Un WebSocket por sesión para audio/eventos; REST para configuración, documentos, casos y reportes.
+1. El navegador finaliza STT y envía `client.turn_text` por WebSocket.
+2. Se persiste el turno original.
+3. El detector determinista inspecciona el texto crudo con negación y contexto.
+4. `InterviewAgent` extrae observaciones y decide si falta aclarar.
+5. El RAG recupera evidencia por procedimiento y versión de conocimiento.
+6. `RuleEngine` y `TriageAgent` producen entradas independientes de decisión.
+7. `reduce_decision` aplica precedencia no degradable.
+8. `ResponseAgent` responde si hay evidencia; el handoff crítico usa copy
+   determinista y no llama al LLM.
+9. La API envía estado, respuesta, decisión y, si termina, resumen.
+10. El navegador inicia TTS y reporta la latencia voz-a-voz.
 
-### 5.2 Backend
+## 8. Seguridad clínica
 
-- Python + FastAPI + Pydantic.
-- Endpoints REST para casos, conocimiento, auditoría, salud y métricas.
-- WebSocket para audio bidireccional y eventos de baja latencia.
-- Orquestador de estados en código; no es un “superprompt”.
-- Repositorios async con SQLite en modo WAL.
-- Tareas de ingestión cortas dentro del proceso; no se añade una cola distribuida durante el MVP.
-
-FastAPI soporta comunicación WebSocket bidireccional y pruebas con `TestClient`: [documentación oficial](https://fastapi.tiangolo.com/advanced/websockets/).
-
-## 6. Diseño multiagéntico
-
-### 6.1 Agentes y límites
-
-| Componente | Responsabilidad única | Puede usar | No puede hacer |
-|---|---|---|---|
-| `CallOrchestrator` | mantener estado, decidir siguiente paso y presupuestos | contratos de agentes y servicios | redactar consejo clínico, improvisar herramientas, delegar recursivamente |
-| `InterviewAgent` | formular/interpretar preguntas conversacionales y extraer observaciones | contexto mínimo de sesión, glosario regional | diagnosticar, decidir riesgo final, consultar datos arbitrarios |
-| `RetrievalAgent` | construir consulta y recuperar evidencia clínica | `KnowledgeSearchPort` | responder sin fuentes, cambiar el índice, decidir escalamiento |
-| `ResponseAgent` | redactar respuesta breve y empática usando evidencia aprobada | observaciones + fragmentos citables + decisión | introducir hechos no sustentados, prescribir o invalidar una alerta |
-| `TriageAgent` | producir evaluación de riesgo estructurada y explicación | observaciones normalizadas + reglas + evidencia | desactivar reglas deterministas, ejecutar la alerta |
-| `SummaryAgent` | generar resumen final estructurado | eventos y decisiones de la sesión | reabrir conversación, inventar datos ausentes |
-| `KnowledgeIngestionService` | validar, fragmentar, indexar y borrar documentos | parsers, embeddings, repositorio | hacer razonamiento clínico; se implementa como servicio determinista, no LLM agent |
-| `SafetyPolicyEngine` | aplicar reglas de precedencia, abstención y escalamiento | reglas versionadas | ser modificado por prompts o respuestas del modelo |
-
-### 6.2 Contrato base de agente
-
-```python
-class AgentRequest(BaseModel):
-    session_id: UUID
-    correlation_id: UUID
-    knowledge_version: int
-    payload: dict
-    deadline_ms: int
-
-class AgentResult(BaseModel):
-    status: Literal["ok", "abstain", "error"]
-    output: dict
-    evidence: list["CitationRef"] = []
-    confidence: float | None = None
-    usage: "UsageMetrics"
-    warnings: list[str] = []
-```
-
-Reglas del contrato:
-
-- salida estructurada validada por Pydantic;
-- tiempo, tokens e intentos máximos por agente;
-- cero llamadas entre agentes: el orquestador es el único coordinador;
-- máximo un reintento por error transitorio;
-- fallback determinista ante timeout, JSON inválido o falta de evidencia;
-- cada resultado incluye `correlation_id`, `knowledge_version` y métricas.
-
-## 7. Flujo de llamada
-
-```mermaid
-stateDiagram-v2
-    [*] --> Initializing
-    Initializing --> Consent
-    Consent --> Interview: consentimiento confirmado
-    Consent --> Closed: rechazo o ausencia
-    Interview --> Interview: ambigüedad / microtriaje breve
-    Interview --> Retrieve: observación clínica
-    Retrieve --> Assess: evidencia disponible
-    Retrieve --> Escalate: evidencia insuficiente + posible riesgo
-    Assess --> Respond: sin alerta dura
-    Assess --> Escalate: regla o riesgo alto
-    Respond --> Interview: necesita seguimiento
-    Respond --> Summarize: objetivos cubiertos
-    Escalate --> Escalate: confirmar teléfonos de contacto
-    Escalate --> Summarize: contacto principal + alternativo confirmados
-    Summarize --> Closed
-```
-
-### 7.1 Secuencia por turno
-
-1. STT entrega texto parcial y final.
-2. `InterviewAgent` extrae observaciones normalizadas y ambigüedades.
-3. `SafetyPolicyEngine` evalúa red flags inmediatas.
-4. Un malestar intenso pero inespecífico (“muy mal”) activa un solo microtriaje de peligro
-   inmediato; no se presenta como solicitud explícita de urgencia.
-5. Si existe red flag dura, bloquea el camino normal y crea `escalate`.
-6. `RetrievalAgent` recupera evidencia filtrada por procedimiento y fase.
-7. `TriageAgent` evalúa riesgo estructurado sin poder rebajar una regla dura.
-8. `ResponseAgent` genera una intervención breve con citas internas.
-9. TTS empieza a transmitir; una nueva voz del paciente cancela la reproducción.
-10. Los eventos se escriben asíncronamente y con política fail-open para telemetría no clínica.
-
-## 8. Lógica de decisión y escalamiento
-
-### 8.1 Modelo de precedencia
+Precedencia:
 
 ```text
 HARD_RED_FLAG
-  > DATA_INTEGRITY_FAILURE
-  > EVIDENCE_INSUFFICIENT_WITH_RISK
-  > MODEL_HIGH_RISK
-  > MODEL_MODERATE_RISK
-  > ROUTINE_FOLLOW_UP
+> DATA_INTEGRITY_FAILURE
+> EVIDENCE_INSUFFICIENT_WITH_RISK
+> MODEL_HIGH_RISK
+> MODEL_MODERATE_RISK
+> ROUTINE_FOLLOW_UP
 ```
 
-Una decisión de mayor severidad nunca puede ser degradada por el LLM.
+Las señales duras se detectan sobre texto crudo y observaciones normalizadas:
+fiebre alta medida, dificultad respiratoria, pérdida de conciencia/confusión,
+sangrado, dolor que empeora/no cede/insoportable, solicitud explícita de
+urgencia y combinaciones clínicas versionadas. La negación se evalúa antes de
+activar una señal.
 
-### 8.2 Salida de triage
+Invariantes:
 
-```json
-{
-  "level": "urgent_human_review",
-  "should_escalate": true,
-  "trigger_codes": ["WOUND_HEAT", "PAIN_WORSENING"],
-  "observations_used": ["..."],
-  "evidence_ids": ["chunk-17", "chunk-22"],
-  "missing_information": ["temperature_c"],
-  "rationale_for_audit": "Combination requires human review under rule set v3.",
-  "patient_message_intent": "explain_handoff_without_diagnosis"
-}
-```
-
-### 8.3 Handoff
-
-En el reto, “alertar” es un handoff visible, persistente y auditable dentro de la aplicación:
-
-- crea un registro `escalation`;
-- cambia el estado de la sesión;
-- muestra la justificación, señales y fuentes;
-- solicita teléfono principal y contacto alternativo;
-- incorpora ambos al reporte y cierra automáticamente la llamada;
-- no depende de un botón ni de un operador para crear el handoff.
+- el LLM nunca rebaja una señal determinista;
+- “muy mal” inicia un microtriaje breve, no escala por sí solo;
+- silencio, falta de dato y ambigüedad son `not_assessed`, no `denied`;
+- ante fallo técnico con riesgo se abstiene/escala;
+- el handoff es idempotente;
+- el cierre crítico solicita teléfono principal y alternativo y finaliza en
+  forma automática.
 
 ## 9. RAG y conocimiento vivo
 
-### 9.1 Estrategia MVP
-
-SQLite es suficiente para el estado operacional y un corpus pequeño/mediano del reto:
-
-- `documents` y `document_versions` para identidad, checksum y estado;
-- `chunks` para texto y metadatos;
-- FTS5 para búsqueda léxica/BM25;
-- embeddings serializados como BLOB;
-- similitud coseno calculada con NumPy sobre candidatos acotados;
-- fusión de rankings por Reciprocal Rank Fusion;
-- reranking opcional solo si mejora una evaluación medida.
-
-FTS5 es un módulo oficial de búsqueda de texto completo de SQLite: [documentación](https://www.sqlite.org/fts5.html).
-
-La elección evita servicios adicionales y extensiones nativas frágiles. El puerto `VectorSearchPort` permite migrar después a Databricks Vector Search, pgvector u otro motor.
-
-### 9.2 Pipeline de ingestión
-
-1. validar tipo, tamaño, MIME, nombre y antivirus/guardas básicas;
-2. calcular SHA-256 y rechazar duplicados no intencionales;
-3. extraer texto y conservar páginas/secciones;
-4. fragmentar por estructura semántica, no por tamaño ciego;
-5. generar metadatos: procedimiento, audiencia, vigencia, fuente y sección;
-6. generar embeddings con adaptador configurable;
-7. escribir documento, chunks, embeddings y FTS en una transacción;
-8. incrementar `knowledge_version`;
-9. ejecutar consulta canaria y mostrar estado `ready`.
-
-### 9.3 Borrado verificable
-
-El borrado debe demostrar olvido:
-
-1. marcar versión `deleting`;
-2. eliminar chunks, FTS, embeddings y cachés dentro de una transacción;
-3. conservar únicamente un tombstone sin texto clínico: id, checksum, actor y fecha;
-4. incrementar `knowledge_version`;
-5. ejecutar una consulta canaria que confirme ausencia;
-6. impedir que una sesión nueva use una versión antigua;
-7. registrar evidencia de borrado para la demo.
-
-### 9.4 Evidence gate
-
-El sistema no permite que `ResponseAgent` genere una afirmación clínica si:
-
-- no hay fragmentos por encima del umbral;
-- los fragmentos pertenecen a otra versión eliminada;
-- la fuente no coincide con procedimiento/fase aplicable;
-- existe conflicto no resuelto entre documentos;
-- faltan metadatos obligatorios de procedencia.
-
-El fallback es pedir aclaración, dar una respuesta no clínica o escalar; nunca completar por conocimiento general del modelo.
-
-## 10. Voz en tiempo real
-
-### 10.1 Pipeline
-
-```mermaid
-flowchart LR
-    MIC["Micrófono"]
-    VAD["VAD"]
-    STT["STT streaming"]
-    ORC["Orquestador"]
-    TTS["TTS streaming"]
-    SPK["Audio"]
-
-    MIC --> VAD --> STT --> ORC --> TTS --> SPK
-    VAD -. "barge-in / cancel" .-> TTS
-```
-
-### 10.2 Decisión diferida al 7 de agosto
-
-El puerto de voz soportará dos implementaciones:
-
-- **Opción A — WebSocket pipeline:** proveedor STT + modelo obligatorio + proveedor TTS; mayor control y mejor trazabilidad.
-- **Opción B — API realtime compatible con el modelo obligatorio:** menor latencia si la ficha técnica y el proveedor lo permiten.
-
-Se elegirá mediante un spike de 90 minutos con cuatro criterios: cumplimiento del modelo, latencia P95, interrupciones y reproducibilidad.
-
-### 10.3 Presupuestos iniciales
-
-Son objetivos internos hasta recibir las métricas oficiales:
-
-| Métrica | Objetivo |
-|---|---:|
-| primera transcripción parcial | ≤500 ms P95 |
-| fin de habla → primera respuesta audible | ≤2.5 s P95 |
-| cancelación por barge-in | ≤250 ms P95 |
-| reconexión recuperable | ≤3 s |
-| pérdida tolerada de eventos auditables | 0 |
-
-## 11. Datos y persistencia
-
-### 11.1 Entidades principales
-
-| Entidad/tabla | Propósito |
-|---|---|
-| `patients` | agregado Pydantic en memoria construido desde los XLSX oficiales |
-| `followup_episodes` | 160 hitos históricos agrupados bajo 40 pacientes |
-| `sessions` | ciclo de vida y versión de conocimiento fijada |
-| `turns` | transcripción, speaker, tiempos y estado |
-| `observations` | síntomas/atributos normalizados y procedencia |
-| `decisions` | nivel, triggers, reglas, evidencia y explicación |
-| `escalations` | handoff idempotente enviado a revisión humana |
-| `followup_records` | proyección semiestructurada persistida de la llamada nueva y su alerta |
-| `summaries` | JSON estructurado y versión de schema |
-| `documents` | identidad lógica del documento |
-| `document_versions` | checksum, vigencia y estado |
-| `chunks` | texto, página/sección y metadatos |
-| `citations` | relación turno↔chunk↔documento |
-| `agent_events` | inicio/fin/error/abstención por agente |
-| `usage_metrics` | latencia, tokens, costo y proveedor |
-| `audit_events` | cambios de conocimiento y acciones administrativas |
-
-### 11.2 Aislamiento
-
-- `session_id` y `case_id` son obligatorios en todos los repositorios.
-- Nunca se reutiliza memoria de conversación entre sesiones.
-- Cada sesión fija una `knowledge_version`; una eliminación invalida nuevas sesiones y cachés.
-- Las vistas de auditoría redactan contenido sensible por defecto.
-
-### 11.3 Dataset oficial y agregado longitudinal
-
-`ChallengeCasePort` aísla los `.xlsx` oficiales de la lógica clínica:
-
-```python
-class ChallengeCasePort(Protocol):
-    async def list_cases(self, filters: CaseFilters) -> list[CaseSummary]: ...
-    async def get_case(self, case_id: str) -> ChallengeCase: ...
-```
-
-El adaptador:
-
-- usa acceso de solo lectura;
-- normaliza los 40 pacientes y agrupa sus días 1/3/7/14 en un contrato propio;
-- conserva los 160 `case_id` originales para trazabilidad, aunque la UI solo
-  presenta una entidad seleccionable por paciente;
-- valida schema y nullability al inicio;
-- no expone credenciales al frontend;
-- entrega el historial como datos estructurados, no como embeddings RAG;
-- persiste cada llamada nueva en `followup_records` con los ejes del dataset.
-
-## 12. API propuesta
-
-### 12.1 REST
-
-| Método | Ruta | Uso |
-|---|---|---|
-| `GET` | `/health/live` | proceso vivo |
-| `GET` | `/health/ready` | DB, modelo, voz y corpus listos |
-| `GET` | `/api/cases` | casos de demo autorizados |
-| `POST` | `/api/sessions` | iniciar sesión |
-| `POST` | `/api/sessions/{id}/finish` | cerrar y resumir |
-| `GET` | `/api/sessions/{id}` | estado y resumen |
-| `GET` | `/api/sessions/{id}/trace` | traza auditable |
-| `GET` | `/api/knowledge` | inventario y versión |
-| `POST` | `/api/knowledge/documents` | cargar documento |
-| `DELETE` | `/api/knowledge/documents/{id}` | borrar y verificar olvido |
-| `POST` | `/api/knowledge/search` | depuración autorizada de RAG |
-| `GET` | `/api/metrics` | P50/P95, tokens y costo |
-
-### 12.2 WebSocket
-
-`/ws/sessions/{session_id}` usa envelopes versionados:
-
-```json
-{
-  "v": 1,
-  "event": "transcript.final",
-  "sequence": 42,
-  "correlation_id": "uuid",
-  "timestamp": "RFC3339",
-  "payload": {}
-}
-```
-
-Eventos clave: `audio.chunk`, `speech.started`, `speech.ended`, `transcript.partial`, `transcript.final`, `agent.state`, `evidence.updated`, `risk.updated`, `tts.chunk`, `tts.cancel`, `escalation.created`, `session.completed`, `error.recoverable`.
-
-## 13. Observabilidad y evaluación
-
-### 13.1 Trace tree
+Pipeline:
 
 ```text
-call.session
-├── voice.stt
-├── agent.interview
-├── safety.rules
-├── rag.retrieve
-├── agent.triage
-├── agent.response
-├── voice.tts
-└── agent.summary
+archivo → validación → extracción/OCR → chunks → FTS5 + embeddings
+       → consulta canaria positiva → status ready + knowledge_version
 ```
 
-Cada span registra:
+La recuperación combina BM25/FTS5 y coseno mediante Reciprocal Rank Fusion.
+El arranque reproducible utiliza `LocalHashEmbeddings`, representación local de
+n-gramas; `OpenAICompatEmbeddings` permite BGE-M3 por Ollama. El evidence gate
+solo entrega fragmentos activos, vigentes y aplicables al procedimiento.
 
-- `session_id` pseudónimo y `correlation_id`;
-- componente, modelo/config hash y prompt version;
-- inicio, fin, resultado, latencia y retry count;
-- tokens de entrada/salida y costo calculado;
-- ids de evidencia, no chain-of-thought;
-- regla/decisión y versión de conocimiento.
+El borrado elimina chunks e invalida caché, incrementa `knowledge_version` y
+solo confirma éxito tras una canaria negativa. Las sesiones fijan la versión
+vigente al crearse, evitando mezclar conocimiento dentro de una llamada.
 
-La escritura de telemetría no crítica es asíncrona y fail-open; la escritura de decisiones, citas y escalamiento es transaccional y no puede perderse silenciosamente.
+## 10. Voz
 
-### 13.2 Evaluaciones
+`useVoiceSession` usa Web Speech API:
 
-- unitarias para reglas, contratos, ranking y borrado;
-- integración para WebSocket, ingestión y Delta Share;
-- conversación simulada para casos routine/moderate/urgent/ambiguous;
-- RAG: recall@k, citation precision, groundedness y deletion test;
-- triage: recall de red flags, false-negative count = 0 en casos críticos semilla;
-- voz: latencia P50/P95, interrupción y recuperación;
-- E2E para las cinco compuertas.
+- STT y TTS en el navegador;
+- half-duplex y supresión por similitud para evitar eco del agente;
+- barge-in: voz nueva cancela la locución;
+- el micrófono se detiene en estados terminales, pero la última respuesta se
+  reproduce antes de apagar el modo voz;
+- `CallModal` mide fin de habla→inicio de audio y persiste la muestra.
 
-## 14. Seguridad, privacidad y propiedad intelectual
+La compatibilidad objetivo es Chrome/Edge. SpeechRecognition puede depender de
+servicios del navegador; no se almacena audio bruto.
 
-- Dataset y material del reto se tratan según sus términos; solo datos sintéticos/autorizados en demo.
-- No se registran secretos, audio bruto ni PII innecesaria.
-- `.env.example` contiene nombres, nunca valores secretos.
-- Secret scanning antes de cada checkpoint y de la entrega.
-- Upload con allowlist, límite de tamaño y nombre saneado; el contenido se trata como datos, no como instrucciones.
-- Prompt-injection defense: el documento no puede redefinir políticas, herramientas ni reglas.
-- El repositorio no incluye material confidencial de Akron Children’s ni de `caregaps-agent`.
-- La fotografía oficial del campus puede usarse solo como referencia/prototipo hasta validar autorización. Para el repositorio público se reemplaza por un activo propio/licenciado si no existe permiso explícito.
-- No se reproduce el logotipo de Akron Children’s sin aprobación.
-- Los términos del concurso conceden amplios derechos de publicación y prohíben información confidencial o datos personales; el control de IP/privacidad es una compuerta de release.
+## 11. Persistencia y observabilidad
 
-## 15. Despliegue y reproducibilidad
+Tablas principales: `sessions`, `turns`, `observations`, `decisions`,
+`escalations`, `followup_records`, `documents`, `document_chunks`, `citations`,
+`events` y `knowledge_version`.
 
-### 15.1 MVP
+Cada evento incluye `correlation_id`, componente, tipo, payload, latencia y
+fecha. `/metrics` separa:
 
-```text
-docker compose up --build
-├── web      Next.js
-└── api      FastAPI + SQLite + documentos demo
-```
+- latencia de servidor (`turn.response_sent`);
+- latencia voz-a-voz (`client.voice_latency_reported`);
+- uso/costo de llamadas cerradas con `provider` y `model` reales.
 
-Objetivos:
+Las sesiones abiertas, dobles de prueba y registros sin modelo verificable no
+entran en denominadores por llamada. La telemetría secundaria es fail-open; las
+decisiones, citas y escalamiento son persistencia clínica crítica.
 
-- una única instrucción de arranque;
-- health checks y seed idempotente;
-- dependencias bloqueadas;
-- `make verify` o equivalente para gates locales;
-- perfil `demo` sin infraestructura externa salvo APIs exigidas;
-- datos y documentos de muestra con licencia compatible.
+## 12. API implementada
 
-La ficha técnica puede entregar un repositorio base; su estructura prevalece. Esta propuesta se adapta mediante puertos, no reemplazando automáticamente el starter.
+| Método | Ruta | Función |
+|---|---|---|
+| GET | `/health` | salud de API/DB |
+| GET | `/api/v1/cases` | pacientes/casos disponibles |
+| POST | `/api/v1/sessions` | crear llamada y mensaje de apertura |
+| GET | `/api/v1/sessions/{id}` | estado de llamada |
+| POST | `/api/v1/sessions/{id}/finish` | cierre explícito seguro |
+| POST | `/api/v1/sessions/{id}/voice-latency` | persistir muestra voz-a-voz |
+| WS | `/ws/sessions/{id}` | turnos y eventos conversacionales |
+| GET/POST/DELETE | `/api/v1/documents...` | conocimiento vivo |
+| GET | `/api/v1/search` | consulta RAG verificable |
+| GET | `/api/v1/audit/sessions` | listado de auditoría |
+| GET | `/api/v1/audit/sessions/{id}/trace` | traza completa |
+| GET | `/api/v1/metrics` | métricas de rúbrica |
 
-### 15.2 Escalamiento posterior
+## 13. Reproducibilidad y seguridad operativa
 
-| MVP | Evolución |
+`./levantar_app.sh` es idempotente: construye la primera vez, reutiliza
+imágenes/volumen después y ofrece `--rebuild`, `--stop`, `--logs`, `--clean` y
+`--local`. Si falta configuración, solicita una key Groq con entrada oculta y
+crea `api/.env`; ningún secreto se versiona o llega al frontend.
+
+El repositorio usa lockfiles, MIT para el código propio, NOTICE de terceros,
+secret scanning, ruff, pytest, TypeScript, lint y build de Next.js.
+
+## 14. Riesgos conocidos
+
+| Riesgo | Mitigación actual |
 |---|---|
-| SQLite | PostgreSQL/Databricks SQL según dominio |
-| vectores en SQLite/NumPy | Databricks Vector Search |
-| eventos in-process | Redis Streams/NATS/Kafka |
-| archivos locales | object storage |
-| una instancia WebSocket | gateway + sticky sessions/pub-sub |
-| alerta simulada | cola clínica/Epic con autorización y confirmación |
-| dataset Delta Share | tablas autorizadas de care gaps |
-| trazas locales | MLflow tracing/observabilidad institucional |
-
-## 16. Integración futura con `caregaps-agent`
-
-### 16.1 Qué se reutiliza conceptualmente
-
-- orquestador delgado;
-- tool/agent registry explícito;
-- allowlists de datos y herramientas;
-- separación `formatted/output` + `metadata`;
-- enrutamiento forzado para capacidades clínicas/analíticas;
-- observabilidad async/fail-open;
-- configuración por entorno y contratos Pydantic;
-- resultados estructurados y trazabilidad.
-
-### 16.2 Qué no se copia
-
-- código propietario;
-- prompts o descripciones de herramientas;
-- tablas, catálogos, schemas, endpoints o credenciales;
-- datos, ejemplos o screenshots de pacientes;
-- nombres internos no publicados.
-
-### 16.3 Seam de integración
-
-Care Companion expone una capacidad futura `PostOpFollowUpCapability`:
-
-```python
-class PostOpFollowUpCapability(Protocol):
-    async def start(self, context: FollowUpContext) -> SessionRef: ...
-    async def handle_turn(self, session: SessionRef, utterance: str) -> TurnResult: ...
-    async def finish(self, session: SessionRef) -> FollowUpSummary: ...
-```
-
-En `caregaps-agent`, esta capacidad podría registrarse como herramienta/capacidad separada. El agente existente decidiría cuándo iniciar el workflow, pero no controlaría el triage interno ni recibiría audio/PII más allá de lo autorizado.
-
-### 16.4 Boundary para Epic
-
-Una integración real se separaría en:
-
-1. **read adapter:** contexto autorizado del paciente;
-2. **decision support:** Care Companion propone y explica;
-3. **human approval:** una persona valida;
-4. **write adapter:** ejecuta una acción limitada, idempotente y auditable.
-
-No se permitirá que Databricks, el LLM o el agente ejecuten escrituras directas en Epic sin autorización, scopes mínimos, validación humana y reconciliación.
-
-## 17. Decisiones ADR
-
-| ADR | Decisión | Estado |
-|---|---|---|
-| ADR-001 | monolito modular durante el reto | aceptada |
-| ADR-002 | orquestación como máquina de estados en Python | aceptada |
-| ADR-003 | SQLite + FTS5 + vectores BLOB/NumPy para MVP | propuesta |
-| ADR-004 | reglas deterministas tienen precedencia sobre LLM | aceptada |
-| ADR-005 | proveedor de LLM y voz detrás de adapters | aceptada |
-| ADR-006 | fotografía/marca del hospital requiere autorización antes de publicación | aceptada |
-| ADR-007 | estrategia concreta de voz | pendiente del 7 de agosto |
-| ADR-008 | modelo y embeddings | pendiente de ficha técnica |
-| ADR-009 | schema de Delta Share | pendiente del dataset |
-
-## 18. Riesgos
-
-| Riesgo | Impacto | Mitigación |
-|---|---|---|
-| modelo obligatorio no soporta el flujo previsto | alto | adapter y spike obligatorio T+0 |
-| latencia de voz excesiva | eliminatorio | streaming, barge-in, presupuestos y modo fallback |
-| borrado deja chunks/cachés | eliminatorio | transacción + knowledge version + consulta canaria |
-| RAG recupera fuente incorrecta | alto | filtros de aplicabilidad, hybrid retrieval, evidence gate |
-| falso negativo clínico | crítico | reglas conservadoras, casos críticos, precedencia no degradable |
-| sobrearquitectura en tres días | alto | monolito modular, freeze de alcance, vertical slice primero |
-| starter/dataset difieren de supuestos | alto | sprint de intake y ADR delta el 7 de agosto |
-| secretos/PHI en repo o video | crítico | datos sintéticos, redacción, secret scan, release checklist |
-| uso no autorizado de marca/foto | alto | activo reemplazable y revisión IP antes de publicar |
-| SQLite bloquea bajo concurrencia | medio en MVP | WAL, transacciones cortas; migración posterior |
-
-## 19. Criterios de aceptación arquitectónicos
-
-- [ ] Una llamada completa atraviesa voz→orquestador→RAG→triage→respuesta→resumen.
-- [ ] Cada afirmación clínica visible tiene al menos una cita válida.
-- [ ] Una red flag determinista no puede ser degradada por ninguna salida del modelo.
-- [ ] La eliminación de un documento impide recuperarlo en sesiones nuevas y se prueba automáticamente.
-- [ ] Un fallo de telemetría no interrumpe la llamada; un fallo de persistencia clínica sí produce estado seguro.
-- [ ] El modelo obligatorio se configura en un solo adapter y no existen llamadas a otros LLM.
-- [ ] El proyecto arranca desde cero en ≤15 minutos con el proceso definido por la ficha técnica.
-- [ ] El repositorio público no contiene secretos, PII, PHI, información institucional confidencial ni activos sin licencia.
+| Cuota Groq | cero reintentos en llamada + resguardo Ollama opcional |
+| Latencia voz elevada | medición real, respuestas breves y trabajo futuro fuera del camino crítico |
+| Web Speech depende del navegador | Chrome/Edge declarados; fallback de texto |
+| Corpus heterogéneo | validación, PDF protegido con contraseña vacía autorizada y OCR cacheado |
+| Prototipo confundido con atención real | alcance explícito, datos sintéticos y handoff persistido sin integración externa |
