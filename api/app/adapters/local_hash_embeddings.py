@@ -1,4 +1,4 @@
-"""`FakeEmbeddings` — adapter determinista de `EmbeddingsPort` (RAG-004).
+"""`LocalHashEmbeddings` — representación vectorial local (RAG-004).
 
 Sin llamadas externas. Usa una bolsa de n-gramas de caracteres con
 "feature hashing" (truco de hashing, à la scikit-learn `HashingVectorizer`):
@@ -32,7 +32,7 @@ _NGRAM_SIZE = 3
 _BOUNDARY = ""  # marcador de inicio/fin, para pesar bordes de palabra
 
 
-class FakeEmbeddings(EmbeddingsPort):
+class LocalHashEmbeddings(EmbeddingsPort):
     """`dimensions` debe coincidir entre todas las llamadas que se vayan a
     comparar por coseno (documentos indexados y queries) — normalmente
     `Settings.rag_embedding_dimensions`."""

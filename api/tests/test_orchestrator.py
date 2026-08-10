@@ -8,9 +8,8 @@ import json
 
 import pytest
 
-from app.adapters.fake_embeddings import FakeEmbeddings
-from app.adapters.fake_llm import ScriptedFakeLLM
 from app.adapters.fixture_cases import FixtureCaseAdapter
+from app.adapters.local_hash_embeddings import LocalHashEmbeddings
 from app.core.config import Settings
 from app.domain.decision import DecisionLevel
 from app.domain.observation import Observation
@@ -30,6 +29,7 @@ from app.repositories.sessions import SessionRepository
 from app.repositories.turns import TurnRepository
 from app.services.embeddings_cache import EmbeddingsCache
 from app.services.ingestion import KnowledgeIngestionService
+from tests.support.llm_doubles import ScriptedFakeLLM
 
 _INTERVIEW_MARKER = "extraer observaciones estructuradas del último turno"
 _TRIAGE_MARKER = "evaluador de riesgo estructurado"
@@ -46,7 +46,9 @@ def _init_db(db_path: str) -> None:
 
 def _orchestrator(db_path: str, llm: ScriptedFakeLLM) -> CallCycleOrchestrator:
     settings = Settings(DATABASE_PATH=db_path)
-    embeddings = EmbeddingsCache(FakeEmbeddings(dimensions=settings.rag_embedding_dimensions))
+    embeddings = EmbeddingsCache(
+        LocalHashEmbeddings(dimensions=settings.rag_embedding_dimensions)
+    )
     return CallCycleOrchestrator(
         database_path=db_path,
         llm=llm,
@@ -835,7 +837,9 @@ async def test_retrieval_is_scoped_to_case_procedure_via_applicability(db_path: 
     `procedure_category="cirugia_ambulatoria_general_x"`."""
     _init_db(db_path)
     settings = Settings(DATABASE_PATH=db_path)
-    embeddings = EmbeddingsCache(FakeEmbeddings(dimensions=settings.rag_embedding_dimensions))
+    embeddings = EmbeddingsCache(
+        LocalHashEmbeddings(dimensions=settings.rag_embedding_dimensions)
+    )
     ingestion = KnowledgeIngestionService(db_path, embeddings_cache=embeddings, settings=settings)
 
     await ingestion.learn(

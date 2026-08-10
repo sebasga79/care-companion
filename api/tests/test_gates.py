@@ -71,27 +71,20 @@ def test_gate_decision_not_degradable() -> None:
 # Gate: un solo modelo (allowlist de proveedores; sin adapters clandestinos)
 # ---------------------------------------------------------------------------
 def test_gate_single_model_allowlist() -> None:
-    # `fake` es solo para tests/desarrollo sin credenciales; los dos
-    # proveedores reales son `groq` (primario, Llama 3.1 70B) y `ollama`
-    # (resguardo local, Phi-3.5 Mini) — decisión en
+    # Runtime solo permite proveedores reales: `groq` (primario, familia
+    # Meta Llama) y `ollama` (resguardo local, Phi-3.5 Mini) — decisión en
     # docs/auditoria-kit-oficial-2026-08-07.md §3, ambos dentro de la
     # allowlist de modelos permitidos del reto (G3).
-    assert {p.value for p in LLMProvider} == {"fake", "groq", "ollama"}
+    assert {p.value for p in LLMProvider} == {"groq", "ollama"}
 
 
 # ---------------------------------------------------------------------------
 # Gate: voz realtime — contrato WebSocket con envelopes versionados y seq
 # ---------------------------------------------------------------------------
 def test_gate_websocket_realtime_contract(client: TestClient) -> None:
-    """`client` usa el `LLM_PROVIDER=fake` DEFAULT del proyecto (el mismo
-    con el que arranca `./levantar_app.sh`/`docker compose up` sin ningún
-    `.env`) — a propósito, no un `ScriptedFakeLLM` a medida. Regresión
-    (docs/auditoria-kit-oficial-2026-08-07.md §9.2): hasta el 7 de agosto,
-    `FakeLLM` devolvía texto plano no-JSON y CUALQUIER turno con el
-    proveedor por defecto caía en fail-safe con
-    `DATA_INTEGRITY_FAILURE` en el primer intento — el camino "sin
-    credenciales" que el README anuncia como funcional nunca completaba una
-    llamada real. Este test falla si eso vuelve a pasar."""
+    """El fixture inyecta un doble determinista únicamente dentro de la
+    suite. El arranque del producto no ofrece ese proveedor: este test
+    conserva la regresión del contrato WebSocket sin consumir cuota Groq."""
     case_id = client.get("/api/v1/cases").json()[0]["case_id"]
     session_id = client.post("/api/v1/sessions", json={"case_id": case_id}).json()["id"]
 
@@ -125,9 +118,8 @@ def test_gate_websocket_realtime_contract(client: TestClient) -> None:
     assert len(set(seqs)) == len(seqs)
     assert "server.decision" in types
 
-    # El PRIMER turno de una llamada nueva, con el proveedor fake por
-    # defecto, nunca debe fallar por un problema técnico interno del propio
-    # adapter (parsing/contrato) — eso es un bug del proveedor `fake`, no
+    # El PRIMER turno de una llamada nueva nunca debe fallar por un problema
+    # técnico interno del doble de prueba (parsing/contrato), no
     # una decisión clínica legítima. `DATA_INTEGRITY_FAILURE` es
     # exactamente la señal de ese tipo de fallo (app/domain/decision.py).
     assert decision_envs[0]["payload"]["level"] != "DATA_INTEGRITY_FAILURE"

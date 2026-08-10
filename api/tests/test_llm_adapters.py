@@ -3,7 +3,7 @@
 
 Sin red real: `httpx.MockTransport` sustituye la conexión HTTP por un
 handler determinista, siguiendo el mismo principio que el resto de adapters
-del proyecto (`FakeLLM`, `FakeEmbeddings`) — comportamiento real del
+del proyecto (dobles deterministas de LLM y embeddings locales) — comportamiento real del
 protocolo, sin credenciales ni servicios externos en CI."""
 
 from __future__ import annotations

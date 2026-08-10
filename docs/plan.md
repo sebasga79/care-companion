@@ -1,5 +1,36 @@
 # Care Companion — Delivery Plan
 
+> **Bitácora histórica.** Este backlog conserva decisiones y tickets tal como
+> evolucionaron antes y después de recibir el kit. Los estados actuales de
+> cumplimiento están consolidados en [`traceability.md`](traceability.md) y
+> [`final-report.md`](final-report.md); `Pendiente-T0` dentro de esta bitácora
+> no describe el producto final.
+
+## 0. Estado de cierre — 9 de agosto de 2026
+
+Fuente de cumplimiento vigente: [`traceability.md`](traceability.md).
+
+- [x] G2 observado en clon limpio: 1 min 45 s con `./levantar_app.sh`.
+- [x] G3: runtime limitado a Groq/Llama 3.3 70B y resguardo real opcional
+  Ollama/Llama 3.2 3B; sin proveedor LLM simulado seleccionable.
+- [x] G4 ensayado manualmente; cuatro muestras de voz persistidas.
+- [x] Métricas recalculadas solo sobre llamadas cerradas del proveedor/modelo
+  final, con denominador, ventana y tokens excluidos visibles.
+- [x] Narrativa canónica reformulada como seguimiento postoperatorio centrado
+  en paciente; familiar/cuidador solo cuando aplica.
+- [x] Benchmarks rotulados como artefactos históricos, sin porcentajes de
+  desempeño general no sustentados.
+- [x] `make verify`: 415 passed, 3 skipped; frontend lint/typecheck/build,
+  Compose, health y métricas verificados.
+- [x] Grabar y publicar el [video funcional del MVP](https://youtu.be/wKgmlhy0Txo).
+- [x] Grabar y publicar el [segundo video con la argumentación y las dos
+  preguntas de cierre](https://youtu.be/cez5dnn9KEA).
+- [x] Entregar arquitectura y flujo de decisión como
+  [`architecture-diagram.md`](architecture-diagram.md), Mermaid renderizable en GitHub;
+  la documentación oficial no exige una exportación adicional.
+- [x] Secret scan final: Gitleaks sobre 79 commits y diff preparado, sin
+  hallazgos; `api/.env` permanece ignorado y solo se publica `.env.example`.
+
 > SDD v0.1 · 23 de julio de 2026  
 > Ventana pública: construcción 7–10 de agosto de 2026; revisión 10–18 de agosto; final 5 de septiembre.  
 > Propietario: SG · Ejecución individual, con Codex/Claude como asistentes de código bajo `spec.md`.

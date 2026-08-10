@@ -1,9 +1,4 @@
-"""`FakeLLM` — adapter determinista de `LLMPort` para tests y desarrollo sin
-credenciales (REP-002/ORC-001, `LLM_PROVIDER=fake`, el default del proyecto
-y el que anuncia el README como "no necesitas credenciales para correr el
-prototipo"). No es uno de los modelos permitidos del reto (G3); se
-reemplaza por un adapter real (Groq/Ollama, `app/adapters/
-openai_compat_llm.py`) sin tocar dominio (ADR-001).
+"""Dobles deterministas de `LLMPort`, exclusivos de la suite de pruebas.
 
 Contract-aware (corregido 7 ago, ver docs/auditoria-kit-oficial-2026-08-07.md
 §9.2): antes, `generate()` devolvía siempre el mismo texto plano
@@ -23,7 +18,8 @@ la forma de los envelopes.
 No importa nada de `app/agents/` (los adapters no dependen de agentes,
 es al revés) — las formas JSON de abajo están hardcodeadas como los tests
 que usan `ScriptedFakeLLM` ya hacen, no reutilizadas de un modelo Pydantic
-importado."""
+importado. Este módulo vive bajo `tests/` y nunca se incluye como proveedor
+configurable del producto."""
 
 from __future__ import annotations
 

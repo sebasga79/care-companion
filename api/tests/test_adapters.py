@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import json
 
-from app.adapters.fake_embeddings import FakeEmbeddings
-from app.adapters.fake_llm import FakeLLM
-from app.adapters.fake_stt import FakeSTT
-from app.adapters.fake_tts import FakeTTS
 from app.adapters.fixture_cases import FixtureCaseAdapter
+from app.adapters.local_hash_embeddings import LocalHashEmbeddings
 from app.ports.challenge_case import CaseFilters
 from app.ports.llm import LLMMessage
+from tests.support.llm_doubles import FakeLLM
+from tests.support.stt_double import FakeSTT
+from tests.support.tts_double import FakeTTS
 
 
 async def test_fake_llm_is_deterministic() -> None:
@@ -91,7 +91,7 @@ async def test_fake_tts_returns_bytes() -> None:
 
 
 async def test_fake_embeddings_is_deterministic_and_dimension_stable() -> None:
-    embeddings = FakeEmbeddings()
+    embeddings = LocalHashEmbeddings()
     vectors = await embeddings.embed(["hola", "hola", "adios"])
     assert vectors[0] == vectors[1]  # mismo texto -> mismo vector
     assert vectors[0] != vectors[2]

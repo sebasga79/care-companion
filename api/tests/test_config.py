@@ -10,10 +10,10 @@ from pydantic import ValidationError
 from app.core.config import EmbeddingsProvider, LLMProvider, get_settings
 
 
-def test_default_settings_use_fake_provider(clean_env: None) -> None:
+def test_default_settings_use_allowed_local_provider(clean_env: None) -> None:
     settings = get_settings()
-    assert settings.llm_provider == LLMProvider.FAKE
-    assert settings.llm_model == "fake-model-v1"
+    assert settings.llm_provider == LLMProvider.OLLAMA
+    assert settings.llm_model == "llama3.2:3b"
     assert settings.api_port == 8000
 
 
@@ -68,7 +68,7 @@ def test_ollama_does_not_require_api_key(clean_env: None, monkeypatch: pytest.Mo
     settings = get_settings()
     assert settings.llm_provider == LLMProvider.OLLAMA
     assert settings.llm_base_url == "http://localhost:11434/v1"
-    assert settings.llm_model == "phi3.5"
+    assert settings.llm_model == "llama3.2:3b"
     assert settings.llm_api_key is None
 
 
@@ -102,7 +102,7 @@ def test_fallback_ollama_applies_defaults(clean_env: None, monkeypatch: pytest.M
     monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "ollama")
     settings = get_settings()
     assert settings.llm_fallback_base_url == "http://localhost:11434/v1"
-    assert settings.llm_fallback_model == "phi3.5"
+    assert settings.llm_fallback_model == "llama3.2:3b"
 
 
 def test_fallback_groq_without_api_key_fails(
@@ -114,9 +114,9 @@ def test_fallback_groq_without_api_key_fails(
         get_settings()
 
 
-def test_embeddings_default_is_fake(clean_env: None) -> None:
+def test_embeddings_default_is_local_hash(clean_env: None) -> None:
     settings = get_settings()
-    assert settings.embeddings_provider == EmbeddingsProvider.FAKE
+    assert settings.embeddings_provider == EmbeddingsProvider.LOCAL_HASH
     assert settings.embeddings_base_url is None
 
 

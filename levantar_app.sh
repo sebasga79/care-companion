@@ -78,6 +78,72 @@ log()  { echo "${GREEN}${BOLD}==>${RESET} $*"; }
 warn() { echo "${YELLOW}${BOLD}warn:${RESET} $*"; }
 err()  { echo "${RED}${BOLD}error:${RESET} $*" >&2; }
 
+write_groq_env() {
+  local source_file="$1" api_key="$2" target_file="$API_DIR/.env"
+  local temp_file="$API_DIR/.env.tmp.$$"
+  umask 077
+  : > "$temp_file"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      LLM_PROVIDER=*) printf '%s\n' 'LLM_PROVIDER=groq' >> "$temp_file" ;;
+      LLM_BASE_URL=*) printf '%s\n' 'LLM_BASE_URL=https://api.groq.com/openai/v1' >> "$temp_file" ;;
+      LLM_API_KEY=*) printf 'LLM_API_KEY=%s\n' "$api_key" >> "$temp_file" ;;
+      LLM_MODEL=*) printf '%s\n' 'LLM_MODEL=llama-3.3-70b-versatile' >> "$temp_file" ;;
+      *) printf '%s\n' "$line" >> "$temp_file" ;;
+    esac
+  done < "$source_file"
+  mv "$temp_file" "$target_file"
+}
+
+valid_groq_key() {
+  local candidate="$1"
+  [ "${#candidate}" -ge 20 ] \
+    && [[ "$candidate" == gsk_* ]] \
+    && [[ "$candidate" != *"..."* ]] \
+    && [[ "$candidate" != *"xxx"* ]]
+}
+
+ensure_real_model_config() {
+  local env_file="$API_DIR/.env" provider="" api_key="${GROQ_API_KEY:-}" file_api_key="" source_file
+
+  if [ -f "$env_file" ]; then
+    provider=$(sed -n 's/^LLM_PROVIDER=//p' "$env_file" | tail -n 1 | tr -d '[:space:]')
+    if [ "$provider" = "groq" ]; then
+      file_api_key=$(sed -n 's/^LLM_API_KEY=//p' "$env_file" | tail -n 1)
+      valid_groq_key "$api_key" || api_key="$file_api_key"
+      if valid_groq_key "$api_key"; then
+        # Normaliza también instalaciones existentes que conservaban un
+        # modelo anterior; no obliga al usuario a editar variables a mano.
+        write_groq_env "$env_file" "$api_key"
+        return 0
+      fi
+    elif [ "$provider" = "ollama" ]; then
+      return 0
+    elif [ -n "$provider" ]; then
+      err "LLM_PROVIDER='$provider' no está permitido. Usa groq u ollama."
+      return 1
+    fi
+  fi
+
+  if ! valid_groq_key "$api_key" && [ -t 0 ]; then
+    echo
+    echo "Care Companion usa Meta Llama 3.3 70B vía Groq."
+    echo "Crea una key gratuita en https://console.groq.com/keys y pégala aquí."
+    printf 'Groq API key (entrada oculta): '
+    IFS= read -r -s api_key
+    echo
+  fi
+  if ! valid_groq_key "$api_key"; then
+    err "Falta una credencial Groq válida. Define GROQ_API_KEY o ejecuta el launcher en una terminal interactiva."
+    return 1
+  fi
+
+  source_file="$API_DIR/.env.example"
+  [ -f "$env_file" ] && source_file="$env_file"
+  write_groq_env "$source_file" "$api_key"
+  log "Configuración local creada con Groq/Llama 3.3 70B (api/.env no se versiona)."
+}
+
 # --- Prerrequisitos ----------------------------------------------------------
 require() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -115,6 +181,10 @@ wait_for_stack() {
 }
 
 run_docker_launcher() {
+  # Corrige permisos de instalaciones anteriores incluso si los servicios
+  # ya están sanos y se toma la ruta rápida sin reconstrucción.
+  [ -f "$API_DIR/.env" ] && chmod 600 "$API_DIR/.env"
+
   # Si Docker o el modo local ya sirven una instancia sana, no reinstala ni
   # reinicia nada: muestra las URLs y abre el navegador.
   if [ "$ACTION" = "up" ] \
@@ -134,21 +204,6 @@ run_docker_launcher() {
   if ! docker compose version >/dev/null 2>&1; then
     err "Docker Compose no está disponible. Actualiza Docker Desktop."
     return 1
-  fi
-
-  # `docker-compose.yml` declara `env_file: ./api/.env` — Docker Compose
-  # trata un env_file declarado-pero-ausente como error FATAL (no como
-  # "sin variables extra"), así que TODO comando de compose (`ps`, `images`,
-  # `up`) fallaba de inmediato en un clon nuevo, antes de construir nada.
-  # Encontrado en vivo: un clon fresco con puertos libres moría en <1s con
-  # "env file .../api/.env not found", sin log legible para quien lo corre
-  # (auditoría §9.38). El .env.example por defecto ya usa el proveedor
-  # `fake` (seguro, sin credenciales) — copiarlo automáticamente restaura
-  # la promesa real de "un solo comando" sin exigir un paso manual previo.
-  if [ ! -f "$API_DIR/.env" ]; then
-    log "No existe api/.env — copiando api/.env.example (modo de prueba sin credenciales)…"
-    cp "$API_DIR/.env.example" "$API_DIR/.env"
-    echo "  ${DIM}Para hablar con el modelo real: edita api/.env (LLM_PROVIDER/LLM_API_KEY) y corre --rebuild.${RESET}"
   fi
 
   if ! docker info >/dev/null 2>&1; then
@@ -178,6 +233,8 @@ run_docker_launcher() {
       return 0
       ;;
   esac
+
+  ensure_real_model_config
 
   if [ "$CLEAN_DB" = true ]; then
     warn "--clean eliminará base, dataset e índice persistidos; el kit se descargará de nuevo."
@@ -222,6 +279,8 @@ if [ "$MODE" = "docker" ]; then
   run_docker_launcher
   exit $?
 fi
+
+ensure_real_model_config
 
 log "Verificando prerrequisitos…"
 require uv   "Instala uv: https://docs.astral.sh/uv/getting-started/installation/"

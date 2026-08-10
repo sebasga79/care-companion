@@ -38,7 +38,7 @@ def extract_json_payload(text: str) -> str:
     objeto JSON pese a que el prompt pida "solo JSON": fences de markdown
     (```json ... ```) o una frase antes/después del objeto. No es un parser
     laxo — solo recorta hasta el primer `{`/último `}` plausible; `parse`
-    (Pydantic) sigue validando la forma real. `FakeLLM`/`ScriptedFakeLLM`
+    (Pydantic) sigue validando la forma real. Los dobles deterministas de tests
     siempre devuelven JSON limpio, así que esto solo importa con un
     proveedor real (Groq/Ollama) que no respete el formato al 100 % pese a
     `response_format=json_object`."""

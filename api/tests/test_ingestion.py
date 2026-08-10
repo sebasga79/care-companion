@@ -11,7 +11,7 @@ import uuid
 
 import pytest
 
-from app.adapters.fake_embeddings import FakeEmbeddings
+from app.adapters.local_hash_embeddings import LocalHashEmbeddings
 from app.core.config import Settings
 from app.domain.models import CitationRef
 from app.repositories.citations import CitationRepository
@@ -54,7 +54,7 @@ def _init_db(db_path: str) -> None:
 
 def _service(db_path: str) -> tuple[KnowledgeIngestionService, EmbeddingsCache, Settings]:
     settings = Settings(DATABASE_PATH=db_path)
-    cache = EmbeddingsCache(FakeEmbeddings(dimensions=settings.rag_embedding_dimensions))
+    cache = EmbeddingsCache(LocalHashEmbeddings(dimensions=settings.rag_embedding_dimensions))
     svc = KnowledgeIngestionService(db_path, embeddings_cache=cache, settings=settings)
     return svc, cache, settings
 

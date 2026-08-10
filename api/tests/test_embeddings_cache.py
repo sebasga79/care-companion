@@ -1,11 +1,11 @@
-"""RAG-004 — `FakeEmbeddings` (n-gramas, no hash de texto completo) y
+"""RAG-004 — `LocalHashEmbeddings` (n-gramas, no hash de texto completo) y
 `EmbeddingsCache` (batching + cache por checksum de texto)."""
 
 from __future__ import annotations
 
 import math
 
-from app.adapters.fake_embeddings import FakeEmbeddings
+from app.adapters.local_hash_embeddings import LocalHashEmbeddings
 from app.services.embeddings_cache import EmbeddingsCache
 
 
@@ -19,7 +19,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 async def test_fake_embeddings_similar_texts_are_closer_than_unrelated() -> None:
-    embeddings = FakeEmbeddings(dimensions=128)
+    embeddings = LocalHashEmbeddings(dimensions=128)
     related_a = "siento calor en la herida y esta enrojecida"
     related_b = "la herida presenta calor y enrojecimiento"
     unrelated = "el clima de hoy esta soleado y agradable"
@@ -32,7 +32,7 @@ async def test_fake_embeddings_similar_texts_are_closer_than_unrelated() -> None
 
 
 async def test_fake_embeddings_identical_text_has_cosine_one() -> None:
-    embeddings = FakeEmbeddings(dimensions=64)
+    embeddings = LocalHashEmbeddings(dimensions=64)
     text = "misma frase exacta"
     vectors = await embeddings.embed([text, text])
     assert abs(_cosine(vectors[0], vectors[1]) - 1.0) < 1e-6
@@ -42,7 +42,7 @@ async def test_embeddings_cache_reuses_vector_for_repeated_text() -> None:
     class CountingEmbeddings:
         def __init__(self) -> None:
             self.calls = 0
-            self._inner = FakeEmbeddings(dimensions=32)
+            self._inner = LocalHashEmbeddings(dimensions=32)
 
         async def embed(self, texts: list[str]) -> list[list[float]]:
             self.calls += 1
@@ -62,7 +62,7 @@ async def test_embeddings_cache_deduplicates_within_same_batch() -> None:
     class CountingEmbeddings:
         def __init__(self) -> None:
             self.requested_texts: list[str] = []
-            self._inner = FakeEmbeddings(dimensions=32)
+            self._inner = LocalHashEmbeddings(dimensions=32)
 
         async def embed(self, texts: list[str]) -> list[list[float]]:
             self.requested_texts.extend(texts)
@@ -77,7 +77,7 @@ async def test_embeddings_cache_deduplicates_within_same_batch() -> None:
 
 
 async def test_embeddings_cache_evict_removes_entry() -> None:
-    cache = EmbeddingsCache(FakeEmbeddings(dimensions=16))
+    cache = EmbeddingsCache(LocalHashEmbeddings(dimensions=16))
     await cache.embed_batch(["texto a olvidar", "texto a conservar"])
     assert len(cache) == 2
 

@@ -243,7 +243,7 @@ def _build_observations(
     `try/except AgentInvocationError`, que sólo cubre la invocación — y
     escapaba hasta el orquestador como excepción no anticipada. Resultado:
     `DATA_INTEGRITY_FAILURE` y escalamiento en el PRIMER turno ante un
-    simple "buenas tardes". Los tests no lo detectaban porque los fakes
+    simple "buenas tardes". Los tests no lo detectaban porque sus dobles deterministas
     siempre rellenan `original_text`.
 
     Dos defensas, en este orden:

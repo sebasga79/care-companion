@@ -14,10 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters.combined_cases import CombinedCaseAdapter
 from app.adapters.dataset_case_source import DatasetCaseAdapter, DatasetFilesMissingError
-from app.adapters.fake_embeddings import FakeEmbeddings
-from app.adapters.fake_llm import FakeLLM
 from app.adapters.fallback_llm import FallbackLLM
 from app.adapters.fixture_cases import FixtureCaseAdapter
+from app.adapters.local_hash_embeddings import LocalHashEmbeddings
 from app.adapters.openai_compat_embeddings import OpenAICompatEmbeddings
 from app.adapters.openai_compat_llm import OpenAICompatLLM
 from app.api.routes import audit, cases, health, knowledge, sessions, ws
@@ -203,8 +202,6 @@ def _build_single_adapter(
     rate_limit_max_retries: int = 0,
     rate_limit_max_wait_seconds: float = 10.0,
 ) -> LLMPort:
-    if provider is LLMProvider.FAKE:
-        return FakeLLM(model=model or "fake-model-v1")
     # `Settings._apply_llm_defaults_and_validate` ya garantizó que
     # base_url/model son valores reales para GROQ/OLLAMA antes de que la
     # app pueda arrancar — nunca llegamos aquí con placeholders.
@@ -224,11 +221,10 @@ def _build_embeddings_adapter(settings: Settings) -> EmbeddingsPort:
     """Único punto de construcción del `EmbeddingsPort` real (mismo
     principio que `_build_llm_adapter`: el dominio nunca importa un SDK de
     proveedor). Decisión en docs/auditoria-kit-oficial-2026-08-07.md §3/§9
-    — `ollama` sirve BGE-M3 localmente; sin `EMBEDDINGS_PROVIDER` configurado
-    se mantiene `FakeEmbeddings` (cero dependencias, comportamiento de
-    siempre)."""
-    if settings.embeddings_provider is EmbeddingsProvider.FAKE:
-        return FakeEmbeddings(dimensions=settings.rag_embedding_dimensions)
+    — `ollama` sirve BGE-M3 localmente; `local_hash` conserva una ruta local,
+    reproducible y sin servicio adicional."""
+    if settings.embeddings_provider is EmbeddingsProvider.LOCAL_HASH:
+        return LocalHashEmbeddings(dimensions=settings.rag_embedding_dimensions)
     # `Settings._apply_llm_defaults_and_validate` ya garantizó valores
     # reales para OLLAMA antes de que la app pueda arrancar.
     assert settings.embeddings_base_url is not None and settings.embeddings_model is not None

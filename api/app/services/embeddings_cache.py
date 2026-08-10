@@ -1,11 +1,11 @@
 """`EmbeddingsCache` — batching + cache por checksum de texto sobre
 `EmbeddingsPort` (RAG-004).
 
-Envuelve cualquier adapter (`FakeEmbeddings` hoy; el adapter real de T0
+Envuelve cualquier adapter (`LocalHashEmbeddings` u Ollama/BGE-M3)
 llega detrás del mismo puerto) para que la ingestión no vuelva a llamar al
 proveedor por un chunk cuyo texto exacto ya fue embebido antes — clave del
 caché es `sha256(texto)`, no el `chunk_id` (dos chunks distintos con texto
-idéntico comparten entrada de caché; determinista con `FakeEmbeddings` y
+idéntico comparten entrada de caché; determinista con `LocalHashEmbeddings` y
 razonable para proveedores reales también).
 
 `evict()` es lo que usa el flujo de borrado (RAG-009 — "purga de ...

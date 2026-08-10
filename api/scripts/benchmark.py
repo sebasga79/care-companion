@@ -24,9 +24,9 @@ Uso:
     uv run python scripts/benchmark.py --capa capa2_ruidosa --limit 10
     uv run python scripts/benchmark.py --limit 40 --out docs/benchmarks/run.json
 
-Corre con el proveedor configurado en `.env`. Con `LLM_PROVIDER=fake` es
-determinista e instantáneo (útil para verificar el arnés); con `groq` u
-`ollama` mide el sistema real.
+Corre únicamente con el proveedor real configurado en `.env` (`groq` u
+`ollama`). Por cuota, sus resultados son exploratorios y no sustituyen las
+métricas vivas de `/api/v1/metrics`.
 """
 
 from __future__ import annotations

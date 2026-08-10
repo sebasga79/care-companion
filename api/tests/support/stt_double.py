@@ -1,4 +1,4 @@
-"""`FakeSTT` — adapter determinista de `STTPort` para tests/desarrollo."""
+"""Doble determinista de `STTPort`, exclusivo de tests."""
 
 from __future__ import annotations
 

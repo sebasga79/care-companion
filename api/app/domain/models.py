@@ -16,8 +16,8 @@ class UsageMetrics(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: float = 0.0
-    provider: str = "fake"
-    model: str = "fake-model-v1"
+    provider: str = "not_invoked"
+    model: str = "not_invoked"
 
 
 class CitationRef(BaseModel):
